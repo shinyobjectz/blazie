@@ -29,13 +29,13 @@ defmodule LazyRiver.Attribute do
 
   alias LazyRiver.Snapshot
 
-  @is :is
-  @answers :answers
-  @cardinality :cardinality
+  @is "is"
+  @answers "answers"
+  @cardinality "cardinality"
 
   @root [@is, @answers, @cardinality]
 
-  @type refusal :: %{attribute: atom(), problem: atom(), repair: String.t()}
+  @type refusal :: %{attribute: String.t(), problem: atom(), repair: String.t()}
 
   @doc """
   The facts that make the attributes that define attributes.
@@ -43,15 +43,15 @@ defmodule LazyRiver.Attribute do
   Self-describing on purpose: `:is` is asserted to be an attribute *using*
   `:is`. Nothing outside this list may be written before it.
   """
-  @spec seed() :: [{atom(), atom(), term()}]
+  @spec seed() :: [{String.t(), String.t(), term()}]
   def seed do
     Enum.flat_map(@root, fn name ->
-      [{name, @is, :attribute}, {name, @answers, :atom}, {name, @cardinality, :one}]
+      [{name, @is, "attribute"}, {name, @answers, "name"}, {name, @cardinality, "one"}]
     end)
   end
 
   @doc "The attributes that define attributes. Everything else is built from these."
-  @spec root() :: [atom()]
+  @spec root() :: [String.t()]
   def root, do: @root
 
   @doc """
@@ -60,26 +60,33 @@ defmodule LazyRiver.Attribute do
       define(:height, answers: :integer)
       define(:tags, answers: :atom, cardinality: :many)
   """
-  @spec define(atom(), keyword()) :: [{atom(), atom(), term()}]
-  def define(name, opts \\ []) when is_atom(name) do
+  @spec define(String.t(), keyword()) :: [{String.t(), String.t(), term()}]
+  def define(name, opts \\ []) when is_binary(name) do
     # Whatever you say about an attribute becomes a fact about it. This module
     # knows nothing about `:space` or anything else a later word wants to
     # declare — it only knows that describing a thing means writing facts.
-    described = Keyword.merge([{@answers, :any}, {@cardinality, :one}], opts)
+    described = Keyword.merge([answers: "any", cardinality: "one"], opts)
 
-    [{name, @is, :attribute} | Enum.map(described, fn {key, value} -> {name, key, value} end)]
+    [
+      {name, @is, "attribute"}
+      | Enum.map(described, fn {key, value} -> {name, Atom.to_string(key), to_string(value)} end)
+    ]
   end
 
   @doc "Every attribute defined in this snapshot."
-  @spec known(Snapshot.t()) :: MapSet.t(atom())
+  @spec known(Snapshot.t()) :: MapSet.t(String.t())
   def known(%Snapshot{} = snapshot) do
+    # The root is always known. It defines itself, so a ledger that has never
+    # been written to still has to accept the writes that seed it — otherwise
+    # nothing could ever be defined anywhere.
     snapshot
-    |> Snapshot.find(attribute: @is, answer: :attribute)
+    |> Snapshot.find(attribute: @is, answer: "attribute")
     |> MapSet.new(& &1.id)
+    |> MapSet.union(MapSet.new(@root))
   end
 
   @doc "Is this attribute defined here?"
-  @spec defined?(Snapshot.t(), atom()) :: boolean()
+  @spec defined?(Snapshot.t(), String.t()) :: boolean()
   def defined?(%Snapshot{} = snapshot, name), do: MapSet.member?(known(snapshot), name)
 
   @doc """
@@ -88,7 +95,7 @@ defmodule LazyRiver.Attribute do
   Returns `:ok`, or every refusal with what would repair it. A boundary that
   rejects without saying how to comply produces loops, not compliance.
   """
-  @spec check([tuple()], MapSet.t(atom())) :: :ok | {:error, [refusal()]}
+  @spec check([tuple()], MapSet.t(String.t())) :: :ok | {:error, [refusal()]}
   def check(assertions, known) do
     assertions
     |> Enum.map(&attribute_of/1)
@@ -106,15 +113,15 @@ defmodule LazyRiver.Attribute do
   Cardinality is a fact about the attribute rather than a feature of the
   engine — if an attribute can say it, the engine does not grow.
   """
-  @spec cardinality(Snapshot.t(), atom()) :: :one | :many
+  @spec cardinality(Snapshot.t(), String.t()) :: String.t()
   def cardinality(%Snapshot{} = snapshot, name) do
-    Snapshot.answer(snapshot, name, @cardinality) || :one
+    Snapshot.answer(snapshot, name, @cardinality) || "one"
   end
 
   @doc "The shape an attribute's answers take, defaulting to `:any`."
-  @spec answers(Snapshot.t(), atom()) :: atom()
+  @spec answers(Snapshot.t(), String.t()) :: String.t()
   def answers(%Snapshot{} = snapshot, name) do
-    Snapshot.answer(snapshot, name, @answers) || :any
+    Snapshot.answer(snapshot, name, @answers) || "any"
   end
 
   defp attribute_of({_id, attribute, _answer}), do: attribute
@@ -126,7 +133,7 @@ defmodule LazyRiver.Attribute do
       problem: :undefined,
       repair:
         "#{inspect(name)} is not an attribute here. Define it first: " <>
-          "Ledger.append(ledger, Attribute.define(#{inspect(name)}, answers: :any))"
+          "Ledger.append(ledger, Attribute.define(#{inspect(name)}))"
     }
   end
 end

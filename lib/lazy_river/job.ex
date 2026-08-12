@@ -45,14 +45,14 @@ defmodule LazyRiver.Job do
   defstruct [:id, :work]
 
   @type t :: %__MODULE__{id: term(), work: (Snapshot.t() -> [assertion()])}
-  @type assertion :: {term(), atom(), term()}
+  @type assertion :: {term(), String.t(), term()}
 
   @doc "The attributes a job describes itself with, defined the ordinary way."
-  @spec seed() :: [{atom(), atom(), term()}]
+  @spec seed() :: [{String.t(), String.t(), term()}]
   def seed do
-    Attribute.define(:every, answers: :integer) ++
-      Attribute.define(:ran_at, answers: :integer, cardinality: :many) ++
-      Attribute.define(:failed, answers: :any, cardinality: :many)
+    Attribute.define("every", answers: "integer") ++
+      Attribute.define("ran_at", answers: "integer", cardinality: "many") ++
+      Attribute.define("failed", answers: "any", cardinality: "many")
   end
 
   @doc "Declare a job. Nothing runs."
@@ -70,8 +70,8 @@ defmodule LazyRiver.Job do
   @spec declare(term(), keyword()) :: [assertion()]
   def declare(id, opts \\ []) do
     case Keyword.get(opts, :every) do
-      nil -> [{id, :is, :job}]
-      seconds -> [{id, :is, :job}, {id, :every, seconds}]
+      nil -> [{id, "is", "job"}]
+      seconds -> [{id, "is", "job"}, {id, "every", seconds}]
     end
   end
 
@@ -87,7 +87,7 @@ defmodule LazyRiver.Job do
   def run(%__MODULE__{} = job, ledger, %Snapshot{} = snapshot, now) do
     try do
       assertions = job.work.(snapshot) |> Enum.map(&stamp(&1, job.id))
-      {:ok, tx} = Ledger.append(ledger, assertions ++ [{job.id, :ran_at, now, job.id}])
+      {:ok, tx} = Ledger.append(ledger, assertions ++ [{job.id, "ran_at", now, job.id}])
       {:ok, tx}
     rescue
       error ->
@@ -95,8 +95,8 @@ defmodule LazyRiver.Job do
 
         {:ok, tx} =
           Ledger.append(ledger, [
-            {job.id, :failed, reason, job.id},
-            {job.id, :ran_at, now, job.id}
+            {job.id, "failed", reason, job.id},
+            {job.id, "ran_at", now, job.id}
           ])
 
         {:failed, tx, reason}
@@ -107,7 +107,7 @@ defmodule LazyRiver.Job do
   @spec last_run(Snapshot.t(), term()) :: integer() | nil
   def last_run(%Snapshot{} = snapshot, id) do
     snapshot
-    |> Snapshot.find(id: id, attribute: :ran_at)
+    |> Snapshot.find(id: id, attribute: "ran_at")
     |> Enum.map(& &1.answer)
     |> Enum.max(fn -> nil end)
   end
@@ -120,7 +120,7 @@ defmodule LazyRiver.Job do
   """
   @spec due?(Snapshot.t(), term(), integer()) :: boolean()
   def due?(%Snapshot{} = snapshot, id, now) do
-    case Snapshot.answer(snapshot, id, :every) do
+    case Snapshot.answer(snapshot, id, "every") do
       nil -> false
       every -> due_by?(last_run(snapshot, id), every, now)
     end
@@ -135,7 +135,7 @@ defmodule LazyRiver.Job do
   @spec due(Snapshot.t(), integer()) :: [term()]
   def due(%Snapshot{} = snapshot, now) do
     snapshot
-    |> Snapshot.find(attribute: :is, answer: :job)
+    |> Snapshot.find(attribute: "is", answer: "job")
     |> Enum.map(& &1.id)
     |> Enum.uniq()
     |> Enum.filter(&due?(snapshot, &1, now))
@@ -144,7 +144,7 @@ defmodule LazyRiver.Job do
   @doc "Everything this job has failed with, oldest first."
   @spec failures(Snapshot.t(), term()) :: [term()]
   def failures(%Snapshot{} = snapshot, id) do
-    snapshot |> Snapshot.find(id: id, attribute: :failed) |> Enum.map(& &1.answer)
+    snapshot |> Snapshot.find(id: id, attribute: "failed") |> Enum.map(& &1.answer)
   end
 
   defp due_by?(nil, _every, _now), do: true

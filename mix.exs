@@ -6,6 +6,7 @@ defmodule LazyRiver.MixProject do
       app: :lazy_river,
       version: "0.1.0",
       elixir: "~> 1.20",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
@@ -19,11 +20,18 @@ defmodule LazyRiver.MixProject do
     ]
   end
 
-  # No dependencies yet, and the order they arrive in is deliberate: storage
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  # Dependencies arrive in a deliberate order, and the order they arrive in is deliberate: storage
   # (SlateDB via Rustler), then the surface (Phoenix), then sandboxing (Wasmex)
   # when tenant code actually exists. The reasoning rides in the commits
   # that add each one.
   defp deps do
-    []
+    [
+      {:phoenix, "~> 1.8"},
+      {:bandit, "~> 1.0"},
+      {:jason, "~> 1.4"}
+    ]
   end
 end

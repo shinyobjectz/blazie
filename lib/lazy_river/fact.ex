@@ -5,6 +5,10 @@ defmodule LazyRiver.Fact do
   An id, an attribute said about it, the answer, and the transaction that
   recorded it. Optionally, the formula or job that produced it.
 
+  An attribute is a binary, not an atom. Doctrine 10 has tenants and agents
+  adding attributes while the system runs, and atoms are never collected — a
+  name that arrives in a request must never become one.
+
   An id is a slot, not a word: it is opaque, carrying no type, no name and no
   contents, and everything known about it is other facts pointing at it.
 
@@ -18,7 +22,7 @@ defmodule LazyRiver.Fact do
 
   @type t :: %__MODULE__{
           id: term(),
-          attribute: atom(),
+          attribute: String.t(),
           answer: term(),
           tx: pos_integer(),
           by: term() | nil

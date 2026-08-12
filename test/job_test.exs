@@ -15,7 +15,7 @@ defmodule LazyRiver.JobTest do
   end
 
   defp fetcher(answer \\ "hello") do
-    Job.new(:fetch, fn _snapshot -> [{42, :headline, answer}] end)
+    Job.new(:fetch, fn _snapshot -> [{42, "headline", answer}] end)
   end
 
   describe "what came from outside happened once" do
@@ -23,7 +23,7 @@ defmodule LazyRiver.JobTest do
       assert {:ok, tx} = Job.run(fetcher(), ledger, Snapshot.open([ledger]), 1000)
 
       landed = Ledger.facts_at(ledger, tx) |> Enum.filter(&(&1.tx == tx))
-      assert %Fact{attribute: :headline, answer: "hello", by: :fetch} = hd(landed)
+      assert %Fact{attribute: "headline", answer: "hello", by: :fetch} = hd(landed)
     end
 
     test "every fact a job wrote names it, so it cannot be rebuilt", %{ledger: ledger} do
@@ -41,8 +41,8 @@ defmodule LazyRiver.JobTest do
       {:ok, _} = Job.run(fetcher("second"), ledger, Snapshot.open([ledger]), 2000)
 
       snapshot = Snapshot.open([ledger])
-      assert length(Snapshot.find(snapshot, id: 42, attribute: :headline)) == 2
-      assert Snapshot.answer(snapshot, 42, :headline) == "second"
+      assert length(Snapshot.find(snapshot, id: 42, attribute: "headline")) == 2
+      assert Snapshot.answer(snapshot, 42, "headline") == "second"
     end
   end
 
@@ -74,7 +74,7 @@ defmodule LazyRiver.JobTest do
     test "cadence is a fact, not a field", %{ledger: ledger} do
       {:ok, _} = Ledger.append(ledger, Job.declare(:fetch, every: 3600))
 
-      assert Snapshot.answer(Snapshot.open([ledger]), :fetch, :every) == 3600
+      assert Snapshot.answer(Snapshot.open([ledger]), :fetch, "every") == 3600
       assert Map.keys(Map.from_struct(fetcher())) |> Enum.sort() == [:id, :work]
     end
 

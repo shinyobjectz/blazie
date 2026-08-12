@@ -20,29 +20,29 @@ defmodule LazyRiver.StoreTest do
   describe "a ledger survives a restart" do
     test "facts are still there after closing and reopening", ctx do
       ledger = on_disk(ctx.name, ctx.dir)
-      {:ok, _} = Ledger.append(ledger, [{42, :height, 180}])
-      {:ok, _} = Ledger.append(ledger, [{42, :height, 181}])
+      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
+      {:ok, _} = Ledger.append(ledger, [{42, "height", 181}])
       :ok = Ledger.close(ctx.name)
 
       reopened = on_disk(ctx.name, ctx.dir)
       snapshot = Snapshot.open([reopened])
 
-      assert Snapshot.answer(snapshot, 42, :height) == 181
-      assert length(Snapshot.find(snapshot, id: 42, attribute: :height)) == 2
+      assert Snapshot.answer(snapshot, 42, "height") == 181
+      assert length(Snapshot.find(snapshot, id: 42, attribute: "height")) == 2
 
       Ledger.close(ctx.name)
     end
 
     test "the transaction counter resumes rather than restarting", ctx do
       ledger = on_disk(ctx.name, ctx.dir)
-      {:ok, _} = Ledger.append(ledger, [{1, :x, 1}])
-      {:ok, two} = Ledger.append(ledger, [{2, :x, 2}])
+      {:ok, _} = Ledger.append(ledger, [{1, "x", 1}])
+      {:ok, two} = Ledger.append(ledger, [{2, "x", 2}])
       :ok = Ledger.close(ctx.name)
 
       reopened = on_disk(ctx.name, ctx.dir)
 
       assert Ledger.tx(reopened) == two
-      assert {:ok, three} = Ledger.append(reopened, [{3, :x, 3}])
+      assert {:ok, three} = Ledger.append(reopened, [{3, "x", 3}])
       assert three == two + 1
 
       Ledger.close(ctx.name)
@@ -51,7 +51,7 @@ defmodule LazyRiver.StoreTest do
     test "a name that is any term still gets a file", ctx do
       for name <- [{:tenant, 1}, "a string", %{tenant: 1}, ["nested", ["list"]]] do
         ledger = on_disk(name, ctx.dir)
-        {:ok, _} = Ledger.append(ledger, [{1, :x, 1}])
+        {:ok, _} = Ledger.append(ledger, [{1, "x", 1}])
         :ok = Ledger.close(name)
 
         assert File.exists?(Path.join(ctx.dir, Store.File.filename(name)))
@@ -71,8 +71,8 @@ defmodule LazyRiver.StoreTest do
   describe "a torn tail loses only the transaction that never finished" do
     test "everything before the tear survives", ctx do
       ledger = on_disk(ctx.name, ctx.dir)
-      {:ok, _} = Ledger.append(ledger, [{1, :x, 1}])
-      {:ok, _} = Ledger.append(ledger, [{2, :x, 2}])
+      {:ok, _} = Ledger.append(ledger, [{1, "x", 1}])
+      {:ok, _} = Ledger.append(ledger, [{2, "x", 2}])
       :ok = Ledger.close(ctx.name)
 
       # A process killed mid-write leaves a record that claims more bytes than
@@ -90,7 +90,7 @@ defmodule LazyRiver.StoreTest do
 
     test "a corrupted record stops the read rather than being trusted", ctx do
       ledger = on_disk(ctx.name, ctx.dir)
-      {:ok, _} = Ledger.append(ledger, [{1, :x, 1}])
+      {:ok, _} = Ledger.append(ledger, [{1, "x", 1}])
       :ok = Ledger.close(ctx.name)
 
       # Right length, wrong checksum.
@@ -109,7 +109,7 @@ defmodule LazyRiver.StoreTest do
   describe "what each store gives you, stated rather than implied" do
     test "memory forgets on close, and that is the whole difference", ctx do
       {:ok, ledger} = Ledger.open(ctx.name)
-      {:ok, _} = Ledger.append(ledger, [{42, :height, 180}])
+      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
       :ok = Ledger.close(ctx.name)
 
       {:ok, reopened} = Ledger.open(ctx.name)
@@ -120,11 +120,11 @@ defmodule LazyRiver.StoreTest do
 
     test "fsync is opt-in, and opting in still works", ctx do
       ledger = on_disk(ctx.name, ctx.dir, sync: true)
-      {:ok, _} = Ledger.append(ledger, [{42, :height, 180}])
+      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
       :ok = Ledger.close(ctx.name)
 
       reopened = on_disk(ctx.name, ctx.dir, sync: true)
-      assert Snapshot.answer(Snapshot.open([reopened]), 42, :height) == 180
+      assert Snapshot.answer(Snapshot.open([reopened]), 42, "height") == 180
 
       Ledger.close(ctx.name)
     end

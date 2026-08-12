@@ -31,7 +31,7 @@ defmodule LazyRiver.Formula do
   defstruct [:id, :compute]
 
   @type t :: %__MODULE__{id: term(), compute: (Snapshot.t() -> [assertion()])}
-  @type assertion :: {term(), atom(), term()}
+  @type assertion :: {term(), String.t(), term()}
   @type read_set :: [keyword()]
 
   @doc "Declare a formula. Nothing runs."

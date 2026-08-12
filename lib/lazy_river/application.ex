@@ -15,7 +15,9 @@ defmodule LazyRiver.Application do
   def start(_type, _args) do
     children = [
       {Registry, keys: :unique, name: LazyRiver.Registry},
-      {DynamicSupervisor, name: LazyRiver.LedgerSupervisor, strategy: :one_for_one}
+      {DynamicSupervisor, name: LazyRiver.LedgerSupervisor, strategy: :one_for_one},
+      {Phoenix.PubSub, name: LazyRiver.PubSub},
+      LazyRiver.Surface.Endpoint
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: LazyRiver.Supervisor)

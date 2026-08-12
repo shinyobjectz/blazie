@@ -24,8 +24,8 @@ defmodule LazyRiver.Ledger do
   @type name :: term()
   @type ref :: GenServer.server()
   @type assertion ::
-          {id :: term(), attribute :: atom(), answer :: term()}
-          | {id :: term(), attribute :: atom(), answer :: term(), by :: term()}
+          {id :: term(), attribute :: String.t(), answer :: term()}
+          | {id :: term(), attribute :: String.t(), answer :: term(), by :: term()}
 
   # ── opening ────────────────────────────────────────────────────────────────
   #

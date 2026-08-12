@@ -23,7 +23,7 @@ defmodule LazyRiver.Symbol do
   not write one until measurement says to.
 
       Ledger.append(ledger, Symbol.seed() ++
-        Attribute.define(:embedding, answers: :symbol, space: :potion_256))
+        Attribute.define("embedding", answers: "symbol", space: "potion_256"))
   """
 
   alias LazyRiver.{Attribute, Fact, Snapshot}
@@ -31,16 +31,16 @@ defmodule LazyRiver.Symbol do
   @enforce_keys [:space, :values]
   defstruct [:space, :values]
 
-  @type t :: %__MODULE__{space: atom(), values: [float()]}
+  @type t :: %__MODULE__{space: String.t(), values: [float()]}
   @type refusal :: %{problem: atom(), repair: String.t()}
 
   @doc "The attribute a symbol-valued attribute needs, defined the ordinary way."
-  @spec seed() :: [{atom(), atom(), term()}]
-  def seed, do: Attribute.define(:space, answers: :atom)
+  @spec seed() :: [{String.t(), String.t(), term()}]
+  def seed, do: Attribute.define("space", answers: "name")
 
   @doc "A symbol in a space. The space travels with it, so it can never be lost."
-  @spec new(atom(), [number()]) :: t()
-  def new(space, values) when is_atom(space) and is_list(values) do
+  @spec new(String.t(), [number()]) :: t()
+  def new(space, values) when is_binary(space) and is_list(values) do
     %__MODULE__{space: space, values: Enum.map(values, &(&1 * 1.0))}
   end
 
@@ -88,7 +88,7 @@ defmodule LazyRiver.Symbol do
   whose answer is not a symbol, or is in another space, are skipped rather than
   refused: a search should not fail because unrelated data exists.
   """
-  @spec nearest(Snapshot.t(), atom(), t(), pos_integer()) :: [{Fact.t(), float()}]
+  @spec nearest(Snapshot.t(), String.t(), t(), pos_integer()) :: [{Fact.t(), float()}]
   def nearest(%Snapshot{} = snapshot, attribute, %__MODULE__{} = query, k \\ 10) do
     snapshot
     |> Snapshot.find(attribute: attribute)

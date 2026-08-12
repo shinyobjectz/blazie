@@ -72,7 +72,7 @@ defmodule LazyRiver.Snapshot do
   Current means latest: nothing is rewritten, so a later fact corrects an
   earlier one and the correction is simply the one with the higher transaction.
   """
-  @spec answer(t(), term(), atom()) :: term() | nil
+  @spec answer(t(), term(), String.t()) :: term() | nil
   def answer(%__MODULE__{} = snapshot, id, attribute) do
     snapshot
     |> find(id: id, attribute: attribute)
