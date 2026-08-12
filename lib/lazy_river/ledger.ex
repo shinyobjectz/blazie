@@ -19,7 +19,9 @@ defmodule LazyRiver.Ledger do
 
   use GenServer
 
-  alias LazyRiver.{Fact, Store}
+  alias LazyRiver.{Erasure, Fact, Store}
+
+  @subject "subject"
 
   @type name :: term()
   @type ref :: GenServer.server()
@@ -224,7 +226,7 @@ defmodule LazyRiver.Ledger do
   @impl true
   def handle_call({:append, assertions}, _from, state) do
     tx = state.tx + 1
-    facts = Enum.map(assertions, &to_fact(&1, tx))
+    facts = Enum.map(assertions, &(&1 |> to_fact(tx) |> seal(state)))
 
     # Recorded before replied to: a returned transaction is one the store took.
     {:ok, store} = state.module.append(state.store, facts)
@@ -250,7 +252,7 @@ defmodule LazyRiver.Ledger do
   end
 
   def handle_call({:find_at, tx, pattern}, _from, state) do
-    {:reply, matching(state, tx, pattern), state}
+    {:reply, Enum.map(matching(state, tx, pattern), &Erasure.reveal_fact/1), state}
   end
 
   def handle_call({:facts_at, tx}, _from, state) do
@@ -258,6 +260,7 @@ defmodule LazyRiver.Ledger do
       state.facts
       |> Enum.drop_while(&(&1.tx > tx))
       |> Enum.reverse()
+      |> Enum.map(&Erasure.reveal_fact/1)
 
     {:reply, facts, state}
   end
@@ -366,6 +369,29 @@ defmodule LazyRiver.Ledger do
     case List.last(head) do
       nil -> head
       last -> head ++ Enum.take_while(rest, &(&1.tx == last.tx))
+    end
+  end
+
+  # A fact is sealed under whoever its entity belongs to, if that was declared
+  # before it was written. The subject fact itself is never sealed — it is the
+  # thing that says which key to use.
+  defp seal(%Fact{attribute: @subject} = fact, _state), do: fact
+
+  defp seal(fact, state) do
+    case owner_of(state, fact.id) do
+      nil -> fact
+      subject -> %{fact | answer: Erasure.protect(fact.answer, subject)}
+    end
+  end
+
+  defp owner_of(state, id) do
+    state
+    |> Map.get(:by_id, %{})
+    |> Map.get(id, [])
+    |> Enum.find(&(&1.attribute == @subject))
+    |> case do
+      nil -> nil
+      fact -> fact.answer
     end
   end
 
