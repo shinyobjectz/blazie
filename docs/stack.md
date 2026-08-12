@@ -93,31 +93,43 @@ API.
 Not covered, deliberately: adaptive-bitrate delivery is a CDN's job, and OCR and
 virus scanning stay tenant formulas until something demands them.
 
-## Asking — Datalog, and no separate query engine
+## Asking — re-execution now, and no query language yet
 
-A formula is a query with a head, so the query language and the formula language
-are one language (doctrine 15). Datalog, because a rule *is* facts following from
-facts; because semi-naive evaluation gives incremental maintenance, which is what
-a subscription needs; because rules reference rules, so composition is native;
-because the grammar is small enough for a model to emit reliably; and because
-pure Datalog terminates, which removes a class of the fairness problem instead of
-requiring a watchdog for it.
+This is socialite's substrate, not a database product, and that decision removes
+the hardest component from the critical path.
 
-Almost nobody writes Datalog directly. A builder API in Elixir and Python covers
-the ordinary cases and compiles to it. Cypher or SQL front-ends can arrive later
-and compile the same way.
+**Incremental view maintenance is product engineering.** It earns its cost when a
+stranger might define an enormous derived view nobody anticipated. For a known
+application, recording what a question read and re-answering it when a later fact
+lands in that read set is enough — the approach Convex has proven at real
+application scale. It has a ceiling. Socialite will not reach it.
 
-Design attention goes to negation and aggregation, both of which want
-stratification to stay well-defined.
+So: **no Datalog yet, and no query language yet.** A formula is an Elixir function
+over `Snapshot.find/2`, and read-set tracking works regardless of what expressed
+the reads. A language is a surface for *tenant-authored* questions, which do not
+exist. Doctrine 15 says a formula never says how it is evaluated, so this choice
+is reversible by construction.
 
-**Rejected: Cypher-native.** Mutation-oriented over a property graph we do not
-have, and incremental view maintenance is painful in it.
+**What we walked away from, and where it waits.** `differential-dataflow` is the
+engine if IVM is ever needed (active, storage-agnostic, proven at Materialize
+scale); `dbsp` is the live alternative with better theory but treats outside
+consumers as off-label; FlowLog compiles Soufflé-syntax Datalog to differential
+dataflow and is the living successor to the archived DDlog. Any of them slots in
+under the same seven words.
 
-**Rejected: SQL.** Does not terminate, does not compose without string building,
-and the row shape makes its table ceremony meaningless here.
+**Rejected: Cypher and SQL as the eventual surface** — mutation-oriented over a
+property graph we do not have, and neither composes without string building. But
+this is now a later decision, not a founding one, and the standards argument for
+them is real.
 
-**Rejected: arbitrary code as the query surface.** No termination guarantee, so
-fairness becomes a watchdog problem, and nothing can be incrementally maintained.
+**Rejected: CozoDB.** Architecturally the closest thing that exists — embedded,
+Datalog, graph algorithms, HNSW inside the query language, time travel — and
+unpushed since December 2024 with a dormant Erlang binding. Excellent to
+prototype semantics against; the Kuzu mistake to build on.
+
+**Rejected: Ascent and Crepe** for tenant questions, since Rust macros compile
+rules at build time and questions arrive at runtime. Right tool for the engine's
+*own* fixed checks.
 
 ## The client contract — four operations
 
