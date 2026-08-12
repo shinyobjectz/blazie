@@ -11,6 +11,8 @@ defmodule LazyRiver do
   The vocabulary lives in `.monty/ontology.db` and is enforced by `just check`.
   Engineering that is deliberately not vocabulary lives in `docs/stack.md`.
 
-  Built so far: `LazyRiver.Fact`, `LazyRiver.Ledger`, `LazyRiver.Snapshot`.
+  Built so far: `LazyRiver.Fact`, `LazyRiver.Ledger`, `LazyRiver.Snapshot`,
+  `LazyRiver.Formula`. Still to come: `job`, and `symbol` once there is
+  something worth embedding.
   """
 end

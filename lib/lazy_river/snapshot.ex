@@ -62,7 +62,8 @@ defmodule LazyRiver.Snapshot do
   """
   @spec find(t(), keyword()) :: [Fact.t()]
   def find(%__MODULE__{} = snapshot, pattern) do
-    snapshot |> facts() |> Enum.filter(&matches?(&1, pattern))
+    record_read(pattern)
+    snapshot |> facts() |> Enum.filter(&Fact.matches?(&1, pattern))
   end
 
   @doc """
@@ -82,7 +83,36 @@ defmodule LazyRiver.Snapshot do
     end
   end
 
-  defp matches?(%Fact{} = fact, pattern) do
-    Enum.all?(pattern, fn {key, want} -> Map.fetch!(fact, key) == want end)
+  # ── read tracking ──────────────────────────────────────────────────────────
+  #
+  # What a question read is what tells the evaluator when to answer it again.
+  # Tracking is process-local and off by default, so an ordinary read costs a
+  # `Process.get/1` and nothing else — only a formula turns it on.
+
+  @reads :lazy_river_reads
+
+  @doc """
+  Run `fun`, and return what it returned alongside every pattern it read.
+
+  This is the whole of re-execution: record the read set, and when a later fact
+  falls inside it, answer again.
+  """
+  @spec track_reads((-> result)) :: {result, [keyword()]} when result: term()
+  def track_reads(fun) when is_function(fun, 0) do
+    outer = Process.put(@reads, [])
+
+    try do
+      result = fun.()
+      {result, Process.get(@reads) |> Enum.reverse() |> Enum.uniq()}
+    after
+      if outer, do: Process.put(@reads, outer), else: Process.delete(@reads)
+    end
+  end
+
+  defp record_read(pattern) do
+    case Process.get(@reads) do
+      nil -> :ok
+      reads -> Process.put(@reads, [Enum.sort(pattern) | reads])
+    end
   end
 end

@@ -34,4 +34,16 @@ defmodule LazyRiver.Fact do
   @spec from_outside?(t()) :: boolean()
   def from_outside?(%__MODULE__{by: nil}), do: true
   def from_outside?(%__MODULE__{}), do: false
+
+  @doc """
+  Does this fact match a pattern? An absent key is a wildcard.
+
+  The same predicate answers two questions, which is why it lives here rather
+  than beside either caller: which facts a snapshot returns, and whether a fact
+  that has since landed falls inside what a formula read.
+  """
+  @spec matches?(t(), keyword()) :: boolean()
+  def matches?(%__MODULE__{} = fact, pattern) do
+    Enum.all?(pattern, fn {key, want} -> Map.fetch!(fact, key) == want end)
+  end
 end
