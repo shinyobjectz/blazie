@@ -119,6 +119,33 @@ and the row shape makes its table ceremony meaningless here.
 **Rejected: arbitrary code as the query surface.** No termination guarantee, so
 fairness becomes a watchdog problem, and nothing can be incrementally maintained.
 
+## The client contract — four operations
+
+A caller outside the cluster holds a snapshot's *name*, not its bytes: which
+ledgers were composed, at which transaction. Small, stable, comparable.
+
+    open      which ledgers  -> a snapshot name
+    ask       name, question -> an answer
+    watch     name, question -> answers as the name advances
+    write     name, facts    -> a new name
+
+That is the whole surface. `write` returning a name is what lets a caller read
+its own write without polling: the name it got back is the snapshot its facts
+are in.
+
+Because an answer at a name never changes, a client caches on (name, question)
+and never invalidates. There is no cache-coherence protocol here because there is
+nothing to cohere — old names stay answerable, and a stale cache entry is simply
+an answer to an older question.
+
+**Authorization is which ledgers a caller may name.** Not row rules, not
+predicates. `open` is the checkpoint, and the resulting name records what was
+composed, so every later answer carries its own provenance.
+
+**Transports:** Phoenix Channels carries all four and is required for `watch`.
+Plain HTTP covers the first, second and fourth for callers that do not need live
+answers. MCP wraps the same four for agents.
+
 ## Vectors
 
 A vector is a `symbol` — a fact's answer — so there is no vector store. Embedding
