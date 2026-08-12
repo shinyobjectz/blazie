@@ -183,6 +183,10 @@ defmodule LazyRiver.Ledger do
   @spec find_at(ref(), non_neg_integer(), keyword()) :: [Fact.t()]
   def find_at(ledger, tx, pattern), do: GenServer.call(ledger, {:find_at, tx, pattern})
 
+  @doc "What the store had to do to open. Observability, not vocabulary."
+  @spec store_stats(ref()) :: map()
+  def store_stats(ledger), do: GenServer.call(ledger, :store_stats)
+
   # ── server ─────────────────────────────────────────────────────────────────
 
   @impl true
@@ -235,6 +239,15 @@ defmodule LazyRiver.Ledger do
 
   def handle_call(:tx, _from, state), do: {:reply, state.tx, state}
   def handle_call(:resident, _from, state), do: {:reply, length(state.facts), state}
+
+  def handle_call(:store_stats, _from, state) do
+    stats =
+      if function_exported?(state.module, :stats, 1),
+        do: state.module.stats(state.store),
+        else: %{}
+
+    {:reply, stats, state}
+  end
 
   def handle_call({:find_at, tx, pattern}, _from, state) do
     {:reply, matching(state, tx, pattern), state}
