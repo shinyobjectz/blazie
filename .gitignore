@@ -25,3 +25,7 @@ lazy_river-*.tar
 
 # A ledger keeps its facts here by default.
 /priv/ledgers/
+
+# Keys are never in the repo.
+/priv/keys/
+/tmp/

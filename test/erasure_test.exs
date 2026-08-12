@@ -22,7 +22,7 @@ defmodule LazyRiver.ErasureTest do
     {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
     {:ok, _} = Ledger.append(ledger, Attribute.define("doubled", answers: "integer"))
     subject = "person-#{System.unique_integer([:positive])}"
-    on_exit(fn -> Keyring.forget(subject) end)
+    on_exit(fn -> Keyring.destroy(subject) end)
     %{ledger: ledger, subject: subject}
   end
 
@@ -123,7 +123,7 @@ defmodule LazyRiver.ErasureTest do
   describe "one subject's erasure is not another's" do
     test "an unrelated subject is untouched", ctx do
       other = "person-#{System.unique_integer([:positive])}"
-      on_exit(fn -> Keyring.forget(other) end)
+      on_exit(fn -> Keyring.destroy(other) end)
 
       {:ok, _} = Ledger.append(ctx.ledger, [{42, "subject", ctx.subject}])
       {:ok, _} = Ledger.append(ctx.ledger, [{43, "subject", other}])
@@ -144,14 +144,31 @@ defmodule LazyRiver.ErasureTest do
       assert :ok = Erasure.erase(ctx.subject)
     end
 
-    test "a key never appears in the ledger", ctx do
+    test "erasing changes no bytes, and yet the answer is gone", ctx do
       {:ok, _} = Ledger.append(ctx.ledger, [{42, "subject", ctx.subject}])
-      {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
+      {:ok, tx} = Ledger.append(ctx.ledger, [{42, "height", 180}])
 
-      key = Keyring.key(ctx.subject)
-      raw = :erlang.term_to_binary(Snapshot.facts(Snapshot.open([ctx.ledger])))
+      # Exactly what is stored, sealed answers and all.
+      before = :erlang.term_to_binary(Ledger.raw_at(ctx.ledger, tx))
+      assert Snapshot.answer(Snapshot.open([ctx.ledger]), 42, "height") == 180
 
-      refute :binary.match(raw, key) != :nomatch
+      :ok = Erasure.erase(ctx.subject)
+
+      # This is the whole of crypto-shredding: not one byte moved.
+      assert :erlang.term_to_binary(Ledger.raw_at(ctx.ledger, tx)) == before
+      assert Snapshot.answer(Snapshot.open([ctx.ledger]), 42, "height") == :erased
+    end
+
+    test "the ledger holds a wrapped key, never a usable one", ctx do
+      {:ok, _} = Ledger.append(ctx.ledger, [{42, "subject", ctx.subject}])
+      {:ok, tx} = Ledger.append(ctx.ledger, [{42, "height", 180}])
+
+      raw = Ledger.raw_at(ctx.ledger, tx) |> Enum.find(&(&1.attribute == "height"))
+      {:sealed, _subject, wrapped, _iv, _tag, cipher} = raw.answer
+
+      # The wrapped data key cannot open the ciphertext it travels with — that
+      # takes the subject's key, which is not here and never was.
+      assert :binary.match(cipher, wrapped) == :nomatch
     end
   end
 end

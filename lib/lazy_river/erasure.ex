@@ -50,7 +50,7 @@ defmodule LazyRiver.Erasure do
   Idempotent and irreversible.
   """
   @spec erase(term()) :: :ok
-  def erase(subject), do: Keyring.forget(subject)
+  def erase(subject), do: Keyring.destroy(subject)
 
   @doc "Could facts about this entity be erased? True only if a subject was declared."
   @spec erasable?(Snapshot.t(), term()) :: boolean()
@@ -65,21 +65,24 @@ defmodule LazyRiver.Erasure do
   def protect(answer, nil), do: answer
 
   def protect(answer, subject) do
-    key = Keyring.key(subject)
+    # A fresh data key per fact, wrapped by the subject's key. The wrapped key
+    # travels in the fact: it is noise without the KEK, so it needs no store of
+    # its own and nothing durable is held in memory.
+    dek = :crypto.strong_rand_bytes(32)
+    {:ok, wrapped} = Keyring.wrap(dek, subject)
+
     iv = :crypto.strong_rand_bytes(12)
     plain = :erlang.term_to_binary(answer)
+    {cipher, tag} = :crypto.crypto_one_time_aead(:aes_256_gcm, dek, iv, plain, <<>>, true)
 
-    {cipher, tag} =
-      :crypto.crypto_one_time_aead(:aes_256_gcm, key, iv, plain, <<>>, true)
-
-    {:sealed, subject, iv, tag, cipher}
+    {:sealed, subject, wrapped, iv, tag, cipher}
   end
 
   @doc false
-  def reveal({:sealed, subject, iv, tag, cipher}) do
-    case Keyring.peek(subject) do
-      {:ok, key} ->
-        case :crypto.crypto_one_time_aead(:aes_256_gcm, key, iv, cipher, <<>>, tag, false) do
+  def reveal({:sealed, subject, wrapped, iv, tag, cipher}) do
+    case Keyring.unwrap(wrapped, subject) do
+      {:ok, dek} ->
+        case :crypto.crypto_one_time_aead(:aes_256_gcm, dek, iv, cipher, <<>>, tag, false) do
           :error -> :erased
           plain -> :erlang.binary_to_term(plain)
         end
@@ -92,7 +95,7 @@ defmodule LazyRiver.Erasure do
   def reveal(answer), do: answer
 
   @doc false
-  def reveal_fact(%Fact{answer: {:sealed, _, _, _, _}} = fact),
+  def reveal_fact(%Fact{answer: {:sealed, _, _, _, _, _}} = fact),
     do: %{fact | answer: reveal(fact.answer)}
 
   def reveal_fact(%Fact{} = fact), do: fact

@@ -13,3 +13,8 @@ config :lazy_river, LazyRiver.Surface.Endpoint,
 config :phoenix, :json_library, Jason
 
 config :logger, level: if(config_env() == :test, do: :warning, else: :info)
+
+# Keys live outside the facts they protect. In test and dev this is a local
+# directory; in front of real users it must be a KMS, because a file can come
+# back from a restore and erasure has to be irreversible.
+config :lazy_river, key_dir: if(config_env() == :test, do: "tmp/test_keys", else: "priv/keys")

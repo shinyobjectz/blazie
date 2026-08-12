@@ -26,9 +26,10 @@ defmodule LazyRiver do
 
   ## What is not true yet, in one place
 
-  The keyring is in memory, so a restart erases everything by accident — the
-  one piece here that must not ship as it stands. Distribution is claimed
-  against but not implemented. And a fact written before its subject was
+  Keys are wrapped in the ledger and the KEKs are in a local file, which is
+  right for development and wrong in front of real users — a file can come back
+  from a restore, and erasure has to be irreversible. A KMS-backed keyring is
+  one module. Distribution is claimed against but not implemented. And a fact written before its subject was
   declared can never be erased, which is a property of the design rather than a
   gap: subject is decided at write time or not at all.
   """
