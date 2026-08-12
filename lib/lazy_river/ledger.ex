@@ -160,6 +160,17 @@ defmodule LazyRiver.Ledger do
   @spec facts_at(ref(), non_neg_integer()) :: [Fact.t()]
   def facts_at(ledger, tx), do: GenServer.call(ledger, {:facts_at, tx})
 
+  @doc """
+  The facts matching a pattern at or before `tx`, oldest first.
+
+  Answered here rather than by scanning what `facts_at/2` returns, for two
+  reasons. The obvious one is that a keyed lookup beats a scan. The quieter one
+  is that filtering in this process means only the answer crosses the process
+  boundary — asking a large ledger a small question used to copy all of it.
+  """
+  @spec find_at(ref(), non_neg_integer(), keyword()) :: [Fact.t()]
+  def find_at(ledger, tx, pattern), do: GenServer.call(ledger, {:find_at, tx, pattern})
+
   # ── server ─────────────────────────────────────────────────────────────────
 
   @impl true
@@ -176,13 +187,19 @@ defmodule LazyRiver.Ledger do
     resumed = replayed |> Enum.map(& &1.tx) |> Enum.max(fn -> 0 end)
 
     {:ok,
-     %{
-       name: name,
-       tx: resumed,
-       facts: Enum.reverse(replayed),
-       store: store,
-       module: module
-     }}
+     index(
+       %{
+         name: name,
+         tx: resumed,
+         facts: Enum.reverse(replayed),
+         by_id: %{},
+         by_attribute: %{},
+         by_answer: %{},
+         store: store,
+         module: module
+       },
+       replayed
+     )}
   end
 
   @impl true
@@ -196,11 +213,16 @@ defmodule LazyRiver.Ledger do
     announce(state.name, tx, facts)
 
     # Newest first while resident; readers reverse. Appending is the hot path.
-    {:reply, {:ok, tx},
-     %{state | tx: tx, store: store, facts: Enum.reverse(facts) ++ state.facts}}
+    state = %{state | tx: tx, store: store, facts: Enum.reverse(facts) ++ state.facts}
+
+    {:reply, {:ok, tx}, index(state, facts)}
   end
 
   def handle_call(:tx, _from, state), do: {:reply, state.tx, state}
+
+  def handle_call({:find_at, tx, pattern}, _from, state) do
+    {:reply, matching(state, tx, pattern), state}
+  end
 
   def handle_call({:facts_at, tx}, _from, state) do
     facts =
@@ -213,6 +235,58 @@ defmodule LazyRiver.Ledger do
 
   @impl true
   def terminate(_reason, state), do: state.module.close(state.store)
+
+  # ── the sort orders ────────────────────────────────────────────────────────
+  #
+  # The same facts, reachable three ways: by the entity they are about, by the
+  # attribute they assert, and by the answer they hold — which is how an edge
+  # is read backwards, since an edge is a fact whose answer is another id.
+  # Every list is newest first, like `facts`, so a read drops what is too new
+  # and stops.
+  #
+  # These hold the same fact terms the list holds, not copies.
+
+  defp index(state, facts) do
+    Enum.reduce(facts, state, fn fact, acc ->
+      acc
+      |> update_in([:by_id, fact.id], &[fact | &1 || []])
+      |> update_in([:by_attribute, fact.attribute], &[fact | &1 || []])
+      |> update_in([:by_answer, answer_key(fact.answer)], &[fact | &1 || []])
+    end)
+  end
+
+  # Only answers that can be looked up cheaply get an entry. A vector is not
+  # one of them, and nobody asks for a fact by its embedding.
+  defp answer_key(answer) when is_integer(answer) or is_binary(answer) or is_atom(answer),
+    do: answer
+
+  defp answer_key(_answer), do: :unindexed
+
+  defp matching(state, tx, pattern) do
+    state
+    |> narrowest(pattern)
+    |> Enum.drop_while(&(&1.tx > tx))
+    |> Enum.filter(&Fact.matches?(&1, pattern))
+    |> Enum.reverse()
+  end
+
+  # Pick the smallest starting set the pattern allows. An id is the most
+  # selective thing anyone asks by, then an answer, then an attribute.
+  defp narrowest(state, pattern) do
+    cond do
+      id = pattern[:id] ->
+        Map.get(state.by_id, id, [])
+
+      (answer = pattern[:answer]) && answer_key(answer) != :unindexed ->
+        Map.get(state.by_answer, answer_key(answer), [])
+
+      attribute = pattern[:attribute] ->
+        Map.get(state.by_attribute, attribute, [])
+
+      true ->
+        state.facts
+    end
+  end
 
   # Tell whoever is watching. Only sends — a watcher that called back into this
   # ledger while it was still replying would deadlock, so it never does.

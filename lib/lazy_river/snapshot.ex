@@ -61,9 +61,12 @@ defmodule LazyRiver.Snapshot do
   read set is what tells it when to answer again.
   """
   @spec find(t(), keyword()) :: [Fact.t()]
-  def find(%__MODULE__{} = snapshot, pattern) do
+  def find(%__MODULE__{at: at}, pattern) do
     record_read(pattern)
-    snapshot |> facts() |> Enum.filter(&Fact.matches?(&1, pattern))
+
+    at
+    |> Enum.flat_map(fn {ledger, tx} -> Ledger.find_at(ledger, tx, pattern) end)
+    |> Enum.sort_by(& &1.tx)
   end
 
   @doc """
