@@ -62,14 +62,12 @@ defmodule LazyRiver.Attribute do
   """
   @spec define(atom(), keyword()) :: [{atom(), atom(), term()}]
   def define(name, opts \\ []) when is_atom(name) do
-    answers = Keyword.get(opts, :answers, :any)
-    cardinality = Keyword.get(opts, :cardinality, :one)
+    # Whatever you say about an attribute becomes a fact about it. This module
+    # knows nothing about `:space` or anything else a later word wants to
+    # declare — it only knows that describing a thing means writing facts.
+    described = Keyword.merge([{@answers, :any}, {@cardinality, :one}], opts)
 
-    [
-      {name, @is, :attribute},
-      {name, @answers, answers},
-      {name, @cardinality, cardinality}
-    ]
+    [{name, @is, :attribute} | Enum.map(described, fn {key, value} -> {name, key, value} end)]
   end
 
   @doc "Every attribute defined in this snapshot."
