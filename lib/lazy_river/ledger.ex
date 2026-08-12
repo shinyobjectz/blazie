@@ -11,13 +11,15 @@ defmodule LazyRiver.Ledger do
   Nothing here is rewritten: a later fact corrects an earlier one, and the only
   destruction is erasure, which destroys a key rather than a segment.
 
-  Storage is in memory for now. The ledger is the seam that hides it, so
-  putting segments on object storage later changes nothing above this line.
+  Where the facts actually live is a `LazyRiver.Store`, chosen when the ledger
+  is opened. The ledger is the seam that hides it, so an LSM on object storage
+  later changes nothing above this line — and nothing above this line has ever
+  needed to ask.
   """
 
   use GenServer
 
-  alias LazyRiver.Fact
+  alias LazyRiver.{Fact, Store}
 
   @type name :: term()
   @type ref :: GenServer.server()
@@ -33,17 +35,27 @@ defmodule LazyRiver.Ledger do
 
   def start_link(opts) do
     name = Keyword.fetch!(opts, :name)
-    GenServer.start_link(__MODULE__, name, name: via(name))
+    GenServer.start_link(__MODULE__, opts, name: via(name))
   end
 
   def child_spec(opts) do
     %{id: {__MODULE__, Keyword.fetch!(opts, :name)}, start: {__MODULE__, :start_link, [opts]}}
   end
 
-  @doc "Open a ledger under this name, or hand back the one already open."
-  @spec open(name()) :: {:ok, ref()}
-  def open(name) do
-    case DynamicSupervisor.start_child(LazyRiver.LedgerSupervisor, {__MODULE__, name: name}) do
+  @doc """
+  Open a ledger under this name, or hand back the one already open.
+
+  Pass `store:` to say where its facts live. The default keeps them in memory,
+  which is right for a ledger nobody needs to survive a restart and wrong for
+  every other one:
+
+      Ledger.open({:tenant, 7}, store: {Store.File, dir: "priv/ledgers"})
+  """
+  @spec open(name(), keyword()) :: {:ok, ref()}
+  def open(name, opts \\ []) do
+    child = {__MODULE__, [name: name] ++ opts}
+
+    case DynamicSupervisor.start_child(LazyRiver.LedgerSupervisor, child) do
       {:ok, _pid} -> {:ok, via(name)}
       {:error, {:already_started, _pid}} -> {:ok, via(name)}
       other -> other
@@ -151,14 +163,39 @@ defmodule LazyRiver.Ledger do
   # ── server ─────────────────────────────────────────────────────────────────
 
   @impl true
-  def init(name), do: {:ok, %{name: name, tx: 0, facts: []}}
+  def init(opts) do
+    # Trap exits so the store is closed on an ordinary shutdown rather than
+    # only when the process is killed.
+    Process.flag(:trap_exit, true)
+
+    name = Keyword.fetch!(opts, :name)
+    {module, store_opts} = Keyword.get(opts, :store, {Store.Memory, []})
+    {:ok, store} = module.open(name, store_opts)
+
+    replayed = module.replay(store)
+    resumed = replayed |> Enum.map(& &1.tx) |> Enum.max(fn -> 0 end)
+
+    {:ok,
+     %{
+       name: name,
+       tx: resumed,
+       facts: Enum.reverse(replayed),
+       store: store,
+       module: module
+     }}
+  end
 
   @impl true
   def handle_call({:append, assertions}, _from, state) do
     tx = state.tx + 1
     facts = Enum.map(assertions, &to_fact(&1, tx))
+
+    # Recorded before replied to: a returned transaction is one the store took.
+    {:ok, store} = state.module.append(state.store, facts)
+
     # Newest first while resident; readers reverse. Appending is the hot path.
-    {:reply, {:ok, tx}, %{state | tx: tx, facts: Enum.reverse(facts) ++ state.facts}}
+    {:reply, {:ok, tx},
+     %{state | tx: tx, store: store, facts: Enum.reverse(facts) ++ state.facts}}
   end
 
   def handle_call(:tx, _from, state), do: {:reply, state.tx, state}
@@ -171,6 +208,9 @@ defmodule LazyRiver.Ledger do
 
     {:reply, facts, state}
   end
+
+  @impl true
+  def terminate(_reason, state), do: state.module.close(state.store)
 
   defp to_fact({id, attribute, answer}, tx),
     do: %Fact{id: id, attribute: attribute, answer: answer, tx: tx}
