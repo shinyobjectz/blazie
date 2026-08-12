@@ -8,6 +8,7 @@ defmodule LazyRiver.Surface.Router do
 
   pipeline :api do
     plug(:accepts, ["json"])
+    plug(LazyRiver.Surface.Authorize)
   end
 
   scope "/", LazyRiver.Surface do

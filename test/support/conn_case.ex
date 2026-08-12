@@ -3,7 +3,7 @@ defmodule LazyRiver.ConnCase do
 
   use ExUnit.CaseTemplate
 
-  alias LazyRiver.{Attribute, Ledger}
+  alias LazyRiver.{Attribute, Authority, Ledger}
 
   using do
     quote do
@@ -19,16 +19,29 @@ defmodule LazyRiver.ConnCase do
   end
 
   setup do
-    {:ok,
-     conn:
-       Phoenix.ConnTest.build_conn()
-       |> Plug.Conn.put_req_header("content-type", "application/json")}
+    # Every operation that names a ledger is checked, so a test connection
+    # carries a caller and `open_ledger/0` grants to it. A test that wants to
+    # be refused replaces or drops the header itself.
+    token = "conn-token-#{System.unique_integer([:positive])}"
+    Process.put(:lazy_river_test_token, token)
+
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Plug.Conn.put_req_header("authorization", "Bearer #{token}")
+
+    {:ok, conn: conn, token: token}
   end
 
   @doc "A ledger named the way a caller would name one — with a string."
   def open_ledger do
     name = "test-ledger-#{System.unique_integer([:positive])}"
     {:ok, _} = Ledger.open(name)
+
+    # Granted to this test's caller, because every operation that names a
+    # ledger is checked and a test that skipped this would only ever see 403.
+    if token = Process.get(:lazy_river_test_token), do: Authority.grant(token, name)
+
     ExUnit.Callbacks.on_exit(fn -> Ledger.close(name) end)
     name
   end
