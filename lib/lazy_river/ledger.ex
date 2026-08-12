@@ -153,6 +153,29 @@ defmodule LazyRiver.Ledger do
     Registry.select(LazyRiver.Registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
   end
 
+  @doc """
+  Where a ledger keeps its facts when nobody said.
+
+  Memory when nothing is configured, which is right for a test and wrong for
+  everything else — so a deployment that sets `:ledger_dir` gets the file store
+  without anyone having to remember to ask. A deployment found this the hard
+  way: the config existed, nothing read it, and every ledger in production was
+  in memory.
+  """
+  @spec default_store() :: {module(), keyword()}
+  def default_store do
+    case Application.get_env(:lazy_river, :ledger_dir) do
+      nil ->
+        {Store.Memory, []}
+
+      dir ->
+        {Store.File,
+         dir: dir,
+         sync: Application.get_env(:lazy_river, :ledger_sync, false),
+         checkpoint_every: Application.get_env(:lazy_river, :ledger_checkpoint_every, 1_000)}
+    end
+  end
+
   @doc "The address of a ledger by name, whether or not it is open yet."
   @spec via(name()) :: ref()
   def via(name), do: {:via, Registry, {LazyRiver.Registry, name}}
@@ -246,7 +269,7 @@ defmodule LazyRiver.Ledger do
     Process.flag(:trap_exit, true)
 
     name = Keyword.fetch!(opts, :name)
-    {module, store_opts} = Keyword.get(opts, :store, {Store.Memory, []})
+    {module, store_opts} = Keyword.get(opts, :store, default_store())
     {:ok, store} = module.open(name, store_opts)
 
     replayed = module.replay(store)

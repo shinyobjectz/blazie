@@ -1,0 +1,9 @@
+_build
+deps
+.git
+.elixir_ls
+priv/keys
+priv/ledgers
+tmp
+test
+.github

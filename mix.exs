@@ -5,7 +5,7 @@ defmodule LazyRiver.MixProject do
     [
       app: :lazy_river,
       version: "0.1.0",
-      elixir: "~> 1.20",
+      elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       releases: [
         lazy_river: [

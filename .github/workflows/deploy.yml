@@ -1,0 +1,58 @@
+name: deploy
+
+# Only after the gate. A deployment that skipped the tests is a deployment
+# nobody can reason about.
+on:
+  workflow_run:
+    workflows: [check]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  release:
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18"
+          otp-version: "27"
+
+      - name: Build the release
+        env:
+          MIX_ENV: prod
+          # Needed to build, never baked in — runtime.exs reads the real one
+          # from the environment at boot.
+          SECRET_KEY_BASE: build-time-placeholder-not-used-at-runtime-000000000000000000000000
+        run: |
+          mix deps.get --only prod
+          mix release --overwrite
+
+      - name: Refuse a release that will not boot
+        env:
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE || 'ci-only-secret-000000000000000000000000000000000000000000000000000000' }}
+          PORT: "4321"
+          LEDGER_DIR: /tmp/ci-ledgers
+          KEY_DIR: /tmp/ci-keys
+        run: |
+          _build/prod/rel/lazy_river/bin/lazy_river daemon
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:4321/open && break
+            sleep 0.5
+          done
+          # An unauthenticated request must be refused, not served. If this
+          # returns anything else the release is not one we ship.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:4321/open \
+            -H 'content-type: application/json' -d '{"ledgers":["x"]}')
+          echo "unauthenticated /open -> $code"
+          _build/prod/rel/lazy_river/bin/lazy_river stop
+          test "$code" = "401"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lazy_river-release
+          path: _build/prod/rel/lazy_river
+          retention-days: 14

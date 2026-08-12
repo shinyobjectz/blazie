@@ -1,0 +1,56 @@
+name: check
+
+# The gate, run by a machine that has never seen this repo before — which is
+# the only way to know `just check` passing locally means anything.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  MIX_ENV: test
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18"
+          otp-version: "27"
+
+      - name: Cache deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - run: mix deps.get
+
+      # Formatting is part of the gate, not a suggestion.
+      - run: mix format --check-formatted
+
+      # Warnings are errors here for the same reason they are locally: a
+      # warning nobody fails on is a warning nobody reads.
+      - run: mix compile --warnings-as-errors
+
+      - run: mix test
+
+      # Slow and real: a process killed with SIGKILL mid-write, three times.
+      # Excluded from the ordinary run, never excluded from the gate.
+      - run: mix test --include crash --only crash
+
+  vocabulary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: The ontology gate
+        run: |
+          uvx --from "git+https://github.com/socialite-ml/montology@main#subdirectory=.monty/cli" \
+            monty lint
