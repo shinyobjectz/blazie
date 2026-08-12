@@ -146,6 +146,35 @@ composed, so every later answer carries its own provenance.
 Plain HTTP covers the first, second and fourth for callers that do not need live
 answers. MCP wraps the same four for agents.
 
+## Changing things — additive, except erasure
+
+Doctrine 16. Migration is mostly not migration:
+
+| want | do |
+|---|---|
+| add an attribute | write facts with it |
+| change what an attribute means | add a new one, formula maps old to new |
+| fix wrong data | write a later fact |
+| change a model | new formula identity; derived facts recompute |
+| stop using an attribute | stop writing it; old facts stay readable |
+| make data actually gone | erasure — the only destructive operation |
+
+**Erasure is crypto-shredding.** Facts carry a subject and are encrypted under
+that subject's key; erasing destroys the key. Chosen over the alternatives for a
+specific reason: excision rewrites segments, which would change the answer at an
+already-named snapshot and break the client contract's caching guarantee.
+Shredding turns a value unreadable instead of turning it into a different value —
+a bounded, explicit break rather than an arbitrary one.
+
+Key store is separate from the segments, so backups need no special handling.
+
+**Reaching derived facts is a walk over `derived-by`.** An embedding of an erased
+message may still encode it, so erasure closes over what the formulas produced.
+This is the one place provenance stops being a nicety.
+
+**The constraint, stated up front:** a fact that does not declare its subject can
+never be erased. Subject is decided at write time or not at all.
+
 ## Vectors
 
 A vector is a `symbol` — a fact's answer — so there is no vector store. Embedding
