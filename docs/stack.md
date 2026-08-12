@@ -3,6 +3,13 @@
 Decisions as of 2026-08-12. The vocabulary lives in `.monty/ontology.db`; this
 file is engineering, which is deliberately not vocabulary (doctrine 12).
 
+**The selection rule: prefer what we do not maintain.** Where a maintained
+library covers the requirement, it wins over code that fits better but is ours
+to keep alive. Guest code here is written against our ABI rather than ported
+from the world, so the requirement is narrower than a general sandbox — Wasmex
+covers it, and the ambitious cases (unmodified POSIX binaries, x86 emulation,
+JS on the BEAM) solve a problem we do not have.
+
 ```
 Phoenix           channels and subscriptions, the HTTP surface
 OTP               process per ledger, jobs scheduled from the ledger
