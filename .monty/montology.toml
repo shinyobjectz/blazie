@@ -1,0 +1,14 @@
+name = "lazyriver"
+created = "2026-08-12"
+engine = "git+https://github.com/socialite-ml/montology@main#subdirectory=.monty/cli"
+
+[guard]
+# the firewall (agent pre-write hook): block | warn | off
+names  = "block"   # retired words ALWAYS block; collisions follow [scan]
+design = "block"   # rogue values vs tokens — only fires when tokens exist
+
+[scan]
+# which word kinds a code declaration may NOT be named after
+enforced_kinds = ["core", "inner"]
+# symbols allowed to share a word's name (each entry is a recorded decision)
+allow = []
