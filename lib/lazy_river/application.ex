@@ -15,7 +15,12 @@ defmodule LazyRiver.Application do
   def start(_type, _args) do
     children = [
       {Registry, keys: :unique, name: LazyRiver.Registry},
+      # Who to tell when a ledger appends. Duplicate keys: many watchers per
+      # ledger. A plain Registry rather than Phoenix.PubSub keeps the core free
+      # of the surface's dependencies.
+      {Registry, keys: :duplicate, name: LazyRiver.Watchers},
       {DynamicSupervisor, name: LazyRiver.LedgerSupervisor, strategy: :one_for_one},
+      {DynamicSupervisor, name: LazyRiver.SubscriptionSupervisor, strategy: :one_for_one},
       {Phoenix.PubSub, name: LazyRiver.PubSub},
       LazyRiver.Surface.Endpoint
     ]

@@ -193,6 +193,8 @@ defmodule LazyRiver.Ledger do
     # Recorded before replied to: a returned transaction is one the store took.
     {:ok, store} = state.module.append(state.store, facts)
 
+    announce(state.name, tx, facts)
+
     # Newest first while resident; readers reverse. Appending is the hot path.
     {:reply, {:ok, tx},
      %{state | tx: tx, store: store, facts: Enum.reverse(facts) ++ state.facts}}
@@ -211,6 +213,14 @@ defmodule LazyRiver.Ledger do
 
   @impl true
   def terminate(_reason, state), do: state.module.close(state.store)
+
+  # Tell whoever is watching. Only sends — a watcher that called back into this
+  # ledger while it was still replying would deadlock, so it never does.
+  defp announce(name, tx, facts) do
+    Registry.dispatch(LazyRiver.Watchers, name, fn watchers ->
+      for {pid, _ref} <- watchers, do: send(pid, {:appended, name, tx, facts})
+    end)
+  end
 
   defp to_fact({id, attribute, answer}, tx),
     do: %Fact{id: id, attribute: attribute, answer: answer, tx: tx}
