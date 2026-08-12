@@ -26,5 +26,16 @@ if config_env() == :prod do
   # object storage later is a different module rather than a different path.
   config :lazy_river,
     ledger_dir: System.get_env("LEDGER_DIR") || "/data/ledgers",
-    ledger_sync: System.get_env("LEDGER_SYNC") == "true"
+    ledger_sync: System.get_env("LEDGER_SYNC") == "true",
+    # Keys must outlive a deployment. Defaulting this inside the release would
+    # put them on an ephemeral disk, which is the in-memory keyring's bug
+    # wearing a filesystem — every subject erased by accident on redeploy.
+    key_dir: System.get_env("KEY_DIR") || "/data/keys",
+    kms_key: System.get_env("KMS_KEY")
+
+  if System.get_env("KEY_DIR") == nil do
+    IO.warn(
+      "KEY_DIR is not set; keys will be written to /data/keys. That path must be persistent storage — if it is not, a redeploy erases every subject."
+    )
+  end
 end

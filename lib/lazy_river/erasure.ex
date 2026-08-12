@@ -32,13 +32,19 @@ defmodule LazyRiver.Erasure do
   write time or not at all, and `erasable?/2` answers whether it was.
   """
 
-  alias LazyRiver.{Attribute, Fact, Keyring, Snapshot}
+  alias LazyRiver.{Attribute, Fact, Keyring, Ledger, Snapshot}
 
   @subject "subject"
+  @erased_at "erased_at"
+  @ledger "$erasures"
 
   @doc "The attribute an entity declares its owner with."
   @spec seed() :: [{String.t(), String.t(), term()}]
   def seed, do: Attribute.define(@subject, answers: "name")
+
+  @doc "The ledger tombstones are written to."
+  @spec ledger() :: String.t()
+  def ledger, do: @ledger
 
   @doc "The attribute name itself, for anyone who needs to write one."
   @spec attribute() :: String.t()
@@ -50,7 +56,43 @@ defmodule LazyRiver.Erasure do
   Idempotent and irreversible.
   """
   @spec erase(term()) :: :ok
-  def erase(subject), do: Keyring.destroy(subject)
+  def erase(subject) do
+    # The tombstone first. If the key is destroyed and the record of it is not,
+    # a restored key store resurrects somebody with nothing left to say it
+    # should not have. The other order is recoverable; this one is not.
+    unless erased?(subject), do: record(subject)
+    Keyring.destroy(subject)
+  end
+
+  @doc "Has this subject been erased? Answered from the tombstones, not the keys."
+  @spec erased?(term()) :: boolean()
+  def erased?(subject), do: subject in erased()
+
+  @doc """
+  Everyone who has been erased.
+
+  This is what a keyring reconciles against when it opens, so a key store
+  restored from before an erasure is corrected rather than trusted.
+  """
+  @spec erased() :: [term()]
+  def erased do
+    {:ok, ledger} = Ledger.open(@ledger)
+
+    Snapshot.open([ledger])
+    |> Snapshot.find(attribute: @erased_at)
+    |> Enum.map(& &1.id)
+    |> Enum.uniq()
+  end
+
+  defp record(subject) do
+    {:ok, ledger} = Ledger.open(@ledger)
+
+    if Ledger.tx(ledger) == 0 do
+      Ledger.append(ledger, Attribute.seed() ++ Attribute.define(@erased_at, answers: "integer"))
+    end
+
+    Ledger.append(ledger, [{subject, @erased_at, System.system_time(:second)}])
+  end
 
   @doc "Could facts about this entity be erased? True only if a subject was declared."
   @spec erasable?(Snapshot.t(), term()) :: boolean()

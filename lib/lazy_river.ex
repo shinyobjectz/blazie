@@ -26,11 +26,15 @@ defmodule LazyRiver do
 
   ## What is not true yet, in one place
 
-  Keys are wrapped in the ledger and the KEKs are in a local file, which is
-  right for development and wrong in front of real users — a file can come back
-  from a restore, and erasure has to be irreversible. A KMS-backed keyring is
-  one module. Distribution is claimed against but not implemented. And a fact written before its subject was
+  Distribution is claimed against but not implemented — one node, and
+  `Cluster.distributed?/0` says so. A fact written before its subject was
   declared can never be erased, which is a property of the design rather than a
   gap: subject is decided at write time or not at all.
+
+  Erasure itself is finished: a tombstone in the ledger, reconciled against
+  whenever the keyring opens, so a key store restored from before an erasure is
+  corrected rather than trusted. What it needs from an operator is that
+  `KEY_DIR` points at persistent storage — the release warns when it is unset,
+  because keys on an ephemeral disk erase everybody on redeploy.
   """
 end

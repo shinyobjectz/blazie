@@ -74,17 +74,35 @@ defmodule LazyRiver.Keyring do
   @spec destroy(subject()) :: :ok
   def destroy(subject), do: GenServer.call(__MODULE__, {:destroy, subject})
 
+  @doc """
+  Destroy every key belonging to a subject that has been erased.
+
+  Run when the keyring opens. A key store restored from before an erasure has
+  keys in it that should not exist, and the tombstones are what say so — the
+  ledger is the thing you back up religiously and never roll back on its own,
+  so it is the right place to keep the record.
+  """
+  @spec reconcile() :: :ok
+  def reconcile, do: GenServer.call(__MODULE__, :reconcile, 30_000)
+
   @doc false
   # Tests only: prove that restarting loses nothing, which is the point.
   def restart do
+    was = Process.whereis(__MODULE__)
     GenServer.stop(__MODULE__)
-    wait_for_restart(200)
+    wait_for_restart(was, 400)
   end
 
-  defp wait_for_restart(0), do: {:error, :timeout}
+  # Waiting for a *different* pid, not merely a live one — the old registration
+  # can still be there for a moment after stopping.
+  defp wait_for_restart(_was, 0), do: {:error, :timeout}
 
-  defp wait_for_restart(tries) do
-    if Process.whereis(__MODULE__), do: :ok, else: Process.sleep(5) && wait_for_restart(tries - 1)
+  defp wait_for_restart(was, tries) do
+    case Process.whereis(__MODULE__) do
+      nil -> Process.sleep(5) && wait_for_restart(was, tries - 1)
+      ^was -> Process.sleep(5) && wait_for_restart(was, tries - 1)
+      _new -> :ok
+    end
   end
 
   # ── server ─────────────────────────────────────────────────────────────────
@@ -99,8 +117,13 @@ defmodule LazyRiver.Keyring do
       )
 
     {:ok, ring} = module.open(ring_opts)
-    {:ok, %{module: module, ring: ring, cache: %{}}}
+    # Reconciled after init returns, because opening a ledger needs the rest of
+    # the tree to be up.
+    {:ok, %{module: module, ring: ring, cache: %{}}, {:continue, :reconcile}}
   end
+
+  @impl true
+  def handle_continue(:reconcile, state), do: {:noreply, forget_erased(state)}
 
   @impl true
   def handle_call({:wrap, dek, subject}, _from, state) do
@@ -119,6 +142,8 @@ defmodule LazyRiver.Keyring do
     end
   end
 
+  def handle_call(:reconcile, _from, state), do: {:reply, :ok, forget_erased(state)}
+
   def handle_call({:destroy, subject}, _from, state) do
     :ok = state.module.destroy(state.ring, subject)
     cache = state.cache |> Enum.reject(fn {{s, _}, _} -> s == subject end) |> Map.new()
@@ -134,6 +159,20 @@ defmodule LazyRiver.Keyring do
       :forgotten ->
         {:reply, :forgotten, state}
     end
+  end
+
+  defp forget_erased(state) do
+    Enum.reduce(LazyRiver.Erasure.erased(), state, fn subject, acc ->
+      :ok = acc.module.destroy(acc.ring, subject)
+      %{acc | cache: acc.cache |> Enum.reject(fn {{s, _}, _} -> s == subject end) |> Map.new()}
+    end)
+  rescue
+    _ -> state
+  catch
+    # A dead ledger supervisor exits rather than raising, so both have to be
+    # caught. A keyring that cannot read tombstones must still open — it just
+    # has not reconciled, and reconcile/0 can be called again.
+    :exit, _ -> state
   end
 
   defp now, do: System.monotonic_time(:millisecond)
