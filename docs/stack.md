@@ -93,6 +93,32 @@ API.
 Not covered, deliberately: adaptive-bitrate delivery is a CDN's job, and OCR and
 virus scanning stay tenant formulas until something demands them.
 
+## Asking — Datalog, and no separate query engine
+
+A formula is a query with a head, so the query language and the formula language
+are one language (doctrine 15). Datalog, because a rule *is* facts following from
+facts; because semi-naive evaluation gives incremental maintenance, which is what
+a subscription needs; because rules reference rules, so composition is native;
+because the grammar is small enough for a model to emit reliably; and because
+pure Datalog terminates, which removes a class of the fairness problem instead of
+requiring a watchdog for it.
+
+Almost nobody writes Datalog directly. A builder API in Elixir and Python covers
+the ordinary cases and compiles to it. Cypher or SQL front-ends can arrive later
+and compile the same way.
+
+Design attention goes to negation and aggregation, both of which want
+stratification to stay well-defined.
+
+**Rejected: Cypher-native.** Mutation-oriented over a property graph we do not
+have, and incremental view maintenance is painful in it.
+
+**Rejected: SQL.** Does not terminate, does not compose without string building,
+and the row shape makes its table ceremony meaningless here.
+
+**Rejected: arbitrary code as the query surface.** No termination guarantee, so
+fairness becomes a watchdog problem, and nothing can be incrementally maintained.
+
 ## Vectors
 
 A vector is a `symbol` — a fact's answer — so there is no vector store. Embedding
