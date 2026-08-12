@@ -28,7 +28,10 @@ defmodule LazyRiver.Keyring.Local do
   def open(opts) do
     dir = Keyword.get(opts, :dir, "priv/keys")
     File.mkdir_p!(dir)
-    {:ok, %{path: Path.join(dir, "keks"), master: master()}}
+
+    # A master may be supplied — `LazyRiver.Keyring.GCP` hands one down that a
+    # KMS unwrapped, so the file mechanics here are shared rather than copied.
+    {:ok, %{path: Path.join(dir, "keks"), master: Keyword.get(opts, :master) || master()}}
   end
 
   @impl true
