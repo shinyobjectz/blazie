@@ -9,7 +9,9 @@ defmodule LazyRiver do
   only thing a schedule can attach to.
 
   The vocabulary lives in `.monty/ontology.db` and is enforced by `just check`.
-  Engineering that is deliberately not vocabulary lives in `docs/stack.md`.
+  Engineering that is deliberately not vocabulary lives in the commit that
+  introduced it — there are no documents here, because a document describing
+  the system is a second source that drifts.
 
   All seven exist, one module each: `LazyRiver.Fact`, `LazyRiver.Attribute`,
   `LazyRiver.Ledger`, `LazyRiver.Snapshot`, `LazyRiver.Formula`,
