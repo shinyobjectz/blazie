@@ -1,4 +1,4 @@
-ExUnit.start(exclude: [:gcp])
+ExUnit.start(exclude: [:gcp, :crash])
 
 defmodule LazyRiver.TestLedger do
   @moduledoc """

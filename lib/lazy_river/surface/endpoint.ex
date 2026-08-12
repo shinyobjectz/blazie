@@ -5,6 +5,8 @@ defmodule LazyRiver.Surface.Endpoint do
 
   use Phoenix.Endpoint, otp_app: :lazy_river
 
+  socket("/socket", LazyRiver.Surface.Socket, websocket: true, longpoll: false)
+
   plug(Plug.Parsers,
     parsers: [:json],
     pass: ["application/json"],

@@ -57,13 +57,22 @@ defmodule LazyRiver.Surface.Authorize do
   # that names one and forgetting to check it is a change here, not an omission.
   defp named(%{params: params}) do
     [
-      Map.get(params, "ledgers", []),
-      Map.get(params, "name", %{}) |> Map.keys(),
+      names(Map.get(params, "ledgers")),
+      keys(Map.get(params, "name")),
       List.wrap(Map.get(params, "ledger"))
     ]
     |> List.flatten()
     |> Enum.uniq()
   end
+
+  # A hostile caller sends whatever it likes, and this runs before anything has
+  # validated the shape. Anything that is not a name is not a name — the
+  # operation refuses it on its own terms, and nothing here may crash first.
+  defp names(list) when is_list(list), do: list
+  defp names(_), do: []
+
+  defp keys(map) when is_map(map), do: Map.keys(map)
+  defp keys(_), do: []
 
   defp token(conn) do
     case get_req_header(conn, "authorization") do

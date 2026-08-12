@@ -43,6 +43,18 @@ defmodule LazyRiver.Wire do
     end
   end
 
+  # Whatever a caller sends, it sends. A shape that is not a pattern is refused
+  # on its own terms rather than reaching a guard with nothing to match.
+  def pattern(sent),
+    do:
+      {:error,
+       %{
+         problem: :not_a_pattern,
+         repair:
+           "A pattern is an object of id, attribute, answer or by — any of them, all of them, " <>
+             "or none. #{inspect(sent)} is not one."
+       }}
+
   @doc """
   A wire assertion becomes a three-wide assertion, or a refusal.
 
@@ -95,6 +107,16 @@ defmodule LazyRiver.Wire do
          }}
     end
   end
+
+  def snapshot_name(sent),
+    do:
+      {:error,
+       %{
+         problem: :bad_transaction,
+         repair:
+           "A snapshot name maps each ledger to the transaction it was read at. " <>
+             "#{inspect(sent)} is not a name."
+       }}
 
   # ── out ────────────────────────────────────────────────────────────────────
 

@@ -109,12 +109,7 @@ defmodule LazyRiver.Keyring do
 
   @impl true
   def init(opts) do
-    {module, ring_opts} =
-      Keyword.get(
-        opts,
-        :keyring,
-        {__MODULE__.Local, dir: Application.get_env(:lazy_river, :key_dir, "priv/keys")}
-      )
+    {module, ring_opts} = Keyword.get(opts, :keyring, configured())
 
     {:ok, ring} = module.open(ring_opts)
     # Reconciled after init returns, because opening a ledger needs the rest of
@@ -124,6 +119,23 @@ defmodule LazyRiver.Keyring do
 
   @impl true
   def handle_continue(:reconcile, state), do: {:noreply, forget_erased(state)}
+
+  @doc """
+  Which keyring this deployment uses, from config.
+
+  Setting `:kms_key` selects the KMS-backed one, because a deployment that has
+  named a KMS key has said what it wants. Without one it is the local keyring,
+  which is right for development and says so.
+  """
+  @spec configured() :: {module(), keyword()}
+  def configured do
+    dir = Application.get_env(:lazy_river, :key_dir, "priv/keys")
+
+    case Application.get_env(:lazy_river, :kms_key) do
+      nil -> {__MODULE__.Local, dir: dir}
+      key -> {__MODULE__.GCP, dir: dir, key: key}
+    end
+  end
 
   @impl true
   def handle_call({:wrap, dek, subject}, _from, state) do
