@@ -19,7 +19,7 @@ defmodule LazyRiver.Ledger do
 
   use GenServer
 
-  alias LazyRiver.{Erasure, Fact, Store}
+  alias LazyRiver.{Cluster, Erasure, Fact, Store}
 
   @subject "subject"
 
@@ -53,15 +53,45 @@ defmodule LazyRiver.Ledger do
 
       Ledger.open({:tenant, 7}, store: {Store.File, dir: "priv/ledgers"})
   """
-  @spec open(name(), keyword()) :: {:ok, ref()}
+  @spec open(name(), keyword()) :: {:ok, ref()} | {:error, Cluster.refusal()}
   def open(name, opts \\ []) do
     child = {__MODULE__, [name: name] ++ opts}
 
-    case DynamicSupervisor.start_child(LazyRiver.LedgerSupervisor, child) do
-      {:ok, _pid} -> {:ok, via(name)}
-      {:error, {:already_started, _pid}} -> {:ok, via(name)}
-      other -> other
+    # Claimed across the cluster before anything is started, so a refusal costs
+    # nothing and leaves nothing behind. Two nodes appending under one name
+    # would fork its history.
+    case Cluster.claim(name, self()) do
+      :ok ->
+        case DynamicSupervisor.start_child(LazyRiver.LedgerSupervisor, child) do
+          {:ok, pid} -> hold(name, pid)
+          {:error, {:already_started, pid}} -> hold(name, pid)
+          other -> other
+        end
+
+      {:held, holder} ->
+        # Ours only if the claim points at the ledger we are already running
+        # under that name. Anything else is another owner.
+        if holder == local(name) and holder != nil do
+          {:ok, via(name)}
+        else
+          {:error, Cluster.refusal(name)}
+        end
     end
+  end
+
+  defp local(name) do
+    case Registry.lookup(LazyRiver.Registry, name) do
+      [{pid, _}] -> pid
+      [] -> nil
+    end
+  end
+
+  # The claim moves from whoever opened to the ledger itself, so it is released
+  # when the ledger goes rather than when its opener does.
+  defp hold(name, pid) do
+    Cluster.release(name)
+    Cluster.claim_as(name, pid)
+    {:ok, via(name)}
   end
 
   @doc """
@@ -93,6 +123,7 @@ defmodule LazyRiver.Ledger do
       [] ->
         {:error, :not_found}
     end
+    |> tap(fn _ -> Cluster.release(name) end)
   end
 
   defp await_free(name, remaining \\ 500) do
