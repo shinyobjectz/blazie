@@ -31,7 +31,8 @@ defmodule LazyRiver.MixProject do
     [
       {:phoenix, "~> 1.8"},
       {:bandit, "~> 1.0"},
-      {:jason, "~> 1.4"}
+      {:jason, "~> 1.4"},
+      {:wasmex, "~> 0.15"}
     ]
   end
 end
