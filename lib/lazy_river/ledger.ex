@@ -55,27 +55,48 @@ defmodule LazyRiver.Ledger do
   """
   @spec open(name(), keyword()) :: {:ok, ref()} | {:error, Cluster.refusal()}
   def open(name, opts \\ []) do
-    child = {__MODULE__, [name: name] ++ opts}
+    case local(name) do
+      pid when is_pid(pid) -> {:ok, via(name)}
+      nil -> claim_and_start(name, opts)
+    end
+  end
 
-    # Claimed across the cluster before anything is started, so a refusal costs
-    # nothing and leaves nothing behind. Two nodes appending under one name
-    # would fork its history.
-    case Cluster.claim(name, self()) do
-      :ok ->
-        case DynamicSupervisor.start_child(LazyRiver.LedgerSupervisor, child) do
-          {:ok, pid} -> hold(name, pid)
-          {:error, {:already_started, pid}} -> hold(name, pid)
-          other -> other
-        end
+  # The claim is only ever made *for the ledger process*, never for whoever is
+  # opening. An earlier version claimed as the opener and swapped afterwards,
+  # which left a window where a concurrent open could take the name for its own
+  # transient pid — and a later caller then found the ledger owned by something
+  # that was not a ledger. It failed about one run in twelve.
+  defp claim_and_start(name, opts) do
+    if Cluster.owner(name) do
+      {:error, Cluster.refusal(name)}
+    else
+      child = {__MODULE__, [name: name] ++ opts}
 
-      {:held, holder} ->
-        # Ours only if the claim points at the ledger we are already running
-        # under that name. Anything else is another owner.
-        if holder == local(name) and holder != nil do
+      case DynamicSupervisor.start_child(LazyRiver.LedgerSupervisor, child) do
+        {:ok, pid} ->
+          claim_for(name, pid)
+
+        # Another process on this node won the race to start the same ledger.
+        # Its claim is the right one.
+        {:error, {:already_started, _pid}} ->
           {:ok, via(name)}
-        else
-          {:error, Cluster.refusal(name)}
-        end
+
+        other ->
+          other
+      end
+    end
+  end
+
+  defp claim_for(name, pid) do
+    case Cluster.claim_as(name, pid) do
+      :yes ->
+        {:ok, via(name)}
+
+      :no ->
+        # Claimed elsewhere between the check and the start. Undo what we
+        # started rather than leave an unclaimed ledger running.
+        DynamicSupervisor.terminate_child(LazyRiver.LedgerSupervisor, pid)
+        {:error, Cluster.refusal(name)}
     end
   end
 
@@ -84,14 +105,6 @@ defmodule LazyRiver.Ledger do
       [{pid, _}] -> pid
       [] -> nil
     end
-  end
-
-  # The claim moves from whoever opened to the ledger itself, so it is released
-  # when the ledger goes rather than when its opener does.
-  defp hold(name, pid) do
-    Cluster.release(name)
-    Cluster.claim_as(name, pid)
-    {:ok, via(name)}
   end
 
   @doc """

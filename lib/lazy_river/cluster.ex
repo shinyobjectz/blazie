@@ -45,24 +45,6 @@ defmodule LazyRiver.Cluster do
   @spec owned_here?(name()) :: boolean()
   def owned_here?(name), do: owner(name) == node()
 
-  @doc """
-  Claim a ledger for a process, or say who holds it.
-
-  Called by `LazyRiver.Ledger.open/2` before anything is started, so a refusal
-  costs nothing and leaves nothing behind.
-  """
-  @spec claim(name(), pid()) :: :ok | {:held, pid()}
-  def claim(name, pid) do
-    case claim_as(name, pid) do
-      :yes -> :ok
-      # Somebody holds it. Whether that is our own ledger reopening or another
-      # node is not a question this module can answer — comparing nodes would
-      # call any process on this node "ours", which is how the first version of
-      # this let a conflict through.
-      :no -> {:held, :global.whereis_name(key(name))}
-    end
-  end
-
   @doc false
   # Exposed so a test can stand in for another node's ledger process.
   @spec claim_as(name(), pid()) :: :yes | :no
