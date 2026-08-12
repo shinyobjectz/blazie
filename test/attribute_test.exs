@@ -6,12 +6,12 @@ defmodule LazyRiver.AttributeTest do
   use ExUnit.Case, async: true
 
   alias LazyRiver.{Attribute, Ledger, Snapshot}
+  alias LazyRiver.TestLedger
 
   setup do
-    name = :"ledger_#{System.unique_integer([:positive])}"
-    start_supervised!({Ledger, name: name})
-    {:ok, _} = Ledger.append(name, Attribute.seed())
-    %{ledger: name}
+    ledger = TestLedger.open()
+    {:ok, _} = Ledger.append(ledger, Attribute.seed())
+    %{ledger: ledger}
   end
 
   defp known(ledger), do: Attribute.known(Snapshot.open([ledger]))
@@ -103,8 +103,7 @@ defmodule LazyRiver.AttributeTest do
 
   describe "everything extends, nothing redefines" do
     test "a vocabulary composed from another ledger is visible", %{ledger: tenant} do
-      shared = :"shared_#{System.unique_integer([:positive])}"
-      start_supervised!({Ledger, name: shared})
+      shared = TestLedger.open()
       {:ok, _} = Ledger.append(shared, Attribute.define(:height, answers: :integer))
 
       refute Attribute.defined?(Snapshot.open([tenant]), :height)

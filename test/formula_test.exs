@@ -6,11 +6,10 @@ defmodule LazyRiver.FormulaTest do
   use ExUnit.Case, async: true
 
   alias LazyRiver.{Fact, Formula, Ledger, Snapshot}
+  alias LazyRiver.TestLedger
 
   setup do
-    name = :"ledger_#{System.unique_integer([:positive])}"
-    start_supervised!({Ledger, name: name})
-    %{ledger: name}
+    %{ledger: TestLedger.open()}
   end
 
   defp doubled do

@@ -6,12 +6,12 @@ defmodule LazyRiver.JobTest do
   use ExUnit.Case, async: true
 
   alias LazyRiver.{Fact, Job, Ledger, Snapshot, Attribute}
+  alias LazyRiver.TestLedger
 
   setup do
-    name = :"ledger_#{System.unique_integer([:positive])}"
-    start_supervised!({Ledger, name: name})
-    {:ok, _} = Ledger.append(name, Attribute.seed() ++ Job.seed())
-    %{ledger: name}
+    ledger = TestLedger.open()
+    {:ok, _} = Ledger.append(ledger, Attribute.seed() ++ Job.seed())
+    %{ledger: ledger}
   end
 
   defp fetcher(answer \\ "hello") do

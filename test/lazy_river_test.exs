@@ -6,15 +6,10 @@ defmodule LazyRiverTest do
   use ExUnit.Case, async: true
 
   alias LazyRiver.{Fact, Ledger, Snapshot}
+  alias LazyRiver.TestLedger
 
   setup do
-    %{a: start_ledger(), b: start_ledger()}
-  end
-
-  defp start_ledger do
-    name = :"ledger_#{System.unique_integer([:positive])}"
-    start_supervised!({Ledger, name: name})
-    name
+    %{a: TestLedger.open(), b: TestLedger.open()}
   end
 
   describe "one row shape" do

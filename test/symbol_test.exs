@@ -6,17 +6,16 @@ defmodule LazyRiver.SymbolTest do
   use ExUnit.Case, async: true
 
   alias LazyRiver.{Attribute, Fact, Formula, Ledger, Snapshot, Symbol}
+  alias LazyRiver.TestLedger
 
   setup do
-    name = :"ledger_#{System.unique_integer([:positive])}"
-    start_supervised!({Ledger, name: name})
-
-    {:ok, _} = Ledger.append(name, Attribute.seed() ++ Symbol.seed())
+    ledger = TestLedger.open()
+    {:ok, _} = Ledger.append(ledger, Attribute.seed() ++ Symbol.seed())
 
     {:ok, _} =
-      Ledger.append(name, Attribute.define(:embedding, answers: :symbol, space: :potion_256))
+      Ledger.append(ledger, Attribute.define(:embedding, answers: :symbol, space: :potion_256))
 
-    %{ledger: name}
+    %{ledger: ledger}
   end
 
   describe "assert and represent are different, and share a row" do
