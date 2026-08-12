@@ -15,7 +15,19 @@ defmodule LazyRiver do
   `LazyRiver.Ledger`, `LazyRiver.Snapshot`, `LazyRiver.Formula`,
   `LazyRiver.Symbol`, `LazyRiver.Job`.
 
-  Storage is in memory and the ledger is the seam that hides it. There is no
-  sandbox yet, so doctrine 14's boundary is a shape rather than a fence.
+  Around them, and deliberately not vocabulary: a `Store` behind the ledger
+  seam with checkpointing, sort orders and resident bounds inside the ledger, a
+  `Surface` of four operations with an `Authority` deciding which ledgers a
+  caller may name, a `Job.Runner`, `Subscription`, `Formula.Engine`,
+  `Formula.Sandbox` for code we do not trust, `Erasure` with its `Keyring`,
+  `Cluster` for one-ledger-one-owner, and `Vitals`.
+
+  ## What is not true yet, in one place
+
+  The keyring is in memory, so a restart erases everything by accident — the
+  one piece here that must not ship as it stands. Distribution is claimed
+  against but not implemented. And a fact written before its subject was
+  declared can never be erased, which is a property of the design rather than a
+  gap: subject is decided at write time or not at all.
   """
 end
