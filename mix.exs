@@ -7,6 +7,14 @@ defmodule LazyRiver.MixProject do
       version: "0.1.0",
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
+      releases: [
+        lazy_river: [
+          include_executables_for: [:unix],
+          # Everything the release needs to differ by comes from the
+          # environment at boot, so one artefact runs anywhere.
+          applications: [lazy_river: :permanent]
+        ]
+      ],
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
