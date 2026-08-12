@@ -46,10 +46,30 @@ defmodule LazyRiver.Ledger do
   The transaction is the ledger's name for that moment, so a writer can read
   its own write without polling — the number it gets back is the point the
   facts are visible at.
+
+  Pass `check:` to refuse a write that would leave the vocabulary inconsistent.
+  The ledger applies the check without knowing what one is — it holds the one
+  serialized path every write goes through, and that is the only reason the
+  check belongs here.
+
+      Ledger.append(ledger, assertions, check: &Attribute.check(&1, known))
+
+  A refusal is returned, never raised, and carries whatever the check said
+  would repair it.
   """
-  @spec append(ref(), [assertion()]) :: {:ok, pos_integer()}
-  def append(ledger, assertions) when is_list(assertions) do
-    GenServer.call(ledger, {:append, assertions})
+  @spec append(ref(), [assertion()], keyword()) :: {:ok, pos_integer()} | {:error, term()}
+  def append(ledger, assertions, opts \\ []) when is_list(assertions) do
+    case Keyword.get(opts, :check) do
+      nil -> GenServer.call(ledger, {:append, assertions})
+      check when is_function(check, 1) -> checked_append(ledger, assertions, check)
+    end
+  end
+
+  defp checked_append(ledger, assertions, check) do
+    case check.(assertions) do
+      :ok -> GenServer.call(ledger, {:append, assertions})
+      {:error, refusals} -> {:error, refusals}
+    end
   end
 
   # ── reading ────────────────────────────────────────────────────────────────
