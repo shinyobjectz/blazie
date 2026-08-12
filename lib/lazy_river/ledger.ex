@@ -152,6 +152,18 @@ defmodule LazyRiver.Ledger do
   def tx(ledger), do: GenServer.call(ledger, :tx)
 
   @doc """
+  How many facts this ledger is holding in memory.
+
+  Bounded by `resident:`, with two honest caveats. It is a floor rounded up to
+  a transaction boundary, because a transaction is evicted whole or not at all
+  — so a fifty-fact write keeps fifty however small the setting. And it only
+  saves anything when the facts are durable somewhere else: with the memory
+  store, the store *is* the memory.
+  """
+  @spec resident(ref()) :: non_neg_integer()
+  def resident(ledger), do: GenServer.call(ledger, :resident)
+
+  @doc """
   Every fact recorded at or before `tx`, oldest first.
 
   This is the whole reason a snapshot can be a value: the answer here depends
@@ -195,11 +207,14 @@ defmodule LazyRiver.Ledger do
          by_id: %{},
          by_attribute: %{},
          by_answer: %{},
+         oldest: oldest_of(replayed),
+         resident: Keyword.get(opts, :resident, :unbounded),
          store: store,
          module: module
        },
        replayed
-     )}
+     )
+     |> trim()}
   end
 
   @impl true
@@ -215,10 +230,11 @@ defmodule LazyRiver.Ledger do
     # Newest first while resident; readers reverse. Appending is the hot path.
     state = %{state | tx: tx, store: store, facts: Enum.reverse(facts) ++ state.facts}
 
-    {:reply, {:ok, tx}, index(state, facts)}
+    {:reply, {:ok, tx}, state |> index(facts) |> trim()}
   end
 
   def handle_call(:tx, _from, state), do: {:reply, state.tx, state}
+  def handle_call(:resident, _from, state), do: {:reply, length(state.facts), state}
 
   def handle_call({:find_at, tx, pattern}, _from, state) do
     {:reply, matching(state, tx, pattern), state}
@@ -263,11 +279,25 @@ defmodule LazyRiver.Ledger do
   defp answer_key(_answer), do: :unindexed
 
   defp matching(state, tx, pattern) do
-    state
-    |> narrowest(pattern)
-    |> Enum.drop_while(&(&1.tx > tx))
-    |> Enum.filter(&Fact.matches?(&1, pattern))
-    |> Enum.reverse()
+    resident =
+      state
+      |> narrowest(pattern)
+      |> Enum.drop_while(&(&1.tx > tx))
+      |> Enum.filter(&Fact.matches?(&1, pattern))
+      |> Enum.reverse()
+
+    evicted(state, tx, pattern) ++ resident
+  end
+
+  # Anything older than what is resident has to come from the store. This is a
+  # full re-read: honest rather than good, and exactly what compaction and a
+  # segmented store are for.
+  defp evicted(%{oldest: nil}, _tx, _pattern), do: []
+  defp evicted(%{oldest: oldest}, _tx, _pattern) when oldest <= 1, do: []
+
+  defp evicted(state, tx, pattern) do
+    state.module.replay(state.store)
+    |> Enum.filter(&(&1.tx < state.oldest and &1.tx <= tx and Fact.matches?(&1, pattern)))
   end
 
   # Pick the smallest starting set the pattern allows. An id is the most
@@ -287,6 +317,47 @@ defmodule LazyRiver.Ledger do
         state.facts
     end
   end
+
+  # ── staying within bounds ──────────────────────────────────────────────────
+  #
+  # Trimming rebuilds the sort orders, so it runs on a high-water mark rather
+  # than on every append once the limit is reached — otherwise the cost would
+  # land on every write forever.
+
+  defp trim(%{resident: :unbounded} = state), do: state
+
+  defp trim(state) do
+    if length(state.facts) > trunc(state.resident * 1.5) do
+      kept = keep_whole_transactions(state.facts, state.resident)
+
+      %{
+        state
+        | facts: kept,
+          by_id: %{},
+          by_attribute: %{},
+          by_answer: %{},
+          oldest: oldest_of(kept)
+      }
+      |> index(Enum.reverse(kept))
+    else
+      state
+    end
+  end
+
+  # A transaction is evicted whole or not at all. Splitting one leaves its
+  # remainder neither resident nor older than what is resident, so it answers
+  # from nowhere — which is how forty facts went missing the first time.
+  defp keep_whole_transactions(facts, limit) do
+    {head, rest} = Enum.split(facts, limit)
+
+    case List.last(head) do
+      nil -> head
+      last -> head ++ Enum.take_while(rest, &(&1.tx == last.tx))
+    end
+  end
+
+  defp oldest_of([]), do: nil
+  defp oldest_of(facts), do: facts |> Enum.map(& &1.tx) |> Enum.min()
 
   # Tell whoever is watching. Only sends — a watcher that called back into this
   # ledger while it was still replying would deadlock, so it never does.
