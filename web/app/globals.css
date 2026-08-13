@@ -111,6 +111,18 @@
   --color-sidebar: var(--sidebar);
 }
 
+/* Tailwind v4 defaults `border-color` to `currentColor`, so a bare `border`
+   draws in whatever the text colour is — white, on this page. shadcn's own v4
+   setup ships this base layer and this file never had it, which is why every
+   rule in the console came out as a bright stroke. It is one declaration and it
+   is the difference between a hairline and a highlight. */
+@layer base {
+  * {
+    border-color: var(--border);
+    outline-color: var(--ring);
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

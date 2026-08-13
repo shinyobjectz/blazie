@@ -69,11 +69,11 @@ export function AppSidebar({ login }: { login: string | null }) {
 
   return (
     <Sidebar collapsible="icon">
-      {/* No rule under the mark either: it would stop dead at the sidebar's
-          edge and read as a broken line against the content header beside it,
-          which is exactly the sort of stray edge removing the right border was
-          meant to be rid of. */}
-      <SidebarHeader className="h-14 justify-center">
+      {/* Matches the content header's height so the rule under the wordmark and
+          the one under the snapshot bar are the same line across the page. That
+          only reads correctly now that a border is the border token rather than
+          currentColor — as a white stroke it was a highlight, not a hairline. */}
+      <SidebarHeader className="h-14 justify-center border-b">
         <Link href="/" className="flex items-center px-2 py-1.5">
           <Wordmark size="sm" />
         </Link>

@@ -58,6 +58,16 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${pixel.variable} ${sans.variable} ${mono.variable} h-full antialiased`}
     >
+      <head>
+        {/*
+          Dark Reader rewrites every fill and stroke on a page before React
+          hydrates, which both mangles an already-dark design and surfaces as a
+          hydration mismatch. `color-scheme: dark` asks it politely; this tag is
+          the one it actually honours unconditionally, and this page has nothing
+          for it to do.
+        */}
+        <meta name="darkreader-lock" />
+      </head>
       <body className="min-h-full flex flex-col bg-black text-white">
         {children}
       </body>
