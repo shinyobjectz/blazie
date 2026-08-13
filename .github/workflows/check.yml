@@ -49,6 +49,16 @@ jobs:
       # Excluded from the ordinary run, never excluded from the gate.
       - run: mix test --include crash --only crash
 
+      # The backup signs SigV4 by hand, and a signature that is subtly wrong
+      # fails only against a real server. This talks to a real bucket, under a
+      # prefix of its own so a run can never touch what a deployment holds.
+      - run: mix test --include object_storage --only object_storage
+        env:
+          BACKUP_ENDPOINT: ${{ secrets.BACKUP_ENDPOINT }}
+          BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+          BACKUP_ACCESS_KEY_ID: ${{ secrets.BACKUP_ACCESS_KEY_ID }}
+          BACKUP_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_SECRET_ACCESS_KEY }}
+
   vocabulary:
     runs-on: ubuntu-latest
     steps:

@@ -118,6 +118,12 @@ Restoring refuses rather than overwrites, and names what is in the way. Pass
 while the facts are fine is a real thing, and not the same operation as
 restoring a machine.
 
+Two limits, stated rather than hidden. `verify` always names `$backup` itself,
+because a run copies and *then* records what it copied; the next run catches it
+up. And no target can delete, but the credentials a deployment holds usually
+can — so versioning and a retention window belong on the bucket, out of reach
+of a node that has been taken over.
+
 ## Deployment
 
 A two-stage image: build with the toolchain, ship without it. Facts and keys

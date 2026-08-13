@@ -37,11 +37,28 @@ defmodule LazyRiver.Backup do
   reconciles against erasure tombstones every time it opens, and those are
   facts, so they are in the backup too.
 
+  ## The backup's own ledger is always one transaction behind
+
+  A run copies, and then `Job.run/4` writes what it copied — so the facts
+  describing a run land after the copy that would have carried them, and
+  `verify/1` called between runs always names `$backup` itself. The next run
+  catches it up and creates the same lag again.
+
+  This is stated rather than special-cased. Teaching `verify` to ignore one
+  ledger would be teaching it to ignore the one that says whether backups are
+  happening, and a check with an exception in it is a check nobody trusts.
+  Anything else in that list is real.
+
   ## What this is not
 
   It is not replication and it is not a second node. It is the thing that means
   losing the disk costs whatever has happened since the last run, and nothing
   before it.
+
+  Nor is it protection from a target that erases. No target here can delete,
+  but the credentials a deployment holds usually can — so versioning and a
+  retention window belong on the bucket, where a node that has been taken over
+  cannot reach them.
   """
 
   alias LazyRiver.{Attribute, Job, Ledger, Store}
