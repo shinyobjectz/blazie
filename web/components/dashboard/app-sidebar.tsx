@@ -6,6 +6,7 @@ import {
   Database,
   Fingerprint,
   HardDrive,
+  Orbit,
   Settings,
   SquareTerminal,
   Table2,
@@ -29,14 +30,20 @@ import {
 /**
  * The nav, in the order somebody uses it.
  *
- * Data first, because that is what anybody opening a backend console came to
- * see. An earlier version grouped these by what a thing IS in blazie's own
- * terms — read / declared / the node — which is a fine way to organise a
- * reference and a confusing way to organise a screen.
+ * The orbit first and data second, which is a reversal: data was first because
+ * it is what anybody opening a backend console came to see, and that is still
+ * true of one world. It stopped being true of the console, which holds several
+ * — and answering "what have I got" with a table of one world's rows made the
+ * other worlds something you had to remember to go and look at.
+ *
+ * An earlier version grouped these by what a thing IS in blazie's own terms —
+ * read / declared / the node — which is a fine way to organise a reference and
+ * a confusing way to organise a screen.
  */
 
 const items: { href: string; label: string; icon: typeof Table2 }[] = [
-  { href: "/dashboard", label: "data", icon: Table2 },
+  { href: "/dashboard", label: "orbit", icon: Orbit },
+  { href: "/dashboard/data", label: "data", icon: Table2 },
   { href: "/dashboard/editor", label: "editor", icon: SquareTerminal },
   { href: "/dashboard/agents", label: "agents", icon: Bot },
   { href: "/dashboard/worlds", label: "worlds", icon: Database },

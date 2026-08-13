@@ -18,11 +18,21 @@ import { type Avatar, avatarOf, paletteOf } from "@/lib/world-avatar"
  * Which you get is not entirely up to the caller — see `LIVE` below.
  */
 
-/** On the scale, so a menu row and a card cannot drift a pixel apart. */
+/**
+ * On the scale, so a menu row and a card cannot drift a pixel apart.
+ *
+ * The two large steps are the orbit page's planets. It sizes a world by how
+ * much data is in it, and a free-form pixel width would have given every caller
+ * a way around the scale to get one — so the sizes a world can be drawn at stay
+ * a short list, and "how big is this planet" is answered by picking from it.
+ * `lib/orbit.ts` holds the buckets and states what each one means.
+ */
 const SIZES = {
   sm: "size-5",
   md: "size-7",
   lg: "size-14",
+  xl: "size-20",
+  "2xl": "size-28",
 } as const
 
 /**
