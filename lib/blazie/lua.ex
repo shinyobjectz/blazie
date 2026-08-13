@@ -90,6 +90,7 @@ defmodule Blazie.Lua do
     deadline = Keyword.get(opts, :deadline, @deadline)
     heap = Keyword.get(opts, :heap, @heap)
     at = Keyword.get(opts, :at, 0)
+    snapshot = Keyword.get(opts, :snapshot)
 
     # Captured here rather than inside, because inside `self()` is the guest.
     caller = self()
@@ -99,7 +100,33 @@ defmodule Blazie.Lua do
     {pid, ref} =
       spawn_monitor(fn ->
         Process.flag(:max_heap_size, %{size: heap, kill: true, error_logger: false})
-        send(caller, {self(), evaluate(source, kind, at)})
+        send(caller, {self(), evaluate(source, kind, at, snapshot)})
+      end)
+
+    case await(pid, ref, deadline, heap) do
+      {:ok, value, _wrote} -> {:ok, value}
+      other -> other
+    end
+  end
+
+  @doc false
+  # The same run, with what the guest wrote. `Blazie.Lua.World.run/3` is the way
+  # to reach this; it is here because only this module knows how to spawn a
+  # guest with a deadline around it.
+  @spec collect(binary(), [option()]) ::
+          {:ok, term(), [Blazie.Lua.World.assertion()]} | {:error, refusal()}
+  def collect(source, opts \\ []) do
+    kind = Keyword.get(opts, :as, :formula)
+    deadline = Keyword.get(opts, :deadline, @deadline)
+    heap = Keyword.get(opts, :heap, @heap)
+    at = Keyword.get(opts, :at, 0)
+    snapshot = Keyword.get(opts, :snapshot)
+    caller = self()
+
+    {pid, ref} =
+      spawn_monitor(fn ->
+        Process.flag(:max_heap_size, %{size: heap, kill: true, error_logger: false})
+        send(caller, {self(), evaluate(source, kind, at, snapshot)})
       end)
 
     await(pid, ref, deadline, heap)
@@ -169,6 +196,17 @@ defmodule Blazie.Lua do
   # too: a guest that can compile a string could rebuild anything removed here
   # if it ever got a reference back.
   @removed ~w(io package require load loadstring dofile loadfile)
+
+  @doc """
+  The globals this host removes, so the world can keep them removed.
+
+  `Blazie.Lua.World` puts a metatable on `_G` that turns any unknown name into
+  an entity — which would quietly turn every one of these from "absent" into
+  "an empty entity named io". The fence is the absence of anything to reach, and
+  a name that answers with a table is not absent.
+  """
+  @spec removed() :: [String.t()]
+  def removed, do: @removed ++ ~w(http)
 
   # The parts of `os` that touch the machine. `date` goes with them for a
   # different reason: formatting a moment for a human is presentation, and a
@@ -245,12 +283,22 @@ defmodule Blazie.Lua do
 
   # ── running one ────────────────────────────────────────────────────────────
 
-  defp evaluate(source, kind, at) do
+  defp wrote(nil), do: []
+  defp wrote(_snapshot), do: Blazie.Lua.World.staged()
+
+  defp evaluate(source, kind, at, snapshot) do
     state = world(kind, at)
+    # Bound only when a snapshot was given. Without one this is still the plain
+    # host — useful for a chunk that computes rather than reads, and the reason
+    # `run/2` did not have to change shape to gain a database.
+    state = if snapshot, do: Blazie.Lua.World.bind(state, snapshot), else: state
 
     case :luerl.do(source, state) do
-      {:ok, returned, after_state} -> {:ok, decode(returned, after_state)}
-      {:error, why, _} -> {:error, not_lua(why)}
+      {:ok, returned, after_state} ->
+        {:ok, decode(returned, after_state), wrote(snapshot)}
+
+      {:error, why, _} ->
+        {:error, not_lua(why)}
     end
   rescue
     # Lua's own errors arrive here too: `rescue` covers the :error class, which
