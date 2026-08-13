@@ -34,6 +34,9 @@ defmodule LazyRiver.Application do
         # After the ledgers, because it reconciles against erasure tombstones
         # when it opens and those live in one.
         LazyRiver.Keyring,
+        # One engine for every ledger: it caches by formula and snapshot name,
+        # and a name already says which ledgers it composed.
+        {LazyRiver.Formula.Engine, name: LazyRiver.Formula.Engine},
         {Phoenix.PubSub, name: LazyRiver.PubSub},
         LazyRiver.Surface.Endpoint
       ] ++ vitals()

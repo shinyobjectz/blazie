@@ -11,6 +11,37 @@ defmodule LazyRiver.RunningJobsTest do
 
   alias LazyRiver.{Attribute, Job, Ledger, Snapshot, Vitals}
 
+  test "the formula engine is running" do
+    assert pid = Process.whereis(LazyRiver.Formula.Engine),
+           "nothing is running the formula engine, so nothing caches an answer"
+
+    assert Process.alive?(pid)
+  end
+
+  test "the running engine answers and caches" do
+    ledger = LazyRiver.TestLedger.open()
+    {:ok, _} = Ledger.append(ledger, Attribute.seed())
+    {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
+    {:ok, _} = Ledger.append(ledger, [{1, "height", 10}])
+
+    {:ok, agent} = Agent.start_link(fn -> 0 end)
+
+    formula =
+      LazyRiver.Formula.new("running-#{System.unique_integer([:positive])}", fn snapshot ->
+        Agent.update(agent, &(&1 + 1))
+        for f <- Snapshot.find(snapshot, attribute: "height"), do: {f.id, "doubled", f.answer * 2}
+      end)
+
+    :ok = LazyRiver.Formula.Engine.register(LazyRiver.Formula.Engine, formula)
+    snapshot = Snapshot.open([ledger])
+
+    {:ok, first} = LazyRiver.Formula.Engine.answer(LazyRiver.Formula.Engine, formula.id, snapshot)
+    {:ok, again} = LazyRiver.Formula.Engine.answer(LazyRiver.Formula.Engine, formula.id, snapshot)
+
+    assert first == again
+    assert Agent.get(agent, & &1) == 1
+  end
+
   test "the vitals job is running and taking readings" do
     assert pid = Process.whereis(LazyRiver.Vitals.Runner),
            "nothing is running the vitals job"

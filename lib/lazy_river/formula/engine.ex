@@ -24,6 +24,10 @@ defmodule LazyRiver.Formula.Engine do
   because recomputation is always available — a miss costs time, never
   correctness.
 
+  It belongs to no ledger. A cache key is a formula and a snapshot name, and a
+  snapshot name already says which ledgers it composed — so one engine serves
+  every ledger, and asking it to name one was state it never read.
+
   It also counts what each formula was asked and what it had to compute, which
   is the input to the decision it does not yet make: whether an answer is
   expensive and repeated enough to be worth writing into a ledger as facts.
@@ -33,11 +37,10 @@ defmodule LazyRiver.Formula.Engine do
 
   use GenServer
 
-  alias LazyRiver.{Formula, Ledger, Snapshot}
+  alias LazyRiver.{Formula, Snapshot}
 
   @type option ::
-          {:ledger, Ledger.name() | Ledger.ref()}
-          | {:formulas, [Formula.t()]}
+          {:formulas, [Formula.t()]}
           | {:cache, pos_integer()}
           | {:name, GenServer.name()}
 
@@ -81,7 +84,6 @@ defmodule LazyRiver.Formula.Engine do
   def init(opts) do
     {:ok,
      %{
-       ledger: Keyword.fetch!(opts, :ledger),
        formulas: opts |> Keyword.get(:formulas, []) |> Map.new(&{&1.id, &1}),
        limit: Keyword.get(opts, :cache, @default_cache),
        # key => answer, plus the order they were last wanted in.
