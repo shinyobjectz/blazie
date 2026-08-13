@@ -237,7 +237,7 @@ defmodule LazyRiver.Drill do
     Ledger.open_ledgers()
     |> Enum.sort_by(&Map.get(order, &1, -1))
     |> Enum.reduce_while({nil, []}, fn name, {nil, too_big} ->
-      case Backup.held([target: target], name) do
+      case held(target, name) do
         # Nothing held under this name: a ledger kept in memory, or one opened
         # since the last backup run. Neither is a finding.
         0 -> {:cont, {nil, too_big}}
@@ -245,6 +245,20 @@ defmodule LazyRiver.Drill do
         _held -> {:halt, {name, too_big}}
       end
     end)
+  end
+
+  # `Backup.held/2` insists the target answered, and a target that cannot be
+  # listed would otherwise reach the ledger as a match error with no repair on
+  # it. Said properly, because a boundary that rejects without saying how to
+  # comply produces loops rather than compliance.
+  defp held(target, name) do
+    Backup.held([target: target], name)
+  rescue
+    error ->
+      reraise "the backup target could not be listed (#{Exception.message(error)}). " <>
+                "A drill cannot choose what to prove without knowing what is held, so check " <>
+                "the target's credentials and that it is reachable from this node.",
+              __STACKTRACE__
   end
 
   # ── the drill itself ───────────────────────────────────────────────────────

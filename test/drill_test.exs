@@ -1,3 +1,18 @@
+defmodule LazyRiver.DrillTest.Unreachable do
+  @moduledoc "A target that answers nothing, which is what a wrong credential looks like."
+
+  @behaviour LazyRiver.Backup.Target
+
+  @impl true
+  def put(_opts, _key, _bytes), do: {:error, :unreachable}
+
+  @impl true
+  def get(_opts, _key), do: {:error, :unreachable}
+
+  @impl true
+  def list(_opts, _prefix), do: {:error, :unreachable}
+end
+
 defmodule LazyRiver.DrillTest do
   @moduledoc """
   A backup is only ever proven by the last restore, so the restore is a job.
@@ -98,12 +113,6 @@ defmodule LazyRiver.DrillTest do
       assert Snapshot.value(Snapshot.open([ctx.live]), "ada", "height") == 180
     end
 
-    test "and that name is gone again afterwards", ctx do
-      {:ok, _} = Drill.run(Snapshot.open([ctx.journal]), ctx.opts)
-
-      refute Enum.any?(Ledger.open_ledgers(), &match?({Drill, :restored, _}, &1))
-    end
-
     test "it leaves the live ledgers and the live keys alone", ctx do
       before = File.ls!(ctx.ledgers)
 
@@ -158,13 +167,22 @@ defmodule LazyRiver.DrillTest do
       assert refusal.repair =~ "re-copies from the hole"
     end
 
+    test "a target nobody can list fails with a repair, not a match error", ctx do
+      opts = Keyword.put(ctx.opts, :target, {LazyRiver.DrillTest.Unreachable, []})
+
+      assert {:failed, _tx, reason} =
+               Job.run(Drill.job(opts), ctx.journal, Snapshot.open([ctx.journal]), 1000)
+
+      assert reason =~ "could not be listed"
+      assert reason =~ "reachable from this node"
+    end
+
     test "and it clears up after a failure too", ctx do
       corrupt(ctx.remote)
 
       assert {:error, _} = Drill.run(Snapshot.open([ctx.journal]), ctx.opts)
 
       assert File.ls!(ctx.scratch) == []
-      refute Enum.any?(Ledger.open_ledgers(), &match?({Drill, :restored, _}, &1))
     end
   end
 

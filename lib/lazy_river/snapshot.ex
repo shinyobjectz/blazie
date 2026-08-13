@@ -81,6 +81,7 @@ defmodule LazyRiver.Snapshot do
   """
   @spec find(t(), keyword()) :: [Fact.t()]
   def find(%__MODULE__{at: at}, pattern) do
+    Fact.fields!(pattern)
     record_read(pattern)
 
     at

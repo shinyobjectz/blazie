@@ -78,8 +78,47 @@ defmodule LazyRiver.DrillWiringTest do
       assert Snapshot.value(snapshot, "drill", "restored_ledgers") == 1
       assert Snapshot.value(snapshot, "drill", "compared_facts") > 0
 
-      # And it left nothing behind on the way.
+      # And it left nothing behind on the way: no scratch directory, and no
+      # ledger name still held. Asserted here rather than beside the drill's own
+      # tests because the registry is VM-wide and this file is the one that runs
+      # on its own.
       assert File.ls!(ctx.scratch) == []
+      refute Enum.any?(Ledger.open_ledgers(), &match?({Drill, :restored, _}, &1))
+    end
+
+    test "a drill that fails still leaves nothing open and nothing behind", ctx do
+      name = {:drill_wiring_broken, System.unique_integer([:positive])}
+      {:ok, ledger} = Ledger.open(name, store: {Store.File, dir: ctx.ledgers})
+      on_exit(fn -> Ledger.close(name) end)
+      {:ok, _} = Ledger.append(ledger, Attribute.seed())
+
+      {:ok, _} =
+        Backup.run(
+          ledger_dir: ctx.ledgers,
+          key_dir: ctx.keys,
+          target: {Backup.Target.Directory, root: ctx.remote}
+        )
+
+      # Bytes that are not records. `0xFF` rather than zeros on purpose: a run of
+      # zeros decodes as a valid empty record, and this has to be unreadable.
+      {:ok, [segment]} = Backup.Target.Directory.list([root: ctx.remote], "ledgers/")
+      path = Path.join(ctx.remote, segment)
+      File.write!(path, :binary.copy(<<255>>, byte_size(File.read!(path))))
+
+      start_drill(ctx)
+      {:ok, _} = Job.Runner.tick(Drill.Runner, 1000)
+
+      # The failure is a fact, not a crash and not a silence.
+      assert eventually(fn ->
+               case Job.failures(Snapshot.open([Ledger.via(Drill.ledger())]), "drill") do
+                 [] -> nil
+                 failures -> failures
+               end
+             end) != []
+
+      assert Process.alive?(Process.whereis(Drill.Runner))
+      assert File.ls!(ctx.scratch) == []
+      refute Enum.any?(Ledger.open_ledgers(), &match?({Drill, :restored, _}, &1))
     end
   end
 

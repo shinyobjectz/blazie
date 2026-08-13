@@ -65,6 +65,9 @@ artefact runs anywhere and carries no secret.
 | `BACKUP_BUCKET` | With `BACKUP_ENDPOINT`, `BACKUP_ACCESS_KEY_ID`, `BACKUP_SECRET_ACCESS_KEY`, and optionally `BACKUP_REGION` and `BACKUP_PREFIX`. |
 | `BACKUP_DIR` | A directory to copy into instead — a second disk, or a test. |
 | `BACKUP_EVERY` | Seconds between runs. Defaults to 900. |
+| `DRILL_EVERY` | Seconds between restore drills. Defaults to 21600 — six hours. `0` turns the drill off. |
+| `DRILL_DIR` | Where a drill stages what it restores. Defaults to the container's temp space, and must never be `LEDGER_DIR`. |
+| `DRILL_MAX_BYTES` | The largest ledger a drill will pull down. Defaults to 512 MB. |
 
 Without `LEDGER_DIR` a ledger is in memory, which is right for a test and
 wrong for everything else. Without `KMS_KEY` the keyring keeps its keys in a
@@ -132,6 +135,51 @@ because a run copies and *then* records what it copied; the next run catches it
 up. And no target can delete, but the credentials a deployment holds usually
 can — so versioning and a retention window belong on the bucket, out of reach
 of a node that has been taken over.
+
+## The restore drill
+
+A backup is only ever proven by the last restore, and a restore a human did once
+by hand is a rumour with a timestamp. So the restore is a job too: every six
+hours it pulls one ledger back out of the backup, opens it, asks it for every
+fact it holds, and asks the live ledger the same question. Equal answers, or the
+run fails and the failure is a fact.
+
+The comparison is made at the *restored* ledger's transaction, never the live
+one's. A backup is always a prefix — a run copies and the live ledger goes on
+being written to — so the honest question is whether the copy answers at
+transaction *n* exactly what the original answers there. That is a snapshot, and
+an answer at a snapshot is the same answer forever, which is why this can be an
+equality rather than a tolerance. Byte counts are what `verify` compares, and a
+broken restore has plenty of those.
+
+One ledger per run, and the one picked is the one drilled longest ago, read out
+of the drill's own past facts — so a redeploy resumes the rotation and there is
+no state to reconcile. With *n* ledgers each is proven inside *n* cadences.
+Restoring everything every cadence would cost more than the backup it checks,
+every time, and a check nobody can afford is a check somebody turns off. Only the
+sampled ledger's segments cross the wire: the drill hands `Backup.restore/1` a
+narrowed view of the target rather than a second restore path of its own.
+
+It stages into a scratch directory, restores `only: :ledgers`, opens the copy
+under a name of its own, and removes both the directory and the name on the way
+out whether it proved anything or raised. Opening the copy under the live name
+would hand back the live ledger — `Ledger.open/2` does that by design — and the
+drill would compare it against itself and pass forever.
+
+    proven_at          when we last proved we could restore
+    drilled            which ledger this run gave back
+    proven_tx          the transaction it was proven to
+    compared_facts     how many facts had to agree
+    too_big            a ledger over the ceiling, skipped and named
+
+Four limits, stated rather than hidden. Only ledgers that are **open** are
+drilled, because comparing means asking the live one and a drill must never
+start a live ledger. A ledger over `DRILL_MAX_BYTES` is skipped and named rather
+than passed over. **Keys are not restored** — pointing the keyring at a restored
+key store would mean swapping a live global for the length of a drill, and both
+sides of the comparison reveal through the same keyring anyway. And a run with
+nothing to drill records zero rather than failing: `proven_at` simply stops
+advancing, which is the thing to watch.
 
 ## Deployment
 

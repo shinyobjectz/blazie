@@ -104,4 +104,52 @@ defmodule LazyRiver.NamesTest do
       assert Snapshot.name(Snapshot.reopen(decoded)) == name
     end
   end
+
+  describe "a read can never take the ledger down with it" do
+    # Found by measurement, not by a test: `Fact.matches?/2` used `Map.fetch!`,
+    # so a pattern naming a field a fact does not have raised inside the
+    # ledger's own process. The ledger died, and with a memory store every fact
+    # in it died too — a read destroying what a writer put there.
+    #
+    # `subject` is the example worth naming: it is a real attribute in
+    # `Erasure`, and it is not a field of a fact. The mistake is one letter
+    # from a legitimate query.
+    test "a pattern naming something that is not a field is refused", %{ledger: ledger} do
+      {:ok, _} = Ledger.append(ledger, [{"ada", "height", 180}])
+      tx = Ledger.tx(ledger)
+
+      assert_raise ArgumentError, ~r/is not one/, fn ->
+        Ledger.find_at(ledger, tx, subject: "person-x")
+      end
+
+      # Still alive, still holding everything.
+      assert Ledger.tx(ledger) == tx
+      assert [%{value: 180}] = Ledger.find_at(ledger, tx, attribute: "height")
+    end
+
+    test "and the refusal says what to write instead", %{ledger: ledger} do
+      error =
+        assert_raise ArgumentError, fn ->
+          Snapshot.find(Snapshot.open([ledger]), subject: "person-x")
+        end
+
+      assert error.message =~ "id, attribute, value, tx, by"
+      assert error.message =~ ~s(attribute: "subject")
+    end
+
+    test "a snapshot read is checked the same way", %{ledger: ledger} do
+      snapshot = Snapshot.open([ledger])
+
+      assert_raise ArgumentError, fn -> Snapshot.find(snapshot, nonsense: 1) end
+      assert Snapshot.find(snapshot, attribute: "height") == []
+    end
+
+    test "every field a fact really has is accepted", %{ledger: ledger} do
+      {:ok, tx} = Ledger.append(ledger, [{"ada", "height", 180}])
+
+      for pattern <- [[id: "ada"], [attribute: "height"], [value: 180], [tx: tx], [by: nil]] do
+        assert is_list(Ledger.find_at(ledger, tx, pattern)), "#{inspect(pattern)} was refused"
+      end
+    end
+  end
 end

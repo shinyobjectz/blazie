@@ -1,32 +1,52 @@
 # Write throughput of one ledger
 
-*Measured 2026-08-13 against `26b7d3b`. Every number here came out of
-`test/throughput_test.exs`; nothing in this file was typed by hand.*
+*Measured 2026-08-13. Every number here came out of `test/throughput_test.exs`;
+nothing in this file was typed by hand.*
 
-## What was asked and what the answer is
+## Read this first: two revisions
 
-A ledger is a GenServer, so every append to one ledger serialises through one
-process. Nobody had measured the ceiling. Here it is, in one line: **a single
-ledger sustains roughly 100,000 transactions per second while it is small, and
-that rate falls linearly with how many facts it is already holding — about
-3 µs of service time per thousand resident facts.** At 100k facts it is
-3,300 txn/s. At a million it is 360. Serialisation is not what limits it and
-the 5-second `GenServer.call` timeout is never reached; **what limits it is
-that the whole ledger is copied on every append**, and what eventually kills
-it is memory.
+The investigation started at **`26b7d3b`**. Halfway through it, a parallel
+stream landed `03a3302` ("a ledger stopped getting slower the longer it ran")
+and `75bdf3f`, which fixed the single biggest thing measured here. So every
+table below has two columns, and they are labelled:
 
-The three things worth knowing before reading the tables:
+| | |
+|---|---|
+| **before** | `26b7d3b` — every append copied the whole fact list |
+| **after** | `75bdf3f` — facts kept newest-first and prepended; checkpoints on geometric growth |
 
-1. **Concurrency is free and size is not.** 128 writers against a small ledger
-   cost nothing in throughput. One writer against a 1M-fact ledger costs 2.8 ms
-   per append. The queue is not the problem; the service time is.
-2. **`resident:` bounds the ledger's memory but not the store's**, because
-   `Store.File` keeps every fact it ever read in the same process. It saves
-   63% of the bytes, not the 99% the setting suggests — and it makes an indexed
-   read 800× slower.
-3. **Not one caller timed out anywhere in this suite**, at any writer count, at
-   any ledger size, with fsync on or off. A timeout would need ~16,700
-   concurrent writers on a 100k-fact ledger.
+The "before" numbers are kept because they are the mechanism, not history: they
+say what the ceiling of a serialised ledger is when the serialised work is
+O(history), and that shape will come back the next time something is added to
+the append path.
+
+## The answer
+
+**Before:** a single ledger sustained ~100,000 txn/s while small, falling
+linearly with what it already held — 3 µs of service time per thousand resident
+facts. 3,300 txn/s at 100k facts; 360 at a million.
+
+**After:** append is flat. **2–5 µs per transaction at every size from a
+thousand facts to two million**, a serial ceiling of 120,000–200,000 txn/s that
+does not move as the ledger grows, and about 1.0–1.3 M facts/s at a batch of
+100 or more.
+
+Three things are true of both revisions and are the durable findings:
+
+1. **Serialisation was never the problem.** 128 writers against one ledger cost
+   nothing in throughput — before *or* after. A GenServer mailbox is a queue and
+   it behaves like one: no convoy, no collapse, no starvation, and the p99/p50
+   ratio *improves* as writers pile up. What cost anything was the service time
+   inside the lock.
+2. **Nothing ever timed out.** Not once, at any writer count, ledger size, or
+   fsync setting, in seven full runs. Reaching the 5-second `GenServer.call`
+   default needed ~16,700 concurrent writers before the fix and ~1,000,000
+   after. An SLO breaks two orders of magnitude earlier than a timeout does.
+3. **Memory did not change and is now the binding constraint.** 241 bytes per
+   resident fact, flat, of which **87% is the three sort orders**. That is what
+   decides how big a ledger can get, and the fix did not touch it.
+
+---
 
 ## The machine
 
@@ -38,11 +58,17 @@ The three things worth knowing before reading the tables:
 | Erlang | OTP 29, erts-17.0.5, JIT |
 | Elixir | 1.20.3 |
 | Disk | internal APFS SSD; ledger files under `System.tmp_dir!()` |
-| Revision | `26b7d3b`, measured in a detached worktree so a concurrent edit to `lib/` could not move underneath the run |
 
-Times are microseconds unless labelled. Every row is a percentile over the
-measured appends, never a mean — a mean hides precisely the tail this was
-written to find. Each configuration discards a warmup round.
+Both revisions were measured in detached worktrees, so a concurrent edit to
+`lib/` could not move underneath a run. Times are microseconds unless labelled.
+Every row is a percentile over the measured appends, never a mean — a mean
+hides precisely the tail this was written to find. Each configuration discards
+a warmup round.
+
+Reported figures are from run 3 of 4 (before) and run 2 of 3 (after); where
+runs disagreed by more than noise it is said so in the text. One earlier "after"
+run was discarded outright: it was taken while another compile was running on
+the same box and every latency in it is inflated.
 
 ## Reproducing
 
@@ -51,162 +77,145 @@ written to find. Each configuration discards a warmup round.
 
 One section at a time:
 
-    mix test --include throughput test/throughput_test.exs:166   # batch size
+    mix test --include throughput test/throughput_test.exs:166   # batch size, fsync
     mix test --include throughput test/throughput_test.exs:282   # growth
     mix test --include throughput test/throughput_test.exs:370   # concurrency
     mix test --include throughput test/throughput_test.exs:479   # many ledgers
     mix test --include throughput test/throughput_test.exs:541   # read while writing
+    mix test --include throughput test/throughput_test.exs:617   # checkpoints, cliffs
     mix test --include throughput test/throughput_test.exs:730   # memory
 
 `:throughput` is excluded by default in `test/test_helper.exs`, alongside
-`:load`, `:crash` and `:object_storage`. The whole file takes about 75 seconds.
+`:load`, `:crash` and `:object_storage`. The whole file takes 27 s at `75bdf3f`
+and 75 s at `26b7d3b` — the difference is itself a result.
 
-To pin the revision the way this run did:
+To pin a revision the way these runs did:
 
-    git worktree add --detach /tmp/bench HEAD
+    git worktree add --detach /tmp/bench <rev>
     cp test/throughput_test.exs test/test_helper.exs /tmp/bench/test/
     cd /tmp/bench && mix test --include throughput test/throughput_test.exs
 
 ---
 
-## 1. Batch size, and what an fsync costs
+## 1. Batch size
 
 10,000 facts written to a fresh ledger every time, so each row walks the ledger
 through the same range of sizes and only the transaction count changes.
 
-| store | facts/txn | txns | txn/s | facts/s | p50 | p95 | p99 | max |
-|---|---|---|---|---|---|---|---|---|
-| memory | 1 | 10000 | 53,686 | 53,686 | 10 | 70 | 122 | 754 |
-| memory | 10 | 1000 | 33,471 | 334,706 | 17 | 106 | 188 | 280 |
-| memory | 100 | 100 | 10,279 | 1,027,855 | 65 | 229 | 266 | 266 |
-| memory | 1000 | 10 | 800 | 800,320 | 1199 | 2139 | 2139 | 2139 |
-| file, sync:false | 1 | 10000 | 15,866 | 15,866 | 31 | 161 | 630 | 8959 |
-| file, sync:false | 10 | 1000 | 19,535 | 195,347 | 39 | 127 | 176 | 540 |
-| file, sync:false | 100 | 100 | 6,770 | 677,002 | 128 | 301 | 565 | 565 |
-| file, sync:false | 1000 | 10 | 909 | 908,595 | 1094 | 1418 | 1418 | 1418 |
+| store | facts/txn | txn/s before | txn/s after | facts/s before | facts/s after | p50 before | p50 after |
+|---|---|---|---|---|---|---|---|
+| memory | 1 | 53,686 | **369,031** | 53,686 | 369,031 | 10 | 2 |
+| memory | 10 | 33,471 | **107,840** | 334,706 | 1,078,400 | 17 | 5 |
+| memory | 100 | 10,279 | 13,135 | 1,027,855 | 1,313,543 | 65 | 65 |
+| memory | 1000 | 800 | 1,230 | 800,320 | 1,229,710 | 1199 | 727 |
+| file | 1 | 15,866 | **191,172** | 15,866 | 191,172 | 31 | 4 |
+| file | 10 | 19,535 | **54,535** | 195,347 | 545,345 | 39 | 15 |
+| file | 100 | 6,770 | 9,436 | 677,002 | 943,574 | 128 | 91 |
+| file | 1000 | 909 | 1,010 | 908,595 | 1,009,999 | 1094 | 947 |
 
-Peak fact rate is about **1.0 M facts/s**, reached anywhere between a batch of
-100 and a batch of 1000. Batching past 100 buys little: the per-fact work
-(build the struct, seal it, three index updates) dominates, and only the fixed
-per-transaction cost — one file write, one term encode, one message round trip
-— is being amortised.
-The `file sync:false` batch-1 row is the noisiest cell in the whole suite
-(15.9k–39.9k txn/s across runs, max latency 0.4–9 ms) because 10,000 separate
-`:file.write/2` calls interact with page-cache flushing.
+Peak fact rate is **1.0–1.3 M facts/s**, reached at a batch of 100 and flat
+after that: the per-fact work (build the struct, seal it, three index updates)
+dominates, and only the fixed per-transaction cost is being amortised. The fix
+shows up almost entirely at batch 1, because that is the only column where the
+ledger grows enough *during* the measurement for the old code to be paying for
+it: 10,000 transactions to write 10,000 facts. The `file / 1` row is also the
+noisiest cell in the suite — 15.9k–39.9k txn/s across "before" runs, max latency
+0.4–9 ms — because 10,000 separate `:file.write/2` calls interact with
+page-cache flushing.
 
-### fsync
+`p99` at batch 1000 runs 1.3–2.7× the p50 in both revisions; large batches have
+a wide spread because a thousand-fact append is long enough to be interrupted.
+
+### What an fsync costs
 
 2,000 facts per configuration, because at batch 1 this is one fsync per fact
 and the fsync is the measurement rather than something to amortise.
 
-| store | facts/txn | txn/s | facts/s | p50 | p99 | max |
-|---|---|---|---|---|---|---|
-| file, sync:false | 1 | 77,140 | 77,140 | 10 | 56 | 169 |
-| file, sync:false | 10 | 39,635 | 396,354 | 17 | 99 | 129 |
-| file, sync:false | 100 | 8,850 | 884,956 | 103 | 168 | 168 |
-| file, sync:false | 1000 | 1,038 | 1,038,422 | 950 | 950 | 950 |
-| file, sync:true | 1 | 4,604 | 4,604 | 139 | 851 | 3261 |
-| file, sync:true | 10 | 5,437 | 54,370 | 162 | 382 | 431 |
-| file, sync:true | 100 | 2,855 | 285,510 | 341 | 455 | 455 |
-| file, sync:true | 1000 | 883 | 883,002 | 1149 | 1149 | 1149 |
-
-**The fsync cost, as a ratio:**
-
-| facts/txn | txn/s no sync | txn/s sync | ratio | p50 delta |
+| facts/txn | txn/s no sync | txn/s sync | **ratio** | p50 delta |
 |---|---|---|---|---|
+| **before** ||||
 | 1 | 77,140 | 4,604 | **16.8×** | +129 µs |
 | 10 | 39,635 | 5,437 | **7.3×** | +145 µs |
 | 100 | 8,850 | 2,855 | **3.1×** | +238 µs |
 | 1000 | 1,038 | 883 | **1.2×** | +199 µs |
+| **after** ||||
+| 1 | 201,207 | 5,436 | **37.0×** | +135 µs |
+| 10 | 60,846 | 5,335 | **11.4×** | +155 µs |
+| 100 | 10,173 | 2,383 | **4.3×** | +257 µs |
+| 1000 | 1,176 | 895 | **1.3×** | +228 µs |
 
-An fsync on this SSD is about **130–200 µs**, and it is a constant. That is the
-whole story: `sync: true` costs one fixed payment per *transaction*, so the
-ratio is entirely a function of how much you put in each one. At one fact per
-transaction it is a 17× tax; at a thousand it is 20%. Across runs the batch-1
-ratio ranged 16.8–27.3×, tracking how fast the unsynced baseline happened to be.
+**An fsync on this SSD is 130–260 µs and it is a constant.** That is the whole
+story: `sync: true` costs one fixed payment per *transaction*, so the ratio is
+entirely a function of how much you put in each one. The synced throughput
+column barely moved between revisions — at batch 1 it is 4,604 then 5,436,
+because the ledger was never the cost. Making appends 12× faster made the fsync
+ratio *worse* (16.8× → 37×) for exactly that reason.
 
-**The operational reading:** durability is nearly free if you batch, and
-brutal if you do not. A caller writing one fact at a time with `sync: true`
-gets 4,600 txn/s; the same caller batching a hundred gets 285,000 facts/s.
-Nothing else in this document has a 60× lever attached to a single caller-side
-decision.
+**The operational reading:** durability is nearly free if you batch and brutal
+if you do not. One fact at a time with `sync: true` gets 5,400 txn/s; the same
+caller batching a hundred gets 238,000 facts/s. Nothing else in this document
+has a 44× lever attached to a single caller-side decision.
 
 ---
 
-## 2. What it costs at size — the number that matters
+## 2. What it costs at size — the headline
 
-One single-fact append, measured at each size, so the figure is
+One single-fact append measured at each size, so the figure is
 per-transaction overhead rather than per-fact work. 300 measured appends after
 50 discarded.
 
-| store | resident facts | txn/s | p50 | p95 | p99 | max | µs per 1k resident |
-|---|---|---|---|---|---|---|---|
-| memory | 1,000 | 163,399 | 4 | 15 | 19 | 65 | 4.0 |
-| memory | 10,000 | 30,618 | 26 | 114 | 123 | 128 | 2.6 |
-| memory | 100,000 | 2,782 | 279 | 906 | 981 | 985 | 2.79 |
-| file, sync:false | 1,000 | 114,723 | 6 | 17 | 22 | 31 | 6.0 |
-| file, sync:false | 10,000 | 18,972 | 48 | 132 | 146 | 253 | 4.8 |
-| file, sync:false | 100,000 | 2,604 | 298 | 920 | 1019 | 1084 | 2.98 |
-| file, checkpoint:1000 | 1,000 | 95,541 | 7 | 21 | 39 | 89 | 7.0 |
-| file, checkpoint:1000 | 10,000 | 21,305 | 39 | 112 | 144 | 167 | 3.9 |
-| file, checkpoint:1000 | 100,000 | 1,948 | 301 | 1006 | 1242 | **27,911** | 3.01 |
-
-Extended out, single-writer, file store, no checkpoints:
-
-| resident facts | service time p50 | p99 | serial txn/s | process heap |
+| resident facts | p50 before | p50 after | serial txn/s before | serial txn/s after |
 |---|---|---|---|---|
-| 10,000 | 48 µs | 278 µs | 20,833 | 3.9 MB |
-| 50,000 | 159 µs | 641 µs | 6,289 | 15.8 MB |
-| 100,000 | 300 µs | 1.08 ms | 3,333 | 32.8 MB |
-| 250,000 | 586 µs | 6.94 ms | 1,706 | 68.0 MB |
-| 500,000 | 1.44 ms | 7.48 ms | 693 | 141.0 MB |
-| 1,000,000 | 2.78 ms | 26.9 ms | 360 | 350.9 MB |
-| 2,000,000 | 6.11 ms | 42.1 ms | 164 | 606.3 MB |
+| 10,000 | 48 µs | **4 µs** | 20,833 | 250,000 |
+| 50,000 | 159 µs | **5 µs** | 6,289 | 200,000 |
+| 100,000 | 300 µs | **5 µs** | 3,333 | 200,000 |
+| 250,000 | 586 µs | **5 µs** | 1,706 | 200,000 |
+| 500,000 | 1.44 ms | **6 µs** | 693 | 166,667 |
+| 1,000,000 | 2.78 ms | **5 µs** | 360 | 200,000 |
+| 2,000,000 | 6.11 ms | **12 µs** | 164 | 83,333 |
 
-**Appending one fact is O(facts already in the ledger), at a stable
-2.9–3.0 µs per thousand.** Both stores do it and the constant is the same,
-because it is the same line of code in both:
+**Before**, appending one fact was O(facts already in the ledger), at a stable
+2.9–3.0 µs per thousand, in both stores, because it was the same line of code
+in both:
 
-    # Store.Memory
-    def append(facts, new), do: {:ok, facts ++ new}
-    # Store.File
-    state = %{state | facts: state.facts ++ facts, ...}
+    def append(facts, new), do: {:ok, facts ++ new}     # Store.Memory
+    facts: state.facts ++ facts                          # Store.File
 
 `list ++ new` copies the entire left spine. At 100k resident that is 100,000
-cons cells rebuilt to add one, per append — 1.6 MB copied and immediately
-garbaged for a single fact. Filling a ledger to *n* facts one at a time is
-Θ(n²) work and Θ(n²) garbage. The `by_id` / `by_attribute` / `by_value` sort
-orders are not the cause: those are map updates, O(log n), and the prepend
-onto `state.facts` is O(batch).
+cons cells rebuilt to add one — 1.6 MB copied and immediately garbaged for a
+single fact. Filling a ledger to *n* facts one at a time was Θ(n²) work and
+Θ(n²) garbage, and the p99/p50 spread widened from 5.8× at 10k to 9.7× at 1 M
+as the collector worked through a heap made mostly of dead list spines.
 
-The p99/p50 spread widens from 5.8× at 10k to 9.7× at 1M — that is the
-garbage collector working through a heap made mostly of dead list spines. At
-2M facts, one append in a hundred takes 42 ms.
+**After**, facts are kept newest-first and prepended, so an append costs the
+batch. The line is flat to 2 M facts and the p99 stays within 3× of the p50
+everywhere except at 500k+ where a periodic collection shows through
+(p99 3.1–4.8 ms against a 5 µs median, once per few hundred appends).
 
-**The `checkpoint:1000` row is the one to look at twice**, because it is what
-production runs: `Ledger.default_store/0` sets `checkpoint_every: 1000`
-whenever `:ledger_dir` is configured. See §6.
+The three sort orders were never the cause: those are map updates, O(log n).
 
-### One hot entity
+### The one cost that still grows with history
 
 Sealing asks who owns a fact's entity and answers by scanning `by_id[id]` for a
 `"subject"` fact. Unique ids make that list one element long. An entity that
-accumulates history makes it as long as its history — and when there is no
-subject fact, the scan never short-circuits.
+accumulates history makes it as long as its history — and with no subject fact
+present, the scan never short-circuits.
 
-| shape | facts written | txn/s | p50 | p99 | max |
-|---|---|---|---|---|---|
-| unique ids | 1,000 | 244,978 | 3 | 13 | 36 |
-| unique ids | 10,000 | 58,082 | 9 | 108 | 1290 |
-| one id | 1,000 | 143,947 | 6 | 19 | 37 |
-| one id | 10,000 | 19,581 | **48** | 164 | 489 |
+| shape | facts written | p50 before | p50 after |
+|---|---|---|---|
+| unique ids | 1,000 | 3 µs | 2 µs |
+| unique ids | 10,000 | 9 µs | 2 µs |
+| one id | 1,000 | 6 µs | 6 µs |
+| one id | 10,000 | **48 µs** | **35 µs** |
 
-A ledger where every fact is about the same entity is **5× slower** at 10k
-facts than one where every fact is about a different entity, and the gap grows
-linearly. This is a second O(n) term hiding in `seal/2` — separate from the
-list copy, and it fires on the shape that a real workload most obviously has
-(one Creator, thousands of posts about them). At 100k facts on one entity,
-`owner_of/2` alone would be ~380 µs per fact.
+**A ledger where every fact is about the same entity is 17× slower at 10k facts
+than one where every fact is about a different entity, and the gap grows
+linearly.** This survived the fix untouched, and it is now the *only*
+per-append cost that grows with what the ledger already holds. It fires on the
+shape a real workload most obviously has — one Creator, thousands of posts
+about them. At 100k facts on one entity, `owner_of/2` alone extrapolates to
+~330 µs per fact, which puts a hot-entity ledger back where the whole ledger
+was before the fix.
 
 ---
 
@@ -215,52 +224,59 @@ list copy, and it fires on the shape that a real workload most obviously has
 The same 2,560 appends in every row, so the server does identical work and only
 the queue in front of it changes. `GenServer.call` at its 5-second default.
 
-| writers | resident before | txn/s | p50 | p95 | p99 | max | timeouts |
-|---|---|---|---|---|---|---|---|
-| 1 | 0 | 103,803 | 7 | 23 | 31 | 150 | **0** |
-| 2 | 0 | 116,253 | 14 | 37 | 45 | 161 | **0** |
-| 8 | 0 | 116,464 | 64 | 108 | 198 | 365 | **0** |
-| 32 | 0 | 93,118 | 317 | 592 | 708 | 907 | **0** |
-| 128 | 0 | 80,216 | 1,557 | 2,388 | 2,673 | 2,844 | **0** |
-| 1 | 100,000 | 2,576 | 300 | 956 | 1,037 | 1,360 | **0** |
-| 2 | 100,000 | 2,631 | 590 | 1,285 | 1,338 | 1,776 | **0** |
-| 8 | 100,000 | 2,554 | 3,006 | 3,859 | 5,499 | 7,364 | **0** |
-| 32 | 100,000 | 2,618 | 12,077 | 13,263 | 16,888 | 17,840 | **0** |
-| 128 | 100,000 | 2,618 | **48,751** | 50,464 | 50,943 | 51,495 | **0** |
+**Empty ledger:**
 
-**This degrades gracefully, and it does so almost perfectly.** Throughput is
-flat across a 128× change in writer count — 80–116k txn/s on an empty ledger,
-2,554–2,631 txn/s on a 100k-fact one. There is no collapse, no thrash, no
-convoy: a GenServer mailbox is a queue and it behaves like one. Latency is
-exactly `writers × service time`, and the p99/p50 ratio *falls* as writers
-climb (1.03 at 128 writers on a full ledger) because the queue becomes the
-whole cost and the queue is uniform.
+| writers | txn/s before | txn/s after | p50 before | p50 after | p99 after | timeouts |
+|---|---|---|---|---|---|---|
+| 1 | 103,803 | 98,903 | 7 | 6 | 40 | **0** |
+| 2 | 116,253 | 178,846 | 14 | 8 | 43 | **0** |
+| 8 | 116,464 | 183,407 | 64 | 37 | 190 | **0** |
+| 32 | 93,118 | 169,570 | 317 | 165 | 584 | **0** |
+| 128 | 80,216 | 132,539 | 1,557 | 859 | 1,690 | **0** |
 
-The 128-writer/empty-ledger row does lose ~30% of peak throughput — that is
-scheduler and mailbox overhead, and it is the only sign of stress anywhere in
-this table.
+**100,000 facts already resident:**
 
-### Where the 5-second timeout actually arrives
+| writers | txn/s before | txn/s after | p50 before | p50 after | p99 after | timeouts |
+|---|---|---|---|---|---|---|
+| 1 | 2,576 | **174,947** | 300 | 5 | 11 | **0** |
+| 2 | 2,631 | **113,169** | 590 | 9 | 40 | **0** |
+| 8 | 2,554 | **204,849** | 3,006 | 34 | 70 | **0** |
+| 32 | 2,618 | **163,161** | 12,077 | 171 | 1,083 | **0** |
+| 128 | 2,618 | **116,147** | 48,751 | 891 | 2,775 | **0** |
+
+**This degrades gracefully, and it did so even at its worst.** Throughput is
+flat across a 128× change in writer count in every configuration measured —
+2,554–2,631 txn/s before, 113k–205k after. There is no collapse, no thrash, no
+convoy. Latency is exactly `writers × service time`, and the p99/p50 ratio
+*falls* as writers climb (1.03 at 128 writers before the fix) because the queue
+becomes the whole cost and the queue is uniform.
+
+The 128-writer rows lose ~25% of peak throughput to scheduler and mailbox
+overhead. That is the only sign of stress anywhere in this table.
+
+The fix's effect is the second table read across: **a 100k-fact ledger under
+128 writers went from 48.8 ms per append to 891 µs, and from 2,618 txn/s to
+116,147.** A 44× throughput change with no change to the concurrency model at
+all.
+
+### Where the 5-second timeout arrives
 
 Latency at the back of the queue is queue depth × service time, so the pair
 that breaks is a curve, not a number.
 
-| resident facts | service time p50 | writers before a 5 s timeout | writers before a 100 ms p50 |
-|---|---|---|---|
-| 10,000 | 48 µs | 104,167 | 2,083 |
-| 50,000 | 159 µs | 31,447 | 629 |
-| 100,000 | 300 µs | 16,667 | 333 |
-| 250,000 | 586 µs | 8,532 | 171 |
-| 500,000 | 1.44 ms | 3,463 | 69 |
-| 1,000,000 | 2.78 ms | 1,799 | 36 |
-| 2,000,000 | 6.11 ms | 818 | 16 |
+| resident facts | writers for a 5 s timeout, before | after | writers for a 100 ms p50, before | after |
+|---|---|---|---|---|
+| 10,000 | 104,167 | 1,250,000 | 2,083 | 25,000 |
+| 100,000 | 16,667 | 1,000,000 | 333 | 20,000 |
+| 500,000 | 3,463 | 833,333 | 69 | 16,667 |
+| 1,000,000 | 1,799 | 1,000,000 | 36 | 20,000 |
+| 2,000,000 | 818 | 416,667 | 16 | 8,333 |
 
-**The `GenServer.call` timeout is not a real limit.** Nothing timed out in any
-run of this suite. Reaching one requires 16,667 simultaneous writers on a
-100k-fact ledger, or 818 on a 2M-fact one — and a node with 818 processes all
-blocked on one ledger has a design problem that a timeout is not the symptom
-of. The right number to hold is the last column: **an SLO breaks two orders of
-magnitude before a timeout does.**
+**The `GenServer.call` timeout is not a real limit and never was.** Nothing
+timed out in any run. Even before the fix, reaching one required 16,667
+simultaneous writers on a 100k-fact ledger — and a node with 16,667 processes
+blocked on one ledger has a problem that a timeout is a symptom of rather than
+a cause. After the fix the number is a million, which is to say: not a limit.
 
 ---
 
@@ -268,26 +284,27 @@ magnitude before a timeout does.**
 
 1,000 appends of 10 facts to each ledger, all concurrently, memory store.
 
-| ledgers | facts | wall ms | facts/s total | facts/s per ledger | speedup |
-|---|---|---|---|---|---|
-| 1 | 10,000 | 38 | 262,992 | 262,992 | 1.0× |
-| 2 | 20,000 | 48 | 410,139 | 205,069 | 1.6× |
-| 4 | 40,000 | 85 | 467,333 | 116,833 | 1.8× |
-| 8 | 80,000 | 70 | 1,139,195 | 142,399 | 4.3× |
-| 16 | 160,000 | 90 | 1,777,699 | 111,106 | 6.8× |
-| 64 | 640,000 | 469 | 1,361,792 | 21,278 | 5.2× |
+| ledgers | facts/s total before | after | speedup before | after |
+|---|---|---|---|---|
+| 1 | 262,992 | 960,892 | 1.0× | 1.0× |
+| 2 | 410,139 | 1,165,433 | 1.6× | 1.2× |
+| 4 | 467,333 | 1,852,881 | 1.8× | 1.9× |
+| 8 | 1,139,195 | **3,972,984** | 4.3× | 4.1× |
+| 16 | 1,777,699 | **4,229,112** | 6.8× | 4.4× |
+| 64 | 1,361,792 | 3,367,358 | 5.2× | 3.5× |
 
-This is the noisiest table in the document; across three runs the 64-ledger
-speedup landed at 6.6×, 4.6× and 5.2×, and the mid rows swing by a factor of
-two. The shape is stable even so: **the design does scale horizontally by
-ledger, to roughly 5–7× on a 10-core box, saturating between 8 and 16 ledgers
-and gaining nothing after that.** Aggregate peak is about 1.8 M facts/s.
+This is the noisiest table in the document — the 64-ledger speedup landed at
+6.6×, 4.6× and 5.2× across three "before" runs and 4.2×, 3.5×, 3.6× across
+three "after" ones. The shape is stable even so: **the design does scale
+horizontally by ledger, saturating between 8 and 16 ledgers on a 10-core box
+and gaining nothing after that.** Aggregate peak went from 1.8 M facts/s to
+**4.2 M facts/s**.
 
-5–7× rather than 10× on 10 cores is the list-copy tax again — the appends are
-memory-bandwidth-bound and GC-bound, not CPU-bound, so more schedulers stop
-helping before they run out. The claim "one ledger is serial but ledgers are
-independent" holds; the claim "N ledgers give N× throughput" does not, past the
-core count.
+The *speedup ratio* got worse after the fix purely because the single-ledger
+baseline got 3.7× faster; absolute throughput more than doubled at every count.
+4× rather than 10× on 10 cores is memory-bandwidth and GC, not CPU. The claim
+"one ledger is serial but ledgers are independent" holds; the claim "N ledgers
+give N× throughput" does not, past the core count.
 
 ---
 
@@ -296,46 +313,47 @@ core count.
 20,000-fact ledger, file store. Writers hammer single-fact appends in a loop
 while a reader takes 200 timed `find_at/3` calls.
 
-| read | writers | read p50 | read p95 | read p99 | read max |
-|---|---|---|---|---|---|
-| by id (1 fact) | 0 | **2** | 3 | 5 | 8 |
-| by id (1 fact) | 1 | **73** | 204 | 225 | 283 |
-| ↳ the writers, meanwhile | 1 | 73 | 205 | 225 | 528 |
-| by id (1 fact) | 8 | **647** | 813 | 883 | 888 |
-| ↳ the writers, meanwhile | 8 | 647 | 816 | 871 | 980 |
-| by id (1 fact) | 32 | **3,134** | 4,182 | 7,271 | 17,199 |
-| ↳ the writers, meanwhile | 32 | 3,123 | 4,106 | 6,916 | 17,623 |
-| by attribute (all 20k) | 0 | 1,234 | 1,582 | 1,742 | 1,750 |
-| by attribute (all 20k) | 1 | 1,508 | 2,370 | 9,047 | 9,983 |
-| ↳ the writers, meanwhile | 1 | 1,247 | 1,816 | 4,917 | 9,543 |
-| by attribute (all 20k) | 8 | 2,130 | 3,018 | 4,747 | 5,978 |
-| ↳ the writers, meanwhile | 8 | 2,016 | 2,806 | 3,421 | 8,247 |
-| by attribute (all 20k) | 32 | 4,562 | 5,646 | 6,576 | 6,687 |
-| ↳ the writers, meanwhile | 32 | 4,427 | 5,403 | 6,107 | 6,976 |
+| read | writers | read p50 before | read p50 after | writers' own p50 after |
+|---|---|---|---|---|
+| by id (1 fact) | 0 | 2 | 2 | — |
+| by id (1 fact) | 1 | 73 | **6** | 6 |
+| by id (1 fact) | 8 | 647 | **47** | 49 |
+| by id (1 fact) | 32 | 3,134 | **170** | 171 |
+| by attribute (all 20k) | 0 | 1,234 | 1,262 | — |
+| by attribute (all 20k) | 1 | 1,508 | 1,297 | 5 |
+| by attribute (all 20k) | 8 | 2,130 | 1,324 | 44 |
+| by attribute (all 20k) | 32 | 4,562 | 1,571 | 1,433 |
 
-**Yes, `find_at/3` contends with writers, completely.** It is a
-`GenServer.call` on the same process, so a read does not contend for a lock —
-it takes a turn. An indexed read that costs 2 µs of server time takes **73 µs
-wall with one writer running and 3.1 ms with 32**, having done no more work.
-The reader is not slow; it is waiting.
+**Yes, `find_at/3` contends with writers, completely, in both revisions.** It is
+a `GenServer.call` on the same process, so a read does not contend for a lock —
+it takes a turn. An indexed read costing 2 µs of server time takes 170 µs wall
+with 32 writers running, having done no more work. The reader is not slow; it
+is waiting.
 
-Note how tightly the read and write rows track each other — 3,134 vs 3,123 at
-32 writers. There is exactly one queue, and everyone in it is equal. That is
-worth stating positively: there is no priority inversion, no starvation, and a
-reader cannot be starved by writers or vice versa.
+Note how tightly the read and write rows track each other — 170 vs 171 at 32
+writers. There is exactly one queue and everyone in it is equal: no priority
+inversion, no starvation, and a reader cannot be starved by writers or vice
+versa. That is worth stating positively.
 
-The corollary is the expensive direction. A wide read is server time nobody
-else can use:
+The expensive direction is unchanged, and relatively it got much worse:
 
-| facts in ledger | `find_at(attribute:)` p50 | p99 | appends it displaces |
-|---|---|---|---|
-| 10,000 | 651 µs | 974 µs | 16 |
-| 100,000 | 6,992 µs | 8,558 µs | 22 |
-| 500,000 | 34,501 µs | 41,514 µs | 28 |
+| facts in ledger | `find_at(attribute:)` p50 before | after | appends it displaces, before | after |
+|---|---|---|---|---|
+| 10,000 | 651 µs | 657 µs | 16 | **131** |
+| 100,000 | 6,992 µs | 7,149 µs | 22 | **1,430** |
+| 500,000 | 34,501 µs | 33–115 ms | 28 | **6,598** |
 
-**One whole-attribute read of a 500k-fact ledger stops every writer for 34 ms.**
-Reads and writes draw on one budget, and a dashboard that polls a wide query is
-a write outage on a schedule.
+**A whole-attribute read of a 500k-fact ledger still stops every writer for
+33 ms or more, and now that appends cost 5 µs it displaces 6,598 of them
+instead of 28.** Reads and writes draw on one budget; the fix made writes cheap
+and left reads exactly where they were, so wide reads went from 3% of the
+problem to essentially all of it. A dashboard that polls a wide query is a
+write outage on a schedule.
+
+The 500k figure is also newly unstable — 33 ms, 73 ms and 115 ms across three
+runs, against a rock-steady 34 ms before. The list is now built by prepending
+into a heap that is collected rarely, so how fast 500,000 cons cells traverse
+depends on where the last collection left them.
 
 ---
 
@@ -343,49 +361,61 @@ a write outage on a schedule.
 
 ### The checkpoint stalls the ledger for as long as it takes to write everything
 
-`Ledger.default_store/0` sets `checkpoint_every: 1000` whenever `:ledger_dir`
-is configured, which is every production deployment. A checkpoint serialises
-**every fact ever written** and writes it to a sidecar — inside `handle_call`,
-so the ledger is stopped for the duration and every queued writer waits.
+A checkpoint serialises **every fact ever written** to a sidecar, inside
+`handle_call`, so the ledger is stopped for the duration and every queued
+writer waits.
 
-| resident facts | p50 | p99 | max | stall vs p50 | checkpoint file | rewritten per txn |
-|---|---|---|---|---|---|---|
-| 10,000 | 43 µs | 144 µs | **3.96 ms** | 92× | 1.1 MB | 1.2 KB |
-| 100,000 | 322 µs | 1.21 ms | **30.5 ms** | 95× | 10.0 MB | 10.2 KB |
-| 500,000 | 1.48 ms | 6.30 ms | **113 ms** | 76× | 48.7 MB | 49.9 KB |
+| resident facts | p50 before | max before | p50 after | max after | sidecar size |
+|---|---|---|---|---|---|
+| 10,000 | 43 µs | **3.96 ms** | 7 µs | **3.09 ms** | 1.1 MB |
+| 100,000 | 322 µs | **30.5 ms** | 5 µs | **31.1 ms** | 10.0 MB |
+| 500,000 | 1.48 ms | **113 ms** | 5 µs | **302 ms** | 48.7 MB |
 
-The checkpoint file is the same size as the log it exists to avoid re-reading
-(~96 bytes per fact, both). So at 500k facts the deployment writes 48.7 MB
-every thousand transactions — **50 KB of write amplification per transaction**
-— to save time on a restart that may never happen. At 2M facts the stall
-extrapolates past 450 ms and the sidecar past 190 MB.
+The sidecar is the same size as the log it exists to avoid re-reading — ~96
+bytes per fact, both. `03a3302` changed *when* one is written: from a fixed
+count of transactions (`checkpoint_every: 1000`, which
+`Ledger.default_store/0` still sets for every production deployment) to a
+geometric rule — write one when the un-checkpointed tail reaches half of what
+is already checkpointed. Total checkpoint bytes went from O(n²) to O(n).
 
-This is the only place in the whole suite where the tail is more than 10× the
-median. It is also, unlike everything else here, purely a configuration
-default: `checkpoint_every: nil` removes it entirely at the cost of a slower
-open.
+The p99 column tells that story: **6,299 µs before, 22–48 µs after**, because
+checkpoints are now rare. Counted directly, with `checkpoint_every: 1000` set
+throughout:
+
+| workload | checkpoints written | old policy would have written |
+|---|---|---|
+| 16,000 single-fact appends from empty | **7** | 16 |
+| 4,000 single appends onto 100k facts loaded in 5,000-fact batches | **1** | 4 |
+| 4,000 single appends onto 100k facts loaded in 100-fact batches | **0** | 4 |
+
+But each individual stall is as bad or worse — 216–302 ms at 500k facts, up to
+60,000× the median append. It is the only tail in this document more than 10×
+its median, and it is now a rare enormous pause rather than a frequent large
+one, which is the better trade and still a real one. At 2 M facts the stall
+extrapolates past 1.2 s.
 
 ### Bounding memory unbounds reads
 
 `resident:` evicts old facts from the ledger's list and sort orders. What was
 evicted is then answered by `evicted/3`, which calls
 `state.module.replay(state.store)` and filters the result — and
-`Store.File.replay/1` hands back a list of every fact it ever loaded, with no
-index at all.
+`Store.File.replay/1` hands back every fact it ever loaded, with no index at
+all.
 
-| resident bound | facts | actually resident | `find_at(id:)` p50 | p99 | max |
-|---|---|---|---|---|---|
-| `:unbounded` | 100,000 | 100,001 | **2 µs** | 3 | 3 |
-| `1_000` | 100,000 | 5,001 | **1,622 µs** | 1,822 | 1,822 |
+| resident bound | facts | actually resident | `find_at(id:)` before | after |
+|---|---|---|---|---|
+| `:unbounded` | 100,000 | 100,001 | **2 µs** | **2 µs** |
+| `1_000` | 100,000 | 5,001 | **1,622 µs** | **2,074 µs** |
 
-**Bounding a ledger to 1% of its facts makes its most selective read 800×
-slower** — and since that read runs inside the same call queue as the writes,
-it costs the writers too. The setting that exists to make a large ledger
-affordable is the setting that makes reading one unaffordable.
+**Bounding a ledger to 1% of its facts makes its most selective read 1,000×
+slower**, and since that read runs in the same call queue as the writes, it
+costs the writers too. The setting that exists to make a large ledger
+affordable is the setting that makes reading one unaffordable. It got slightly
+worse after the fix, because `replay/1` now reverses the list on every call.
 
 ---
 
-## 7. Memory
+## 7. Memory — unchanged, and now the binding constraint
 
 Process heap is what the VM reserved, not what is live: it grows in steps and a
 collection does not return the slack. The live figure has to be taken *inside*
@@ -394,35 +424,38 @@ the ledger, because the five references to each fact (`facts`, `by_id`,
 `:sys.get_state/1` copies the state out, flattening exactly the sharing being
 counted.
 
-| facts | live in process | live B/fact | of which the 3 sort orders | process heap | heap/live | B/fact once copied out |
-|---|---|---|---|---|---|---|
-| 1,000 | 239,320 | **239.3** | 206,928 (86%) | 372,600 | 1.56 | 527.3 |
-| 10,000 | 2,409,176 | **240.9** | 2,088,784 (87%) | 6,665,432 | 2.77 | 528.9 |
-| 100,000 | 24,087,320 | **240.9** | 20,886,928 (87%) | 34,387,008 | 1.43 | 528.9 |
+| facts | live in process | live B/fact | of which the 3 sort orders | heap/live | B/fact once copied out |
+|---|---|---|---|---|---|
+| 1,000 | 239,920 | **239.9** | 207,504 (86%) | 1.55 | 527.9 |
+| 10,000 | 2,410,672 | **241.1** | 2,090,256 (87%) | 1.71 | 529.1 |
+| 100,000 | 24,068,592 | **240.7** | 20,868,176 (87%) | 0.99–1.43 | 528.7 |
+
+Identical to three significant figures before and after the fix; nothing in
+`03a3302` touched what a fact costs.
 
 **A resident fact costs 241 bytes, flat, and 87% of that is the three sort
 orders.** The two list spines holding it are 32 bytes exactly — two cons cells;
 the fact itself plus the price of being findable three ways is the other 209.
-Process heap runs 1.4–2.8× live depending on where the last collection landed —
-for capacity planning, **budget 500 B/fact of RSS**, not 241.
+Heap runs 1.0–2.8× live depending on where the last collection landed — for
+capacity planning, **budget 500 B/fact of RSS**, not 241.
 
 The last column is the one nobody plans for: the same state weighs **529
 bytes/fact** once copied out of the process, because five shared references
-become five facts. Every reply a ledger sends pays a version of that. This is
-why `find_at/3` filters server-side, and it is why `facts_at/2` on a large
-ledger is a bad idea independent of how long the server takes.
+become five facts. Every reply a ledger sends pays a version of that. It is why
+`find_at/3` filters server-side, and why `facts_at/2` on a large ledger is a bad
+idea independent of how long the server takes.
 
 ### What `resident:` actually saves
 
-| resident bound | facts written | ledger's list | store's list | live | live B/fact written | txn/s |
-|---|---|---|---|---|---|---|
-| `:unbounded` | 100,000 | 100,000 | 100,000 | 22.97 MB | 240.8 | 2,744 |
-| `10_000` | 100,000 | 13,300 | **100,000** | 10.31 MB | 108.1 | 2,202 |
-| `1_000` | 100,000 | 1,000 | **100,000** | 8.54 MB | 89.5 | 2,864 |
+| resident bound | facts written | ledger's list | store's list | live | live B/fact written |
+|---|---|---|---|---|---|
+| `:unbounded` | 100,000 | 100,000 | 100,000 | 22.97 MB | 240.8 |
+| `10_000` | 100,000 | 13,300 | **100,000** | 10.32 MB | 108.2 |
+| `1_000` | 100,000 | 1,000 | **100,000** | 8.54 MB | 89.5 |
 
-**`resident: 1_000` on a 100,000-fact ledger holds 100,000 facts.** It trims
-the ledger's own list and rebuilds the sort orders, which is 63% of the bytes —
-but `Store.File` never drops anything, so memory still grows linearly with
+**`resident: 1_000` on a 100,000-fact ledger holds 100,000 facts.** It trims the
+ledger's own list and rebuilds the sort orders — 63% of the bytes — but
+`Store.File` never drops anything, so memory still grows linearly with
 everything ever written, at 89.5 B/fact instead of 240.8. The floor is the
 store, and there is no setting for it.
 
@@ -430,85 +463,88 @@ store, and there is no setting for it.
 
 ## Where this breaks
 
-Stated plainly, in the order the failures actually arrive.
+Stated plainly, in the order the failures arrive. Everything here is `75bdf3f`
+unless it says otherwise.
 
 ### Facts per ledger
 
-**A single ledger stops working somewhere between 500,000 and 1,000,000
-facts, and the symptom is latency, not memory and not timeouts.**
+**A single ledger now stops working somewhere around 5–6 million facts, and the
+symptom is memory. Before the fix it was 500,000–1,000,000 and the symptom was
+latency.** The fix moved the ceiling by roughly an order of magnitude and
+changed which wall you hit.
 
-| facts/ledger | append p50 | serial ceiling | verdict |
-|---|---|---|---|
-| ≤ 10,000 | 48 µs | 21,000 txn/s | comfortable |
-| 100,000 | 300 µs | 3,300 txn/s | **the practical working limit** |
-| 250,000 | 586 µs | 1,700 txn/s | usable, tail already 6.9 ms |
-| 500,000 | 1.44 ms | 690 txn/s | degraded; a wide read stops writers for 34 ms |
-| 1,000,000 | 2.78 ms | 360 txn/s | **broken for a write-heavy ledger** |
-| 2,000,000 | 6.11 ms | 164 txn/s | one append in a hundred takes 42 ms |
-| ~5,000,000 | ~14.5 ms (extrapolated) | ~70 txn/s | unusable long before memory runs out |
+| facts/ledger | append p50 | serial ceiling | live | verdict |
+|---|---|---|---|---|
+| 10,000 | 4 µs | 250,000 txn/s | 2.4 MB | comfortable |
+| 100,000 | 5 µs | 200,000 txn/s | 24 MB | comfortable |
+| 500,000 | 6 µs | 167,000 txn/s | 120 MB | **wide reads now cost 33–115 ms** |
+| 1,000,000 | 5 µs | 200,000 txn/s | 241 MB | writes fine; a checkpoint stalls ~600 ms |
+| 2,000,000 | 12 µs | 83,000 txn/s | 482 MB | writes fine; everything else is not |
+| ~6,000,000 | ~15 µs | ~70,000 txn/s | ~1.4 GB | **the memory wall on a 4 GB box** |
 
-Below 100k facts the design is genuinely fast and nothing about the GenServer
-being serial is visible. Past ~500k the linear service time dominates
-everything else and the ledger becomes a fixed-cost bottleneck: adding writers,
-batching, or turning fsync off changes nothing, because the cost is a full list
-copy that happens once per transaction regardless.
+The write path no longer degrades. What degrades is everything that touches the
+whole ledger: a wide `find_at`, a checkpoint, a full GC of a multi-gigabyte
+heap, and `Ledger.resident/1`. Each of those runs inside the same call, so each
+is a stall for every writer.
 
-**On a 4 GB box.** At 500 B/fact of RSS (241 live × observed heap slack, and a
-copying major GC needs room to allocate the new heap alongside the old), 3 GB
-of usable space is about **6 million facts total across every ledger on the
-node**. But a *single* ledger holding 6 M facts has a 17 ms append and pauses
-for hundreds of milliseconds on every full sweep of its multi-gigabyte heap.
-**Memory
-is not the constraint that bites; latency is, by roughly an order of
-magnitude.** The 4 GB box will be visibly unusable at around 1 M facts per
-ledger and will not OOM until six times that.
+**On a 4 GB box.** At 500 B/fact of RSS (241 live, times observed heap slack,
+and a copying major GC needs room to allocate the new heap alongside the old),
+3 GB of usable space is about **6 million facts across every ledger on the
+node**. A single ledger holding 6 M still appends in ~15 µs — but it pauses for
+hundreds of milliseconds on every full sweep of its heap, its checkpoint sidecar
+is 570 MB and takes over a second to write, and one `find_at(attribute:)`
+against it stops the world for something on the order of half a second.
+
+**So: the practical per-ledger limit is ~1 M facts, set by the stalls, and the
+absolute limit is ~6 M, set by RAM.** Before the fix both numbers were
+500k–1 M and set by the append itself.
 
 ### Writers per ledger
 
 **There is no writer count at which this collapses, and no realistic writer
-count at which anyone times out.** Throughput is flat from 1 to 128 writers.
-What degrades is per-caller latency, linearly and predictably:
+count at which anyone times out.** Throughput is flat from 1 to 128 writers in
+every configuration measured, before and after. What degrades is per-caller
+latency, linearly and predictably:
 
 | ledger size | 8 writers | 32 writers | 128 writers | writers for a 5 s timeout |
 |---|---|---|---|---|
-| empty | 64 µs | 317 µs | 1.56 ms | — |
-| 100,000 facts | 3.0 ms | 12.1 ms | 48.8 ms | 16,667 |
-| 1,000,000 facts | 22 ms (calc.) | 89 ms | 356 ms | 1,799 |
-| 2,000,000 facts | 49 ms (calc.) | 196 ms | 782 ms | 818 |
+| empty | 37 µs | 165 µs | 859 µs | ~1,000,000 |
+| 100,000 facts | 34 µs | 171 µs | 891 µs | ~1,000,000 |
+| 2,000,000 facts | 96 µs (calc.) | 384 µs | 1.5 ms | ~417,000 |
 
 Pick the limit from an SLO, not from the timeout. **For a 100 ms p50 budget:
-2,083 writers at 10k facts, 333 at 100k, 36 at 1 M, 16 at 2 M.** Zero callers
-timed out anywhere in this suite, under any combination measured.
+about 20,000 writers per ledger at any size up to a million facts** — which is
+to say, more writers than a node will have processes. Zero callers timed out
+anywhere in this suite, in seven full runs.
 
-### The three sharpest edges
+The honest framing after the fix: **writers-per-ledger is no longer a limit
+worth tracking.** Facts-per-ledger is.
 
-1. **A checkpoint at 500k facts stops the ledger for 113 ms** and writes 48.7 MB.
-   This is on by default in production (`checkpoint_every: 1000` whenever
-   `:ledger_dir` is set) and is the only tail in this document worse than 10×
-   the median.
-2. **A wide read is a write outage.** `find_at(attribute: …)` on a 500k-fact
-   ledger occupies the process for 34 ms, during which no append can proceed.
-3. **A ledger whose facts are mostly about one entity is 5× slower at 10k
-   facts** and degrades linearly from there, because `seal/2` scans that
-   entity's whole history per fact.
+### The four sharpest edges that remain
 
-### The one-line cause
-
-    def append(facts, new), do: {:ok, facts ++ new}     # Store.Memory
-    facts: state.facts ++ facts                          # Store.File
-
-Every append copies the entire fact list. Filling a ledger to *n* facts is
-Θ(n²). Every ceiling in this document is downstream of those two lines; a store
-that appended in O(1) — a reversed list, a queue, a chunked vector — would move
-the facts-per-ledger limit by roughly the factor by which the ledger has grown.
+1. **A wide read is a write outage, and now it is the dominant cost.**
+   `find_at(attribute: …)` on a 500k-fact ledger occupies the process for
+   33–115 ms, during which no append can proceed — 6,598 appends' worth. Before
+   the fix it displaced 28. This is the single largest remaining item.
+2. **A checkpoint at 500k facts stops the ledger for 302 ms** and writes
+   48.7 MB. Rarer than it was (p99 fell from 6.3 ms to 24 µs) but individually
+   worse, and it extrapolates past 1.2 s at 2 M facts.
+3. **A ledger whose facts are mostly about one entity is 17× slower at 10k
+   facts** and degrades linearly, because `seal/2` scans that entity's whole
+   history per fact. This is now the *only* per-append cost that grows with
+   history, and it fires on the most obvious real-world shape.
+4. **`resident:` makes reads 1,000× slower and only saves 63% of the memory**,
+   because `Store.File` never forgets. The lever for the memory wall is the
+   lever that breaks reads.
 
 ---
 
 ## What turned up in `lib/` along the way
 
-Found while measuring. **Reported, not fixed**, per the terms of this work.
+Found while measuring. **Reported, not fixed**, per the terms of this work. All
+five were verified against `75bdf3f` and all five are still present there.
 
-### 1. A malformed read pattern kills the ledger and its facts — `ledger.ex:330`, `fact.ex:51`
+### 1. A malformed read pattern kills the ledger and its facts — `ledger.ex:330`, `fact.ex:83`
 
 `Fact.matches?/2` does `Map.fetch!(fact, key)`, so a pattern key that is not a
 `Fact` field raises `KeyError` — inside `handle_call`, which takes the
@@ -520,11 +556,13 @@ GenServer down.
        lib/lazy_river/fact.ex:51: LazyRiver.Fact."-matches?/2-fun-0-"/2
        lib/lazy_river/ledger.ex:330: LazyRiver.Ledger.handle_call/3
 
+*(trace taken at `26b7d3b`; at `75bdf3f` the same line is `fact.ex:83`.)*
+
 Verified: the ledger process is dead 50 ms later and, with `Store.Memory`,
 every fact is gone. **A read destroys a writer's data**, and the confusion that
 triggers it is an easy one — `"subject"` is a real attribute name in `Erasure`,
-just not a field of `Fact`. This also contradicts the house rule that errors
-are data with the repair attached: the boundary rejects by crashing.
+just not a field of `Fact`. It also contradicts the house rule that errors are
+data with the repair attached: this boundary rejects by crashing.
 
 ### 2. `check:` does not run on the serialised path — `ledger.ex:203-215`
 
@@ -545,23 +583,21 @@ mechanical — send the function with the append and apply it in `handle_call` �
 and the current placement means the one guarantee the docstring is selling does
 not exist.
 
-### 3. `Store.File` is a memory store that also writes to disk — `store.ex:127-145`
+### 3. `Store.File` is a memory store that also writes to disk — `store.ex:150-175`
 
-`append/2` keeps `state.facts ++ facts` and `replay/1` returns the whole list.
-The file is written but never read again after open. Consequences, all measured
-above: `resident:` saves 63% rather than 99% (§7); a bounded ledger's indexed
-read costs 1.6 ms instead of 2 µs because `evicted/3` re-scans everything (§6);
-and the moduledoc's *"it only saves anything when the facts are durable
-somewhere else"* is only two-thirds true — durability is not the missing piece,
-a store that can forget is.
+`append/2` keeps every fact in `state.facts` and `replay/1` returns the whole
+list. The file is written but never read again after open. Consequences, all
+measured above: `resident:` saves 63% rather than 99% (§7); a bounded ledger's
+indexed read costs 2.1 ms instead of 2 µs because `evicted/3` re-scans
+everything (§6); and the moduledoc's *"it only saves anything when the facts are
+durable somewhere else"* is two-thirds true — durability is not the missing
+piece, a store that can forget is.
 
-### 4. `Θ(n²)` fills — `store.ex:45` and `store.ex:136`
+This is the direct cause of the memory wall in "Where this breaks", and it is
+the one remaining structural item of the same class as the `++` that
+`03a3302` fixed.
 
-Both stores append with `++`. See "The one-line cause" above. Flagging it
-separately because it is the single highest-leverage change available and it is
-confined to two lines behind an interface designed to hide exactly this.
-
-### 5. A checkpoint newer than its log crashes `open/2` — `store.ex:208`
+### 4. A checkpoint newer than its log crashes `open/2` — `store.ex:269`
 
     binary |> binary_part(offset, byte_size(binary) - offset)
 
@@ -574,18 +610,21 @@ ledger cannot start. Verified by truncating a log with a live sidecar:
        lib/lazy_river/store.ex:208: LazyRiver.Store.File.read_from/2
        lib/lazy_river/store.ex:101: LazyRiver.Store.File.open/2
 
-`read_checkpoint/1` carefully falls back when the sidecar is missing or
-corrupt, but this failure happens after it returns, so the fallback never
-fires. A `min(offset, byte_size(binary))` would degrade it to the intended
-"read from the start, just slower".
+*(trace taken at `26b7d3b`; at `75bdf3f` the same line is `store.ex:269`.)*
 
-### 6. Smaller things
+`read_checkpoint/1` carefully falls back when the sidecar is missing or corrupt,
+but this failure happens after it returns, so the fallback never fires. A
+`min(offset, byte_size(binary))` would degrade it to the intended "read from the
+start, just slower".
+
+### 5. Smaller things
 
 - `Ledger.resident/1` is `length(state.facts)` — an O(n) public read that runs
-  inside the ledger. At 2 M facts it stalls every writer for the length of a
-  list walk.
-- `maybe_checkpoint/1` computes `at` with `Enum.map(facts, & &1.tx) |> Enum.max()`
-  over every fact, on top of the `term_to_binary` of every fact. The list is
-  already ordered; `List.last/1` would do.
+  inside the ledger (`ledger.ex:314`). At 2 M facts it stalls every writer for
+  the length of a list walk, and it is called by the load suite.
 - `evicted/3` ignores the pattern's index entirely and full-scans. The moduledoc
   calls this "honest rather than good", which it is — the number is in §6.
+- `Store.File.replay/1` and `Store.Memory.replay/1` now reverse the whole list
+  on every call (`store.ex:51`, `store.ex:172`). Correct, and cheap next to what
+  the caller then does with it, but it makes `evicted/3` two passes instead of
+  one and it is called per read on every bounded ledger.

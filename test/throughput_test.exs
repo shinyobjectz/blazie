@@ -626,13 +626,12 @@ defmodule LazyRiver.ThroughputTest do
         "max us",
         "stall vs p50",
         "checkpoint KB",
-        "KB rewritten per txn"
+        "written in 2100 txns"
       ])
 
       {_name, ledger} = open_ledger(:file, sync: false, checkpoint_every: 1_000)
-      filled = 0
 
-      Enum.reduce([10_000, 100_000, 500_000], filled, fn size, filled ->
+      Enum.reduce([10_000, 100_000, 500_000], {0, 0}, fn size, {filled, before} ->
         fill(ledger, size - filled, 5_000)
 
         # Enough single-fact appends to cross the checkpoint threshold twice.
@@ -644,7 +643,17 @@ defmodule LazyRiver.ThroughputTest do
 
         s = stats(latencies)
         path = inside(pid_of(ledger), & &1.store.path)
-        checkpoint = File.stat!(path <> ".checkpoint").size
+
+        checkpoint =
+          case File.stat(path <> ".checkpoint") do
+            {:ok, %{size: bytes}} -> bytes
+            {:error, :enoent} -> 0
+          end
+
+        # How often one is written is the policy under test, so it is counted
+        # rather than assumed from `checkpoint_every`. The counter is
+        # cumulative; only what this round added is interesting.
+        written = Map.get(Ledger.store_stats(ledger), :checkpoints_written, 0)
 
         row([
           size,
@@ -653,10 +662,10 @@ defmodule LazyRiver.ThroughputTest do
           s.max,
           "#{round(s.max / max(s.p50, 1))}x",
           div(checkpoint, 1024),
-          Float.round(checkpoint / 1_000 / 1024, 1)
+          written - before
         ])
 
-        size + 2_100
+        {size + 2_100, written}
       end)
     end
 

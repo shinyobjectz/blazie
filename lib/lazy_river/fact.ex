@@ -80,6 +80,39 @@ defmodule LazyRiver.Fact do
   """
   @spec matches?(t(), keyword()) :: boolean()
   def matches?(%__MODULE__{} = fact, pattern) do
-    Enum.all?(pattern, fn {key, want} -> Map.fetch!(fact, key) == want end)
+    # `Map.get` with a sentinel rather than `Map.fetch!`. This runs inside the
+    # ledger, so raising here kills the ledger — and with a memory store that
+    # loses every fact in it. A read must never be able to destroy what a
+    # writer put there. A pattern naming a field that does not exist simply
+    # matches nothing; it is refused where a pattern arrives, by `fields/1`,
+    # which runs in the caller.
+    Enum.all?(pattern, fn {key, want} -> Map.get(fact, key, :__no_such_field__) == want end)
+  end
+
+  @doc "The fields a pattern may name."
+  @spec fields() :: [atom()]
+  def fields, do: [:id, :attribute, :value, :tx, :by]
+
+  @doc """
+  Check a pattern names only fields a fact has, and say so if not.
+
+  Called before a read crosses into the ledger, so a typo raises in the process
+  that made it rather than in the one holding everybody's facts. `subject` is
+  the example worth naming: it is a real attribute, and it is not a field.
+  """
+  @spec fields!(keyword()) :: :ok
+  def fields!(pattern) do
+    case Enum.reject(Keyword.keys(pattern), &(&1 in fields())) do
+      [] ->
+        :ok
+
+      unknown ->
+        raise ArgumentError,
+              "A pattern names the fields of a fact — #{Enum.join(fields(), ", ")}. " <>
+                "#{Enum.map_join(unknown, ", ", &inspect/1)} " <>
+                "#{if length(unknown) == 1, do: "is not one", else: "are not"}. " <>
+                "To match on what an attribute says, name the attribute and the value: " <>
+                "`[attribute: \"subject\", value: ...]`."
+    end
   end
 end

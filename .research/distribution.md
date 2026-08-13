@@ -62,7 +62,8 @@ wrong are silent.
 ## 1. Where the tree actually stands
 
 Eight findings. The first was measured on this machine today; the rest are read
-off the code. They matter because most of them mean the current position is not
+off the working tree as of 2026-08-13 — which is moving, so §1.8 records one
+finding that was fixed while this was being written. They matter because most of them mean the current position is not
 "one node, ready for a second" but "one node, and a second node would be a
 second database sharing a name registry".
 
@@ -895,11 +896,13 @@ is a second node.
 **Do not build consensus. Do not build replication. Put the guarantee in the log,
 not in the registry — and build the store before the cluster.** In this order:
 
-**0 — Fix the name.** C1 (refuse a `tx` above the ledger's current, with a
-repair rather than a clamp) and C2 (`Controller.named/2`). Add the session floor
-from §2.3. These are prerequisites: designing distribution on a name that is
-already wrong at one node is designing on sand. They are also worth doing
-whatever the answer to distribution turns out to be.
+**0 — Finish the name.** C2 landed while this was being written — a snapshot
+name is now keyed by ledger name rather than by a node-local registry reference,
+which is what makes it portable at all (§1.8). What remains is C1: refuse a `tx`
+above the ledger's current one, with a repair rather than a clamp. Add the
+session floor from §2.3 while you are there. These are prerequisites: designing
+distribution on a name that is already wrong at one node is designing on sand,
+and both are worth doing whatever the answer to distribution turns out to be.
 
 **0b — Make `append` conditional.** Add an expected-head argument to `Store`'s
 `append/2` and refuse, with a repair, when it does not match. This is the

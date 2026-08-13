@@ -267,7 +267,12 @@ defmodule LazyRiver.Ledger do
   boundary — asking a large ledger a small question used to copy all of it.
   """
   @spec find_at(ref(), non_neg_integer(), keyword()) :: [Fact.t()]
-  def find_at(ledger, tx, pattern), do: GenServer.call(ledger, {:find_at, tx, pattern})
+  def find_at(ledger, tx, pattern) do
+    # Checked here, in the caller's process, because the ledger is where
+    # everybody's facts live and a read must never be able to take it down.
+    Fact.fields!(pattern)
+    GenServer.call(ledger, {:find_at, tx, pattern})
+  end
 
   @doc "Facts exactly as stored, sealed values and all."
   @spec raw_at(ref(), non_neg_integer()) :: [Fact.t()]
