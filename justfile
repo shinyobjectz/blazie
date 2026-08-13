@@ -55,3 +55,9 @@ web:
 # Build the console for a static host.
 web-build:
     cd web && pnpm build
+
+# Ship the console to Cloudflare Pages. The account id is explicit because
+# this wrangler login can see two accounts and picking the wrong one is silent.
+web-deploy: web-build
+    cd web && CLOUDFLARE_ACCOUNT_ID=6d4b74aeb10f455fbf88141901e7595d \
+      npx wrangler pages deploy out --project-name blazie --branch main --commit-dirty=true
