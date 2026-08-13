@@ -57,7 +57,7 @@ defmodule LazyRiver.Attribute do
   fact. `satisfies?/2` is the predicate that check would be built from.
   """
 
-  alias LazyRiver.Snapshot
+  alias LazyRiver.{Fact, Snapshot}
 
   @is "is"
   @answers "answers"
@@ -105,19 +105,20 @@ defmodule LazyRiver.Attribute do
 
   @doc "Every attribute defined in this snapshot."
   @spec known(Snapshot.t()) :: MapSet.t(String.t())
-  def known(%Snapshot{} = snapshot) do
+  def known(source) do
     # The root is always known. It defines itself, so a ledger that has never
     # been written to still has to accept the writes that seed it — otherwise
     # nothing could ever be defined anywhere.
-    snapshot
-    |> Snapshot.find(attribute: @is, value: "attribute")
+    source
+    |> facts_of()
+    |> find_in(attribute: @is, value: "attribute")
     |> MapSet.new(& &1.id)
     |> MapSet.union(MapSet.new(@root))
   end
 
   @doc "Is this attribute defined here?"
   @spec defined?(Snapshot.t(), String.t()) :: boolean()
-  def defined?(%Snapshot{} = snapshot, name), do: MapSet.member?(known(snapshot), name)
+  def defined?(source, name), do: MapSet.member?(known(source), name)
 
   @doc """
   Check assertions against a vocabulary, or against a whole snapshot.
@@ -132,16 +133,19 @@ defmodule LazyRiver.Attribute do
   rejects without saying how to comply produces loops, not compliance.
   """
   @spec check([tuple()], Snapshot.t() | MapSet.t(String.t())) :: :ok | {:error, [refusal()]}
-  def check(assertions, %Snapshot{} = snapshot) do
-    # The snapshot is read here, outside the ledger, and the append happens
-    # after — so a write landing in between is checked against a ledger one
-    # transaction stale. Serialising the whole check inside the writer would
-    # close that, at the cost of every scan running there; until a redeclaration
-    # race is measured rather than imagined, the cheaper reading stands.
-    with :ok <- check(assertions, known(snapshot)) do
+  def check(assertions, %Snapshot{} = snapshot),
+    do: check(assertions, Snapshot.facts(snapshot))
+
+  def check(assertions, facts) when is_list(facts) do
+    # Given facts rather than a snapshot, this is what the ledger runs inside
+    # itself, against the state the write is about to land on. Given a snapshot
+    # it is the same check one transaction earlier — correct for a caller that
+    # wants to know before it asks, and not a substitute for the one the ledger
+    # runs, because only that one is serialised with the append.
+    with :ok <- check(assertions, known(facts)) do
       assertions
-      |> redeclarations(snapshot)
-      |> Enum.flat_map(&contradicted(snapshot, &1))
+      |> redeclarations(facts)
+      |> Enum.flat_map(&contradicted(facts, &1))
       |> case do
         [] -> :ok
         refusals -> {:error, refusals}
@@ -182,14 +186,36 @@ defmodule LazyRiver.Attribute do
   engine — if an attribute can say it, the engine does not grow.
   """
   @spec cardinality(Snapshot.t(), String.t()) :: String.t()
-  def cardinality(%Snapshot{} = snapshot, name) do
-    Snapshot.value(snapshot, name, @cardinality) || "one"
+  def cardinality(source, name) do
+    value_in(facts_of(source), name, @cardinality) || "one"
   end
 
   @doc "The shape an attribute's answers take, defaulting to `:any`."
   @spec answers(Snapshot.t(), String.t()) :: String.t()
-  def answers(%Snapshot{} = snapshot, name) do
-    Snapshot.value(snapshot, name, @answers) || "any"
+  def answers(source, name) do
+    value_in(facts_of(source), name, @answers) || "any"
+  end
+
+  # ── reading a snapshot, or the facts themselves ────────────────────────────
+  #
+  # Everything above works on a list. A snapshot is materialised once on the way
+  # in, so the same check runs in the caller — which holds a snapshot — or
+  # inside the ledger, which holds its own facts and cannot ask itself for them
+  # without calling into the process it is already inside.
+
+  defp facts_of(%Snapshot{} = snapshot), do: Snapshot.facts(snapshot)
+  defp facts_of(facts) when is_list(facts), do: facts
+
+  defp find_in(facts, pattern), do: Enum.filter(facts, &Fact.matches?(&1, pattern))
+
+  defp value_in(facts, id, attribute) do
+    facts
+    |> find_in(id: id, attribute: attribute)
+    |> List.last()
+    |> case do
+      nil -> nil
+      fact -> fact.value
+    end
   end
 
   # ── redeclaring ────────────────────────────────────────────────────────────
@@ -264,9 +290,10 @@ defmodule LazyRiver.Attribute do
     |> Enum.map(fn {id, _values} -> id end)
   end
 
-  defp by_id(snapshot, name) do
-    snapshot
-    |> Snapshot.find(attribute: name)
+  defp by_id(source, name) do
+    source
+    |> facts_of()
+    |> find_in(attribute: name)
     |> Enum.group_by(& &1.id, & &1.value)
   end
 

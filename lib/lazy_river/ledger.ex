@@ -207,24 +207,39 @@ defmodule LazyRiver.Ledger do
   facts are visible at.
 
   Pass `check:` to refuse a write that would leave the vocabulary inconsistent.
-  The ledger applies the check without knowing what one is — it holds the one
-  serialized path every write goes through, and that is the only reason the
-  check belongs here.
+  The ledger holds the one serialized path every write goes through, which is
+  the only reason a check belongs here — but that is only true of a check it
+  actually runs:
 
+      # Serialized. Run inside the ledger, on the facts the write lands on.
+      Ledger.append(ledger, assertions, check: &Attribute.check/2)
+
+      # Advisory. Run in the caller, before the call, against whatever it had.
       Ledger.append(ledger, assertions, check: &Attribute.check(&1, known))
 
+  The arity is the difference and it is load-bearing. An arity-1 check runs in
+  the caller and cannot serialize anything: two writers both pass it, then both
+  append, and a uniqueness check admits both. An arity-2 check is handed the
+  ledger's own facts inside the one process that appends, so what it checked is
+  what it wrote. The arity-1 form is kept because a caller that wants to know
+  before it asks is a fair thing to want — it is not a constraint.
+
   A refusal is returned, never raised, and carries whatever the check said
-  would repair it.
+  would repair it. A check that raises is a refusal too: it runs where the
+  facts live, and nothing running there may take them down.
   """
   @spec append(ref(), [assertion()], keyword()) :: {:ok, pos_integer()} | {:error, term()}
   def append(ledger, assertions, opts \\ []) when is_list(assertions) do
     case Keyword.get(opts, :check) do
       nil -> GenServer.call(ledger, {:append, assertions})
-      check when is_function(check, 1) -> checked_append(ledger, assertions, check)
+      check when is_function(check, 2) -> GenServer.call(ledger, {:append, assertions, check})
+      check when is_function(check, 1) -> advisory_append(ledger, assertions, check)
     end
   end
 
-  defp checked_append(ledger, assertions, check) do
+  # Checked in the caller, then appended — so anything landing in between is
+  # not accounted for. Named for what it is.
+  defp advisory_append(ledger, assertions, check) do
     case check.(assertions) do
       :ok -> GenServer.call(ledger, {:append, assertions})
       {:error, refusals} -> {:error, refusals}
@@ -317,6 +332,17 @@ defmodule LazyRiver.Ledger do
   end
 
   @impl true
+  # The serialized check: run here, on the facts this write is about to land
+  # on, in the one process that appends. A check that raises becomes a refusal
+  # rather than a crash — this runs where everybody's facts live, and a write
+  # that cannot be judged must not be able to destroy the thing it was judging.
+  def handle_call({:append, assertions, check}, from, state) do
+    case run_check(check, assertions, Enum.reverse(state.facts)) do
+      :ok -> handle_call({:append, assertions}, from, state)
+      {:error, refusals} -> {:reply, {:error, refusals}, state}
+    end
+  end
+
   def handle_call({:append, assertions}, _from, state) do
     tx = state.tx + 1
     facts = Enum.map(assertions, &(&1 |> to_fact(tx) |> seal(state)))
@@ -497,6 +523,32 @@ defmodule LazyRiver.Ledger do
 
   # Tell whoever is watching. Only sends — a watcher that called back into this
   # ledger while it was still replying would deadlock, so it never does.
+  defp run_check(check, assertions, facts) do
+    check.(assertions, facts)
+  rescue
+    error ->
+      {:error,
+       [
+         %{
+           problem: :check_raised,
+           repair:
+             "The check on this write raised rather than deciding: " <>
+               "#{Exception.message(error)}. Nothing was written."
+         }
+       ]}
+  catch
+    kind, reason ->
+      {:error,
+       [
+         %{
+           problem: :check_raised,
+           repair:
+             "The check on this write #{kind} #{inspect(reason)} rather than deciding. " <>
+               "Nothing was written."
+         }
+       ]}
+  end
+
   defp announce(name, tx, facts) do
     Registry.dispatch(LazyRiver.Watchers, name, fn watchers ->
       for {pid, _ref} <- watchers, do: send(pid, {:appended, name, tx, facts})

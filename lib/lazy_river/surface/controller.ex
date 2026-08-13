@@ -47,11 +47,11 @@ defmodule LazyRiver.Surface.Controller do
   def write(conn, %{"ledger" => name, "facts" => sent}) when is_list(sent) do
     with {:ok, assertions} <- assertions(sent),
          {:ok, ledger} <- Ledger.open(name),
-         # The snapshot rather than the names in it: a caller can write a
-         # declaration like any other fact, so the boundary has to ask what a
-         # redeclaration would do to the facts already there.
-         snapshot = Snapshot.open([ledger]),
-         {:ok, tx} <- Ledger.append(ledger, assertions, check: &Attribute.check(&1, snapshot)) do
+         # Arity two, so the ledger runs it inside itself against the facts this
+         # write lands on. A caller can write a declaration like any other fact,
+         # so the boundary has to ask what a redeclaration would do to what is
+         # already there — and has to ask it where nothing can land in between.
+         {:ok, tx} <- Ledger.append(ledger, assertions, check: &Attribute.check/2) do
       json(conn, %{"name" => %{name => tx}})
     else
       {:error, [refusal | _]} -> refuse(conn, refusal)

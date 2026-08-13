@@ -49,7 +49,14 @@ defmodule LazyRiver.StoreTest do
     end
 
     test "a name that is any term still gets a file", ctx do
-      for name <- [{:tenant, 1}, "a string", %{tenant: 1}, ["nested", ["list"]]] do
+      # Unique per run, because a ledger name is global. Hard-coding `{:tenant, 1}`
+      # here raced the setup's own `{:tenant, unique_integer()}` — when the
+      # counter reached 1 the two tests shared one ledger, `Ledger.open/2`
+      # handed back the one already open, and the file appeared in the other
+      # test's directory. About one run in ten, and nothing to do with stores.
+      n = System.unique_integer([:positive])
+
+      for name <- [{:tenant, n}, "a string #{n}", %{tenant: n}, ["nested", ["list", n]]] do
         ledger = on_disk(name, ctx.dir)
         {:ok, _} = Ledger.append(ledger, [{1, "x", 1}])
         :ok = Ledger.close(name)
