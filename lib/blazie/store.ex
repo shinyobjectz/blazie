@@ -203,7 +203,13 @@ defmodule Blazie.Store.File do
   @doc "Where a world's facts are kept, for a name that may be any term."
   @spec filename(term()) :: String.t()
   def filename(name) do
-    name |> :erlang.term_to_binary() |> Base.url_encode64(padding: false) |> Kernel.<>(".world")
+    # `.ledger`, not `.world`. The word moved; this suffix is the name of a file
+    # that already exists on every deployed disk, so renaming it does not rename
+    # anything — it makes the node look past 791KB of facts at an empty
+    # directory and call itself healthy. The rename to `world` did exactly that
+    # for one restart, and nothing failed: the suite was green, the node came
+    # up, and the data was simply invisible. A filename is storage layout.
+    name |> :erlang.term_to_binary() |> Base.url_encode64(padding: false) |> Kernel.<>(".ledger")
   end
 
   defp scan(<<size::32, crc::32, payload::binary-size(size), rest::binary>>, acc) do

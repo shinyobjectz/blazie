@@ -71,6 +71,10 @@ defmodule Blazie.Backup do
   @ledgers_prefix "ledgers/"
   @keys_prefix "keys/"
 
+  @doc "Where segments live in the bucket. Pinned by a test: objects exist under it."
+  @spec ledgers_prefix() :: String.t()
+  def ledgers_prefix, do: @ledgers_prefix
+
   @type report :: %{
           ledgers: non_neg_integer(),
           copied_bytes: non_neg_integer(),
@@ -454,7 +458,10 @@ defmodule Blazie.Backup do
 
   defp ledger_files(dir) do
     case File.ls(dir) do
-      {:ok, entries} -> entries |> Enum.filter(&String.ends_with?(&1, ".world")) |> Enum.sort()
+      # `.ledger`: this reads the same files `Store.File.filename/1` writes, and
+      # a backup that scanned for a suffix nothing is written under would copy
+      # an empty list and report success.
+      {:ok, entries} -> entries |> Enum.filter(&String.ends_with?(&1, ".ledger")) |> Enum.sort()
       {:error, _} -> []
     end
   end
