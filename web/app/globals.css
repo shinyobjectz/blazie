@@ -15,10 +15,14 @@
      console is mostly grey rectangles, so an unnamed grey invented per
      component is how a surface ends up sitting a shade off an identical
      surface with no rule saying which is which. */
-  --muted: #0d0d0d; /* a surface: sidebar, card, popover, panel */
-  --raised: #1a1a1a; /* lifted off a surface: hover, selection, secondary */
+  --muted: #0d0d0d; /* a surface: card, popover, panel */
   --muted-foreground: #8a8a8a;
   --border: #1f1f1f;
+  /* A hover fill and a hairline are the same value on purpose. They were two
+     shades a hair apart, which is two ways to say one thing — and the palette
+     is small enough that a hovered row reads as lifted against black without
+     needing its own grey. */
+  --raised: var(--border);
 
   /* Straight off the flame, so the interface and the mark agree. */
   --flame: #f4442e;
@@ -46,10 +50,13 @@
   --ring: var(--flame);
   --radius: 0.5rem;
 
-  /* The sidebar sits a shade off the page so the two read as separate surfaces
-     without a border doing all the work. Its primary is the flame, because a
-     blue selection on an orange product is somebody else's default. */
-  --sidebar: var(--muted);
+  /* The sidebar is the page's own black, not a lighter panel laid on it. A
+     nav that is a grey slab reads as a second window; a nav that is the same
+     ground with items on it reads as part of the page — so there is no fill
+     difference to draw and no edge to draw between them. Its primary is the
+     flame, because a blue selection on an orange product is somebody else's
+     default. */
+  --sidebar: var(--background);
   --sidebar-foreground: #b4b4b4;
   --sidebar-primary: var(--flame);
   --sidebar-primary-foreground: #ffffff;

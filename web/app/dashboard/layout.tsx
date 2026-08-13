@@ -3,6 +3,10 @@
 import { RotateCw } from "lucide-react"
 
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
+import {
+  SidebarResizer,
+  useSidebarWidth,
+} from "@/components/dashboard/sidebar-resizer"
 import { SnapshotName } from "@/components/dashboard/snapshot-name"
 import { RefusalNote } from "@/components/ui/refusal-note"
 import { Separator } from "@/components/ui/separator"
@@ -28,6 +32,7 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   const { cluster, error, retry } = useHoldSnapshot()
+  const { width, setWidth, remember } = useSidebarWidth()
 
   if (error) {
     return (
@@ -53,8 +58,12 @@ export default function DashboardLayout({
 
   return (
     <ClusterHeld value={cluster}>
-      <SidebarProvider>
+      {/* `--sidebar-width` is the variable the sidebar and its spacer already
+          read, so driving it from the drag handle is the whole of the resize —
+          nothing else has to be told the width moved. */}
+      <SidebarProvider style={{ "--sidebar-width": `${width}px` } as React.CSSProperties}>
         <AppSidebar login={cluster.who.login} />
+        <SidebarResizer width={width} onWidth={setWidth} onSettled={remember} />
 
         <SidebarInset className="min-w-0">
           <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur">

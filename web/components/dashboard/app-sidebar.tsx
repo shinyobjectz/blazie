@@ -69,7 +69,11 @@ export function AppSidebar({ login }: { login: string | null }) {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="border-b border-sidebar-border">
+      {/* No rule under the mark either: it would stop dead at the sidebar's
+          edge and read as a broken line against the content header beside it,
+          which is exactly the sort of stray edge removing the right border was
+          meant to be rid of. */}
+      <SidebarHeader className="h-14 justify-center">
         <Link href="/" className="flex items-center px-2 py-1.5">
           <Wordmark size="sm" />
         </Link>
