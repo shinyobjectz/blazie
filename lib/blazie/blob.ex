@@ -108,6 +108,62 @@ defmodule Blazie.Blob do
        }}
 
   @doc """
+  Fetch the bytes this names, and refuse them if they are not what it claimed.
+
+  Reaching outside, so this belongs to a job — and the hash is checked on the
+  way back rather than trusted. A reference is content-addressed, so bytes that
+  do not hash to their key are not "the wrong version", they are somebody
+  else's bytes under this name, and running them would be running whatever the
+  bucket happened to hold.
+
+  That check is the difference between a sandbox running the image a job
+  declared and a sandbox running whatever answered.
+  """
+  @spec fetch(t(), module(), keyword()) :: {:ok, binary()} | {:error, refusal()}
+  def fetch(%__MODULE__{} = blob, target, opts) do
+    case target.get(opts, blob.key) do
+      {:ok, bytes} -> verify(blob, bytes)
+      {:error, :missing} -> {:error, missing(blob)}
+      {:error, why} -> {:error, %{problem: :unreachable, repair: inspect(why)}}
+    end
+  end
+
+  defp verify(%__MODULE__{} = blob, bytes) do
+    actual = describing(bytes)
+
+    cond do
+      actual.hash != blob.hash ->
+        {:error,
+         %{
+           problem: :not_those_bytes,
+           repair:
+             "#{blob.key} holds bytes hashing to #{actual.hash}, not #{blob.hash}. A blob is " <>
+               "content-addressed, so this is not a stale version — it is different content " <>
+               "under the same name."
+         }}
+
+      actual.bytes != blob.bytes ->
+        {:error,
+         %{
+           problem: :wrong_size,
+           repair: "#{blob.key} is #{actual.bytes} bytes, not #{blob.bytes}."
+         }}
+
+      true ->
+        {:ok, bytes}
+    end
+  end
+
+  defp missing(%__MODULE__{} = blob) do
+    %{
+      problem: :no_such_blob,
+      repair:
+        "Nothing is stored at #{blob.key}. The fact naming it is still true — it says what " <>
+          "the bytes were — but the object is gone."
+    }
+  end
+
+  @doc """
   Does the object this names still exist, and is it the size it claims?
 
   Reaching outside, so this belongs to a job. It is the audit a formula cannot

@@ -167,6 +167,19 @@ defmodule Blazie.Wire do
          repair: "An id travels as a number or a string. #{inspect(id)} is neither."
        }}
 
+  @doc """
+  Everything a snapshot says about one id, as json a guest can read.
+
+  What a sandboxed job is handed. Narrow on purpose: a guest gets the facts
+  about the thing it was asked about and nothing else, so what it may see is
+  decided by the host and is readable here rather than inferred from what it
+  managed to reach.
+  """
+  @spec facts_for(Blazie.Snapshot.t(), term()) :: [map()]
+  def facts_for(snapshot, id) do
+    snapshot |> Blazie.Snapshot.find(id: id) |> Enum.map(&fact/1)
+  end
+
   # ── values ─────────────────────────────────────────────────────────────────
 
   # `Symbol.numbers/1` rather than the field: values are a binary now, and json

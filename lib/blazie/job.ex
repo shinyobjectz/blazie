@@ -202,6 +202,73 @@ defmodule Blazie.Job do
     if is_function(work, 2), do: work.(snapshot, 1), else: work.(snapshot)
   end
 
+  @doc """
+  The work of a job whose body is an image rather than a function.
+
+  Returns a `work` function, so a sandboxed job IS a job — the runner, the
+  cadence, the read set and the failure facts are all the ones that already
+  exist, and only what happens inside changes.
+
+  The image is fetched and its hash checked before anything runs. A blob is
+  content-addressed, so bytes that do not hash to their key are not a stale
+  version, they are somebody else's bytes under this name.
+  """
+  @spec sandboxed(Snapshot.t(), term(), module(), keyword()) ::
+          (Snapshot.t() -> [assertion()])
+  def sandboxed(%Snapshot{} = declared, id, target, target_opts) do
+    fn snapshot ->
+      image = Snapshot.value(declared, id, "image")
+
+      unless match?(%Blazie.Blob{}, image) do
+        raise "#{inspect(id)} declares no image to run"
+      end
+
+      case Blazie.Blob.fetch(image, target, target_opts) do
+        {:error, refusal} ->
+          raise refusal.repair
+
+        {:ok, bytes} ->
+          run_image(bytes, snapshot, declared, id)
+      end
+    end
+  end
+
+  defp run_image(bytes, snapshot, declared, id) do
+    opts =
+      for field <- [:fuel, :memory_bytes],
+          value = Snapshot.value(declared, id, to_string(field)),
+          is_integer(value),
+          do: {field, value}
+
+    # A guest gets what the world says, not the world. It cannot hold a
+    # snapshot, cannot read past what it was handed, and cannot ask for more —
+    # so what it may see is decided out here, where it can be read.
+    input = %{"id" => id, "facts" => Blazie.Wire.facts_for(snapshot, id)}
+
+    case Blazie.Sandbox.run(bytes, input, opts) do
+      {:ok, answer, spent} ->
+        assertions(answer, id) ++ [{id, "fuel_spent", spent.fuel}]
+
+      {:error, refusal} ->
+        raise refusal.repair
+    end
+  end
+
+  # A guest returns a list of three-wide rows. It cannot claim provenance —
+  # `Job.run` stamps everything with the job's own id on the way in.
+  defp assertions(answer, id) when is_list(answer) do
+    Enum.map(answer, fn
+      [entity, field, value] -> {entity, field, value}
+      %{"id" => entity, "attribute" => field, "value" => value} -> {entity, field, value}
+      other -> raise "#{inspect(id)} returned #{inspect(other)}, not [id, field, value]"
+    end)
+  end
+
+  defp assertions(nil, _id), do: []
+
+  defp assertions(other, id),
+    do: raise("#{inspect(id)} returned #{inspect(other)}, not a list of [id, field, value]")
+
   defp reads(id, read_set) do
     read_set
     |> Enum.uniq()
