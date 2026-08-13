@@ -28,6 +28,15 @@ defmodule Blazie.Application do
     end
   end
 
+  # One runner per world named in `:agent_worlds`. Off by default and off in
+  # test: a runner that asks a model on a cadence is the one background process
+  # here that costs money, so it starts because somebody said to.
+  defp agents do
+    for world <- Application.get_env(:blazie, :agent_worlds, []) do
+      {Blazie.Agents, world: world, every: Application.get_env(:blazie, :agents_every, 30)}
+    end
+  end
+
   # Only when there is somewhere to put the bytes. A backup job with no target
   # is a crash loop at boot rather than a backup — and the failure a deployment
   # must never have is the one where it looks configured and copies nothing.
@@ -70,7 +79,7 @@ defmodule Blazie.Application do
         {Blazie.Formula.Engine, name: Blazie.Formula.Engine},
         {Phoenix.PubSub, name: Blazie.PubSub},
         Blazie.Surface.Endpoint
-      ] ++ vitals() ++ storage() ++ backup() ++ drill()
+      ] ++ vitals() ++ storage() ++ agents() ++ backup() ++ drill()
 
     # Three restarts in five seconds is too tight for a system where restarting
     # a component is a legitimate operation rather than only a symptom. Ten

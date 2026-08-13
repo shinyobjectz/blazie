@@ -107,6 +107,18 @@ defmodule Blazie.Job.Runner do
   def handle_info({:DOWN, ref, :process, _pid, _reason}, state),
     do: {:noreply, update_in(state.running, &Map.delete(&1, ref))}
 
+  # A job is generative when the field it produces says who to ask. Read from
+  # the world rather than held in the struct, because the declaration is the
+  # thing a caller edits and a copy in memory would go stale against it.
+  defp generative?(snapshot, id), do: Snapshot.value(snapshot, id, "asks") != nil
+
+  defp tries(snapshot, id) do
+    case Snapshot.value(snapshot, id, "tries_allowed") do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 3
+    end
+  end
+
   defp run_due(state, now) do
     snapshot = Snapshot.open([state.world])
     due = Job.due(snapshot, now)
@@ -123,7 +135,18 @@ defmodule Blazie.Job.Runner do
         task =
           Task.async(fn ->
             # A fresh snapshot per job: it may have been waiting behind another.
-            Job.run(job, world, Snapshot.open([world]), now)
+            at = Snapshot.open([world])
+
+            # A generative job is sampled rather than run: its answer has to
+            # satisfy the requirements on the field it produces, and a first
+            # attempt that does not is retried instead of written. `Job.run/4`
+            # would write whatever came back, which for a model is the one
+            # thing that must not happen.
+            if generative?(at, id) do
+              Job.Generative.sample(job, world, at, now, tries: tries(at, id))
+            else
+              Job.run(job, world, at, now)
+            end
           end)
 
         Map.put(acc, task.ref, id)
