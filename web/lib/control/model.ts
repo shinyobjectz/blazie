@@ -56,8 +56,10 @@ export type Host = {
 export type Shown = Omit<Held, "token">
 
 export function shown(cluster: Held): Shown {
-  const rest = { ...cluster } as Held & { token?: string }
-  delete rest.token
+  // Destructured out rather than deleted, so the type says the token is gone
+  // instead of a cast promising it. `void` marks it as dropped on purpose.
+  const { token, ...rest } = cluster
+  void token
   return rest
 }
 
