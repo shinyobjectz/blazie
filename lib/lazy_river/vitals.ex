@@ -26,6 +26,7 @@ defmodule LazyRiver.Vitals do
   alias LazyRiver.{Attribute, Job, Ledger, Subscription}
 
   @id "vitals"
+  @ledger "$vitals"
 
   @doc "The attributes a reading is written with."
   @spec seed() :: [{String.t(), String.t(), term()}]
@@ -35,6 +36,39 @@ defmodule LazyRiver.Vitals do
       Attribute.define("memory_bytes", answers: "integer", cardinality: "many") ++
       Attribute.define("processes", answers: "integer", cardinality: "many") ++
       Attribute.define("node", answers: "name", cardinality: "many")
+  end
+
+  @doc "The ledger readings are written to."
+  @spec ledger() :: String.t()
+  def ledger, do: @ledger
+
+  @doc """
+  Start the vitals job under a runner, seeding its ledger if it is new.
+
+  Built and never started is the same as not built, which the deployment kept
+  proving — so this is what the supervision tree runs rather than a module
+  somebody has to remember to wire.
+  """
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
+  def child_spec(opts) do
+    %{id: __MODULE__, start: {__MODULE__, :start_runner, [opts]}, type: :worker}
+  end
+
+  @doc false
+  def start_runner(opts) do
+    every = Keyword.get(opts, :every, 60)
+    {:ok, ledger} = Ledger.open(@ledger)
+
+    if Ledger.tx(ledger) == 0 do
+      Ledger.append(ledger, Attribute.seed() ++ Job.seed() ++ seed() ++ declare(every: every))
+    end
+
+    Job.Runner.start_link(
+      ledger: ledger,
+      jobs: [job()],
+      every: :timer.seconds(every),
+      name: __MODULE__.Runner
+    )
   end
 
   @doc "Declare vitals as a job, with how often to take a reading."

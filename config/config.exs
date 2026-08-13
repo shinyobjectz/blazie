@@ -18,3 +18,7 @@ config :logger, level: if(config_env() == :test, do: :warning, else: :info)
 # directory; in front of real users it must be a KMS, because a file can come
 # back from a restore and erasure has to be irreversible.
 config :lazy_river, key_dir: if(config_env() == :test, do: "tmp/test_keys", else: "priv/keys")
+
+# Vitals take a reading on this cadence. Unset means the job does not run at
+# all, which is right for tests and wrong for anything watching itself.
+config :lazy_river, vitals_every: if(config_env() == :test, do: 3600, else: 60)

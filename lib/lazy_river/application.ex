@@ -11,22 +11,32 @@ defmodule LazyRiver.Application do
 
   use Application
 
+  # Off in test, where a background job taking readings every minute is noise
+  # rather than observability.
+  defp vitals do
+    case Application.get_env(:lazy_river, :vitals_every) do
+      nil -> []
+      every -> [{LazyRiver.Vitals, every: every}]
+    end
+  end
+
   @impl true
   def start(_type, _args) do
-    children = [
-      {Registry, keys: :unique, name: LazyRiver.Registry},
-      # Who to tell when a ledger appends. Duplicate keys: many watchers per
-      # ledger. A plain Registry rather than Phoenix.PubSub keeps the core free
-      # of the surface's dependencies.
-      {Registry, keys: :duplicate, name: LazyRiver.Watchers},
-      {DynamicSupervisor, name: LazyRiver.LedgerSupervisor, strategy: :one_for_one},
-      {DynamicSupervisor, name: LazyRiver.SubscriptionSupervisor, strategy: :one_for_one},
-      # After the ledgers, because it reconciles against erasure tombstones
-      # when it opens and those live in one.
-      LazyRiver.Keyring,
-      {Phoenix.PubSub, name: LazyRiver.PubSub},
-      LazyRiver.Surface.Endpoint
-    ]
+    children =
+      [
+        {Registry, keys: :unique, name: LazyRiver.Registry},
+        # Who to tell when a ledger appends. Duplicate keys: many watchers per
+        # ledger. A plain Registry rather than Phoenix.PubSub keeps the core free
+        # of the surface's dependencies.
+        {Registry, keys: :duplicate, name: LazyRiver.Watchers},
+        {DynamicSupervisor, name: LazyRiver.LedgerSupervisor, strategy: :one_for_one},
+        {DynamicSupervisor, name: LazyRiver.SubscriptionSupervisor, strategy: :one_for_one},
+        # After the ledgers, because it reconciles against erasure tombstones
+        # when it opens and those live in one.
+        LazyRiver.Keyring,
+        {Phoenix.PubSub, name: LazyRiver.PubSub},
+        LazyRiver.Surface.Endpoint
+      ] ++ vitals()
 
     # Three restarts in five seconds is too tight for a system where restarting
     # a component is a legitimate operation rather than only a symptom. Ten

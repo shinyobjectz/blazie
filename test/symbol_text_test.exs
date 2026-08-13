@@ -18,7 +18,7 @@ defmodule LazyRiver.Symbol.TextTest do
   end
 
   defp formula do
-    Symbol.Text.formula("captions",
+    Symbol.Text.embedding("captions",
       over: "caption",
       into: "caption_symbol",
       space: "sketch_64",

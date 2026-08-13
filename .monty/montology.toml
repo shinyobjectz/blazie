@@ -11,9 +11,4 @@ design = "block"   # rogue values vs tokens — only fires when tokens exist
 # which word kinds a code declaration may NOT be named after
 enforced_kinds = ["core", "inner"]
 # symbols allowed to share a word's name (each entry is a recorded decision)
-allow = [
-  # Symbol.Text.formula/2 returns a %Formula{}. The name is the word being used
-  # correctly rather than drifting from it — the alternative would be a
-  # function that builds a formula and refuses to say so.
-  "LazyRiver.Symbol.Text.formula",
-]
+allow = []

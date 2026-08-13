@@ -24,7 +24,7 @@ defmodule LazyRiver.Symbol.Text do
   built from the imports the host hands in and which is handed none.
 
       formula =
-        Symbol.Text.formula(:caption_symbols,
+        Symbol.Text.embedding(:caption_symbols,
           over: "caption",
           into: "caption_symbol",
           space: "sketch_256",
@@ -57,6 +57,9 @@ defmodule LazyRiver.Symbol.Text do
   @doc """
   A formula turning every text answer under `over` into a symbol under `into`.
 
+  Named for what it does rather than what it returns — `formula` is a word, and
+  a function named after one had better be it.
+
   Options:
 
     * `:over`  — the attribute holding the text
@@ -64,8 +67,8 @@ defmodule LazyRiver.Symbol.Text do
     * `:space` — the space the symbol belongs to
     * `:embed` — text -> [float]; deterministic, or this is not a formula
   """
-  @spec formula(term(), keyword()) :: LazyRiver.Formula.t()
-  def formula(id, opts) do
+  @spec embedding(term(), keyword()) :: LazyRiver.Formula.t()
+  def embedding(id, opts) do
     over = Keyword.fetch!(opts, :over)
     into = Keyword.fetch!(opts, :into)
     space = Keyword.fetch!(opts, :space)
