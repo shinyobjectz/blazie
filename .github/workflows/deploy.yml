@@ -38,7 +38,7 @@ jobs:
           LEDGER_DIR: /tmp/ci-ledgers
           KEY_DIR: /tmp/ci-keys
         run: |
-          _build/prod/rel/lazy_river/bin/lazy_river daemon
+          _build/prod/rel/blazie/bin/blazie daemon
           for i in $(seq 1 60); do
             curl -sf -o /dev/null http://127.0.0.1:4321/open && break
             sleep 0.5
@@ -48,11 +48,11 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:4321/open \
             -H 'content-type: application/json' -d '{"ledgers":["x"]}')
           echo "unauthenticated /open -> $code"
-          _build/prod/rel/lazy_river/bin/lazy_river stop
+          _build/prod/rel/blazie/bin/blazie stop
           test "$code" = "401"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: lazy_river-release
-          path: _build/prod/rel/lazy_river
+          name: blazie-release
+          path: _build/prod/rel/blazie
           retention-days: 14

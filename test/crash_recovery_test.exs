@@ -1,4 +1,4 @@
-defmodule LazyRiver.CrashRecoveryTest do
+defmodule Blazie.CrashRecoveryTest do
   @moduledoc """
   A real operating-system process, killed with SIGKILL mid-write, restarted.
 
@@ -17,7 +17,7 @@ defmodule LazyRiver.CrashRecoveryTest do
   @moduletag timeout: 300_000
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "lazyriver_crash_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "blazie_crash_#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
     %{dir: dir}
@@ -27,11 +27,11 @@ defmodule LazyRiver.CrashRecoveryTest do
   defp writer_script(dir, receipts) do
     """
     dir = #{inspect(dir)}
-    {:ok, l} = LazyRiver.Ledger.open("crashy", store: {LazyRiver.Store.File, dir: dir, sync: true})
+    {:ok, l} = Blazie.Ledger.open("crashy", store: {Blazie.Store.File, dir: dir, sync: true})
     {:ok, io} = File.open(#{inspect(receipts)}, [:append])
 
     Enum.each(1..100_000, fn n ->
-      {:ok, tx} = LazyRiver.Ledger.append(l, [{n, "n", n}])
+      {:ok, tx} = Blazie.Ledger.append(l, [{n, "n", n}])
       # Written only after append returned, so anything here was committed.
       IO.write(io, "\#{tx}\\n")
       :file.sync(io)
@@ -95,9 +95,9 @@ defmodule LazyRiver.CrashRecoveryTest do
   end
 
   defp survivors(dir) do
-    {:ok, store} = LazyRiver.Store.File.open("crashy", dir: dir)
-    facts = LazyRiver.Store.File.replay(store)
-    LazyRiver.Store.File.close(store)
+    {:ok, store} = Blazie.Store.File.open("crashy", dir: dir)
+    facts = Blazie.Store.File.replay(store)
+    Blazie.Store.File.close(store)
     facts
   end
 
@@ -157,10 +157,10 @@ defmodule LazyRiver.CrashRecoveryTest do
 
       # And it is still a working ledger, not merely a readable file.
       {:ok, ledger} =
-        LazyRiver.Ledger.open("crashy-reopened", store: {LazyRiver.Store.File, dir: ctx.dir})
+        Blazie.Ledger.open("crashy-reopened", store: {Blazie.Store.File, dir: ctx.dir})
 
-      assert {:ok, _tx} = LazyRiver.Ledger.append(ledger, [{1, "n", 1}])
-      LazyRiver.Ledger.close("crashy-reopened")
+      assert {:ok, _tx} = Blazie.Ledger.append(ledger, [{1, "n", 1}])
+      Blazie.Ledger.close("crashy-reopened")
     end
   end
 end

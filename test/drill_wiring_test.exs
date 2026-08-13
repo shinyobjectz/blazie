@@ -1,4 +1,4 @@
-defmodule LazyRiver.DrillWiringTest do
+defmodule Blazie.DrillWiringTest do
   @moduledoc """
   That the drill is actually *started*, and configured from the environment.
 
@@ -12,7 +12,7 @@ defmodule LazyRiver.DrillWiringTest do
   """
   use ExUnit.Case, async: false
 
-  alias LazyRiver.{Attribute, Backup, Drill, Job, Ledger, Snapshot, Store}
+  alias Blazie.{Attribute, Backup, Drill, Job, Ledger, Snapshot, Store}
 
   setup do
     root = Path.join(System.tmp_dir!(), "lr_drill_wiring_#{System.unique_integer([:positive])}")
@@ -126,8 +126,8 @@ defmodule LazyRiver.DrillWiringTest do
     test "no target and no cadence means no drill, which is why test is quiet" do
       # Both conditions the tree checks, neither of them true here. This is the
       # running application's own answer, not a re-implementation of the guard.
-      assert Application.get_env(:lazy_river, :backup_target) == nil
-      assert Application.get_env(:lazy_river, :drill_every) == nil
+      assert Application.get_env(:blazie, :backup_target) == nil
+      assert Application.get_env(:blazie, :drill_every) == nil
       assert Process.whereis(Drill.Runner) == nil
     end
   end

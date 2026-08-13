@@ -14,7 +14,7 @@ if config_env() == :prod do
       is not in the repo on purpose.
       """
 
-  config :lazy_river, LazyRiver.Surface.Endpoint,
+  config :blazie, Blazie.Surface.Endpoint,
     server: true,
     secret_key_base: secret,
     http: [
@@ -24,7 +24,7 @@ if config_env() == :prod do
 
   # Where ledgers keep their facts. The store is the seam, so moving this to
   # object storage later is a different module rather than a different path.
-  config :lazy_river,
+  config :blazie,
     ledger_dir: System.get_env("LEDGER_DIR") || "/data/ledgers",
     ledger_sync: System.get_env("LEDGER_SYNC") == "true",
     # Keys must outlive a deployment. Defaulting this inside the release would
@@ -40,7 +40,7 @@ if config_env() == :prod do
   backup_target =
     cond do
       bucket = System.get_env("BACKUP_BUCKET") ->
-        {LazyRiver.Backup.Target.S3,
+        {Blazie.Backup.Target.S3,
          endpoint: System.fetch_env!("BACKUP_ENDPOINT"),
          bucket: bucket,
          region: System.get_env("BACKUP_REGION") || "auto",
@@ -49,13 +49,13 @@ if config_env() == :prod do
          prefix: System.get_env("BACKUP_PREFIX")}
 
       dir = System.get_env("BACKUP_DIR") ->
-        {LazyRiver.Backup.Target.Directory, root: dir}
+        {Blazie.Backup.Target.Directory, root: dir}
 
       true ->
         nil
     end
 
-  config :lazy_river,
+  config :blazie,
     backup_target: backup_target,
     backup_every: String.to_integer(System.get_env("BACKUP_EVERY") || "900")
 
@@ -70,7 +70,7 @@ if config_env() == :prod do
   # somewhere that can — never to LEDGER_DIR, which the drill refuses anyway.
   drill_every = String.to_integer(System.get_env("DRILL_EVERY") || "21600")
 
-  config :lazy_river,
+  config :blazie,
     drill_every: if(drill_every > 0, do: drill_every),
     drill_dir: System.get_env("DRILL_DIR"),
     drill_max_bytes: String.to_integer(System.get_env("DRILL_MAX_BYTES") || "536870912")

@@ -1,6 +1,6 @@
 ExUnit.start(exclude: [:gcp, :crash, :load, :object_storage, :throughput])
 
-defmodule LazyRiver.TestLedger do
+defmodule Blazie.TestLedger do
   @moduledoc """
   A ledger that closes itself when the test ends.
 
@@ -9,7 +9,7 @@ defmodule LazyRiver.TestLedger do
   to prevent.
   """
 
-  alias LazyRiver.Ledger
+  alias Blazie.Ledger
 
   def open do
     name = {:test, System.unique_integer([:positive])}

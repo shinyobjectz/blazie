@@ -1,17 +1,17 @@
-defmodule LazyRiver.KeyringSelectionTest do
+defmodule Blazie.KeyringSelectionTest do
   @moduledoc "Which keyring a deployment gets, and why."
   use ExUnit.Case, async: false
 
-  alias LazyRiver.Keyring
+  alias Blazie.Keyring
 
   setup do
-    was = Application.get_env(:lazy_river, :kms_key)
-    on_exit(fn -> Application.put_env(:lazy_river, :kms_key, was) end)
+    was = Application.get_env(:blazie, :kms_key)
+    on_exit(fn -> Application.put_env(:blazie, :kms_key, was) end)
     :ok
   end
 
   test "no KMS key configured means the local keyring" do
-    Application.delete_env(:lazy_river, :kms_key)
+    Application.delete_env(:blazie, :kms_key)
 
     assert {Keyring.Local, opts} = Keyring.configured()
     assert Keyword.has_key?(opts, :dir)
@@ -19,7 +19,7 @@ defmodule LazyRiver.KeyringSelectionTest do
 
   test "naming a KMS key selects the KMS keyring" do
     Application.put_env(
-      :lazy_river,
+      :blazie,
       :kms_key,
       "projects/p/locations/global/keyRings/r/cryptoKeys/k"
     )

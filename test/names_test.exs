@@ -1,4 +1,4 @@
-defmodule LazyRiver.NamesTest do
+defmodule Blazie.NamesTest do
   @moduledoc """
   A name is what a thing is called. An address is where it currently is.
 
@@ -21,7 +21,7 @@ defmodule LazyRiver.NamesTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Ledger, Snapshot, TestLedger}
+  alias Blazie.{Attribute, Ledger, Snapshot, TestLedger}
 
   setup do
     ledger = TestLedger.open()

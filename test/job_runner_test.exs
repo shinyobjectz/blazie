@@ -1,4 +1,4 @@
-defmodule LazyRiver.Job.RunnerTest do
+defmodule Blazie.Job.RunnerTest do
   @moduledoc """
   The thing that actually calls `Job.run/4`.
 
@@ -9,8 +9,8 @@ defmodule LazyRiver.Job.RunnerTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Job, Ledger, Snapshot, TestLedger}
-  alias LazyRiver.Job.Runner
+  alias Blazie.{Attribute, Job, Ledger, Snapshot, TestLedger}
+  alias Blazie.Job.Runner
 
   setup do
     ledger = TestLedger.open()

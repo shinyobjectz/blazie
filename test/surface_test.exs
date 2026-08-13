@@ -1,9 +1,9 @@
-defmodule LazyRiver.SurfaceTest do
+defmodule Blazie.SurfaceTest do
   @moduledoc """
   Doctrine 17, over the wire: four operations, a caller holds the name rather
   than the bytes, and write hands back the name its facts are in.
   """
-  use LazyRiver.ConnCase, async: true
+  use Blazie.ConnCase, async: true
 
   setup do
     ledger = open_ledger()
@@ -83,7 +83,7 @@ defmodule LazyRiver.SurfaceTest do
 
     test "defining it first is itself an ordinary write", %{conn: conn, ledger: ledger} do
       defining =
-        Enum.map(LazyRiver.Attribute.define("colour", answers: "name"), fn {id, att, ans} ->
+        Enum.map(Blazie.Attribute.define("colour", answers: "name"), fn {id, att, ans} ->
           %{"id" => id, "attribute" => att, "value" => ans}
         end)
 

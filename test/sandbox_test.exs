@@ -1,4 +1,4 @@
-defmodule LazyRiver.Formula.SandboxTest do
+defmodule Blazie.Formula.SandboxTest do
   @moduledoc """
   Doctrine 14, made a fence rather than a shape.
 
@@ -9,8 +9,8 @@ defmodule LazyRiver.Formula.SandboxTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Formula, Ledger, Snapshot, TestLedger}
-  alias LazyRiver.Formula.Sandbox
+  alias Blazie.{Attribute, Formula, Ledger, Snapshot, TestLedger}
+  alias Blazie.Formula.Sandbox
 
   @doubling """
   (module
@@ -70,7 +70,7 @@ defmodule LazyRiver.Formula.SandboxTest do
 
       assert reads == [[attribute: "height"]]
 
-      refute Formula.stale?(reads, [%LazyRiver.Fact{id: 9, attribute: "colour", value: 1, tx: 9}])
+      refute Formula.stale?(reads, [%Blazie.Fact{id: 9, attribute: "colour", value: 1, tx: 9}])
     end
   end
 

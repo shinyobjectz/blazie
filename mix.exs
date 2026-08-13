@@ -1,18 +1,18 @@
-defmodule LazyRiver.MixProject do
+defmodule Blazie.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :lazy_river,
+      app: :blazie,
       version: "0.1.0",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       releases: [
-        lazy_river: [
+        blazie: [
           include_executables_for: [:unix],
           # Everything the release needs to differ by comes from the
           # environment at boot, so one artefact runs anywhere.
-          applications: [lazy_river: :permanent]
+          applications: [blazie: :permanent]
         ]
       ],
       start_permanent: Mix.env() == :prod,
@@ -24,7 +24,7 @@ defmodule LazyRiver.MixProject do
   def application do
     [
       extra_applications: [:logger, :inets, :ssl],
-      mod: {LazyRiver.Application, []}
+      mod: {Blazie.Application, []}
     ]
   end
 

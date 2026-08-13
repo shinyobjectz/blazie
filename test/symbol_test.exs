@@ -1,12 +1,12 @@
-defmodule LazyRiver.SymbolTest do
+defmodule Blazie.SymbolTest do
   @moduledoc """
   The doctrine, executable — assert and represent share a row, and the two
   rulings recorded on `sym` are enforced rather than described.
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Fact, Formula, Ledger, Snapshot, Symbol}
-  alias LazyRiver.TestLedger
+  alias Blazie.{Attribute, Fact, Formula, Ledger, Snapshot, Symbol}
+  alias Blazie.TestLedger
 
   setup do
     ledger = TestLedger.open()

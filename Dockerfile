@@ -40,7 +40,7 @@ RUN apt-get update -y \
 RUN mkdir -p /data/ledgers /data/keys
 
 WORKDIR /app
-COPY --from=build /app/_build/prod/rel/lazy_river ./
+COPY --from=build /app/_build/prod/rel/blazie ./
 
 # latin1 breaks Elixir string handling; the release must run under UTF-8.
 ENV LANG=C.UTF-8 \
@@ -56,4 +56,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -sf -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:4000/open \
       -H 'content-type: application/json' -d '{"ledgers":["health"]}' | grep -q 401
 
-CMD ["/app/bin/lazy_river", "start"]
+CMD ["/app/bin/blazie", "start"]

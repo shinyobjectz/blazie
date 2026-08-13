@@ -1,7 +1,7 @@
 # Distribution
 
 *Design research, 2026-08-13. Nothing in this document is built.
-`LazyRiver.Cluster.distributed?/0` returns false, there is one node, and this
+`Blazie.Cluster.distributed?/0` returns false, there is one node, and this
 exists so that stays a decision somebody took rather than a task that keeps
 being postponed.*
 
@@ -50,7 +50,7 @@ failure list one at a time.
 There is one more thing to say before the detail, because it changes how §1
 should be read. **Today's position is not "one node, ready for a second."** A
 ledger owned by another node cannot be read, written or watched from here at all
-— `LazyRiver.Registry` is node-local and nothing routes. `watch` across nodes
+— `Blazie.Registry` is node-local and nothing routes. `watch` across nodes
 would join, receive nothing and never error. Erasure destroys a key on one
 machine. Two nodes running the backup job overwrite each other's keys in the
 bucket. A second node added today would not be a distributed database; it would
@@ -69,7 +69,7 @@ second database sharing a name registry".
 
 ### 1.1 `:global` prevents a fork only *within* a partition — measured
 
-`LazyRiver.Cluster`'s moduledoc says a claim exists so that "a claim somebody
+`Blazie.Cluster`'s moduledoc says a claim exists so that "a claim somebody
 else holds is refused with its repair, rather than quietly forking", and puts
 `:global`'s netsplit behaviour aside as "a weakness of *distribution*, which is
 not here yet". Both halves are true, and together they mean the failure the
@@ -210,7 +210,7 @@ not anticipate networks to fail in this way."
 
 ### 1.2 There is no routing, so a second node is a second database
 
-`Ledger.via/1` and `Ledger.local/1` address `LazyRiver.Registry`, a plain
+`Ledger.via/1` and `Ledger.local/1` address `Blazie.Registry`, a plain
 `Registry`, which is node-local. `Ledger.open/2` on node B for a ledger owned by
 node A returns `{:error, :owned_elsewhere}` and there is no other path that
 reaches it. `Snapshot.find/2` calls `Ledger.find_at/3` on a via-tuple pointing at
@@ -222,7 +222,7 @@ green-field.
 
 ### 1.3 `watch` is silently node-local
 
-`Ledger.announce/3` uses `Registry.dispatch(LazyRiver.Watchers, name, …)`. That
+`Ledger.announce/3` uses `Registry.dispatch(Blazie.Watchers, name, …)`. That
 registry is node-local, so an announcement never crosses a node. A subscription
 registered on another node would join successfully, receive nothing, and never
 error.
@@ -235,7 +235,7 @@ directly.
 
 ### 1.4 The keyring is per-node, so erasure is per-node
 
-`LazyRiver.Keyring` is a GenServer registered under a *local* `name: __MODULE__`.
+`Blazie.Keyring` is a GenServer registered under a *local* `name: __MODULE__`.
 `Keyring.Local` keeps KEKs in a file under `KEY_DIR` on that node's disk, and
 `Keyring.GCP` delegates `wrap`, `unwrap` and `destroy` to it — the KMS is touched
 once at boot to unwrap a master and never again. So the thing erasure destroys
@@ -330,7 +330,7 @@ together in the prose around it:
 1. **Stability** — the same name answers the same facts forever.
 2. **Atomicity** — the ledgers in a name were read at one common instant.
 
-Lazy River has (1). It has never had (2), and does not claim it anywhere in
+blazie has (1). It has never had (2), and does not claim it anywhere in
 doctrine. `Snapshot.open/1` is:
 
 ```elixir
@@ -378,7 +378,7 @@ machine. Datomic Cloud reaches the same place by a different route, using
 in storage, not a quorum.
 
 The conclusion to draw is not "Datomic did it so it is fine". It is narrower and
-stronger: **the shape Lazy River has chosen has a well-tested existence proof in
+stronger: **the shape blazie has chosen has a well-tested existence proof in
 which consensus appears nowhere in the write path, and the single writer is
 protected by a conditional write in the storage layer.** That is option B2 in
 §3, fifteen years early.
@@ -683,7 +683,7 @@ the side of the partition holding the ledger's owning node.
 | | Owner side | Other side | Correct behaviour |
 |---|---|---|---|
 | **`ask` at a name** | Answers normally. | Cannot answer. | Refuse, naming the unreachable ledger and its owner. **Never** a partial fact set — a partial answer at a name is cached forever. |
-| **`open`** | Returns a current name. | Cannot produce a name. | Refuse. Do not fall back to opening a fresh local ledger under that name — which is what `Ledger.open/2` does today when `:global` says nobody owns it, and under partition `:global` says exactly that (§1.1). This is the single most dangerous line of code in a distributed Lazy River. |
+| **`open`** | Returns a current name. | Cannot produce a name. | Refuse. Do not fall back to opening a fresh local ledger under that name — which is what `Ledger.open/2` does today when `:global` says nobody owns it, and under partition `:global` says exactly that (§1.1). This is the single most dangerous line of code in a distributed blazie. |
 | **`write`** | Appends normally. | Cannot append. | Refuse with a repair. Under B this holds only by good luck; under B2 the stale epoch makes it structural — the far side may *try*, and the store refuses it. |
 | **`watch`** | Keeps pushing. | Stops pushing. | Must **terminate the subscription with a reason** the client receives. A watch that goes quiet is indistinguishable from data that stopped changing (§1.3), and that is the failure shape this repo has already decided it will not ship. |
 | **Keyring** | Can destroy locally; cannot reach the other side's KEK store or its 15-minute DEK cache. | Cannot reconcile against `$erasures` if that ledger is on the far side; fails silently today (§1.5). | Erasure must be refused, not partially performed, when any node that could answer for the subject is unreachable — and the refusal must say which. A partial erasure that reports success is a compliance failure, not an availability one. |
@@ -878,7 +878,7 @@ Two conclusions fall out.
 
 **The store is the bottleneck, not the cluster.** Five of the seven rows above
 are gated on whether a ledger's bytes are reachable from more than one machine.
-`LazyRiver.Store` is already a three-function behaviour designed for exactly this
+`Blazie.Store` is already a three-function behaviour designed for exactly this
 — its moduledoc says "a file on disk and an LSM on object storage implement the
 same three functions, which is what keeps the storage decision a configuration
 line rather than a rewrite". Doing that work first makes the distribution work
@@ -911,7 +911,7 @@ what makes every later option safe rather than hopeful. Do it before anything
 else on this list, because it is the only item that is both cheap now and
 load-bearing later.
 
-**1 — Tell the truth about `:global`, today.** Change `LazyRiver.Cluster`'s
+**1 — Tell the truth about `:global`, today.** Change `Blazie.Cluster`'s
 moduledoc to say what §1.1 measures: `:global` is same-partition mutual
 exclusion, it does not prevent a fork under partition, and OTP's default
 mitigation is to disconnect reachable nodes. Add the netsplit test — the script

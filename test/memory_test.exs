@@ -1,4 +1,4 @@
-defmodule LazyRiver.MemoryTest do
+defmodule Blazie.MemoryTest do
   @moduledoc """
   A ledger holds its facts in RAM, which is fine until it is not.
 
@@ -8,10 +8,10 @@ defmodule LazyRiver.MemoryTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Ledger, Snapshot, Store}
+  alias Blazie.{Ledger, Snapshot, Store}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "lazyriver_mem_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "blazie_mem_#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(dir) end)
     %{dir: dir, name: {:bounded, System.unique_integer([:positive])}}
   end

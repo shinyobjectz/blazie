@@ -1,4 +1,4 @@
-defmodule LazyRiver.LuaTest do
+defmodule Blazie.LuaTest do
   @moduledoc """
   The host that runs tenant code, and the world it hands them.
 
@@ -15,7 +15,7 @@ defmodule LazyRiver.LuaTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.Lua
+  alias Blazie.Lua
 
   describe "the world a formula is handed" do
     test "has no way out" do

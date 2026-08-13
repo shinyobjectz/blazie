@@ -1,4 +1,4 @@
-defmodule LazyRiver.StorageEventsTest do
+defmodule Blazie.StorageEventsTest do
   @moduledoc """
   Doctrine 20: a storage event is not a fact.
 
@@ -21,7 +21,7 @@ defmodule LazyRiver.StorageEventsTest do
   """
   use ExUnit.Case, async: false
 
-  alias LazyRiver.{Attribute, Backup, Ledger, Store, Subscription}
+  alias Blazie.{Attribute, Backup, Ledger, Store, Subscription}
 
   setup do
     root = Path.join(System.tmp_dir!(), "lr_events_#{System.unique_integer([:positive])}")
@@ -56,7 +56,7 @@ defmodule LazyRiver.StorageEventsTest do
 
   defp drain(acc \\ 0) do
     receive do
-      {:lazy_river, _ref, _answer} -> drain(acc + 1)
+      {:blazie, _ref, _answer} -> drain(acc + 1)
     after
       150 -> acc
     end
@@ -123,10 +123,10 @@ defmodule LazyRiver.StorageEventsTest do
       # The structural argument, made checkable. If a storage module ever learns
       # the name of the registry, this fails before the behaviour does.
       below = [
-        "lib/lazy_river/store.ex",
-        "lib/lazy_river/backup.ex",
-        "lib/lazy_river/backup/target.ex",
-        "lib/lazy_river/backup/target/s3.ex"
+        "lib/blazie/store.ex",
+        "lib/blazie/backup.ex",
+        "lib/blazie/backup/target.ex",
+        "lib/blazie/backup/target/s3.ex"
       ]
 
       for path <- below do

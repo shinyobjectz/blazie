@@ -1,4 +1,4 @@
-defmodule LazyRiver.CompactionTest do
+defmodule Blazie.CompactionTest do
   @moduledoc """
   Replay was O(everything ever written).
 
@@ -12,10 +12,10 @@ defmodule LazyRiver.CompactionTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Ledger, Snapshot, Store}
+  alias Blazie.{Ledger, Snapshot, Store}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "lazyriver_compact_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "blazie_compact_#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(dir) end)
     %{dir: dir, name: {:compact, System.unique_integer([:positive])}}
   end

@@ -1,4 +1,4 @@
-defmodule LazyRiver.Surface.WatchChannelTest do
+defmodule Blazie.Surface.WatchChannelTest do
   @moduledoc """
   The fourth operation, over the wire.
 
@@ -9,9 +9,9 @@ defmodule LazyRiver.Surface.WatchChannelTest do
   use ExUnit.Case, async: true
   import Phoenix.ChannelTest
 
-  alias LazyRiver.{Attribute, Authority, Ledger, Snapshot}
+  alias Blazie.{Attribute, Authority, Ledger, Snapshot}
 
-  @endpoint LazyRiver.Surface.Endpoint
+  @endpoint Blazie.Surface.Endpoint
 
   setup do
     token = "watch-token-#{System.unique_integer([:positive])}"
@@ -24,14 +24,14 @@ defmodule LazyRiver.Surface.WatchChannelTest do
     {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
     {:ok, _} = Ledger.append(ledger, Attribute.define("colour"))
 
-    {:ok, socket} = connect(LazyRiver.Surface.Socket, %{"token" => token})
+    {:ok, socket} = connect(Blazie.Surface.Socket, %{"token" => token})
     %{socket: socket, ledger: ledger, name: name, token: token}
   end
 
   describe "connecting" do
     test "a socket needs a token" do
-      assert :error = connect(LazyRiver.Surface.Socket, %{})
-      assert :error = connect(LazyRiver.Surface.Socket, %{"token" => ""})
+      assert :error = connect(Blazie.Surface.Socket, %{})
+      assert :error = connect(Blazie.Surface.Socket, %{"token" => ""})
     end
   end
 
@@ -109,11 +109,14 @@ defmodule LazyRiver.Surface.WatchChannelTest do
     end
 
     test "each matching write pushes again", ctx do
+      # A push crosses three processes — ledger, subscription, channel — and
+      # `assert_push` waits 100ms by default, which is a coin flip when the
+      # whole suite is running. The timeout is not the property under test.
       {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
-      assert_push("answer", %{"facts" => first})
+      assert_push("answer", %{"facts" => first}, 2_000)
 
       {:ok, _} = Ledger.append(ctx.ledger, [{43, "height", 190}])
-      assert_push("answer", %{"facts" => second})
+      assert_push("answer", %{"facts" => second}, 2_000)
 
       assert length(first) == 1
       assert length(second) == 2
@@ -128,7 +131,7 @@ defmodule LazyRiver.Surface.WatchChannelTest do
           "pattern" => %{"attribute" => "height"}
         })
 
-      before = LazyRiver.Subscription.count()
+      before = Blazie.Subscription.count()
 
       # The channel is linked to this process, so closing it would take the
       # test with it.
@@ -137,12 +140,12 @@ defmodule LazyRiver.Surface.WatchChannelTest do
 
       # The subscription is owned by the channel, so it goes with it.
       Enum.reduce_while(1..100, nil, fn _, _ ->
-        if LazyRiver.Subscription.count() < before,
+        if Blazie.Subscription.count() < before,
           do: {:halt, :ok},
           else: {:cont, Process.sleep(10)}
       end)
 
-      assert LazyRiver.Subscription.count() < before
+      assert Blazie.Subscription.count() < before
     end
   end
 end

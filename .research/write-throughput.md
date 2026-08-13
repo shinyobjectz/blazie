@@ -552,9 +552,9 @@ GenServer down.
 
     Ledger.find_at(ledger, tx, subject: "someone")   # "subject" is an attribute, not a field
 
-    ** (KeyError) key :subject not found in: %LazyRiver.Fact{...}
-       lib/lazy_river/fact.ex:51: LazyRiver.Fact."-matches?/2-fun-0-"/2
-       lib/lazy_river/ledger.ex:330: LazyRiver.Ledger.handle_call/3
+    ** (KeyError) key :subject not found in: %Blazie.Fact{...}
+       lib/blazie/fact.ex:51: Blazie.Fact."-matches?/2-fun-0-"/2
+       lib/blazie/ledger.ex:330: Blazie.Ledger.handle_call/3
 
 *(trace taken at `26b7d3b`; at `75bdf3f` the same line is `fact.ex:83`.)*
 
@@ -607,8 +607,8 @@ restored from an older backup, or truncated — the length goes negative and
 ledger cannot start. Verified by truncating a log with a live sidecar:
 
     ** (ArgumentError) errors were found at the given arguments: ... -5250
-       lib/lazy_river/store.ex:208: LazyRiver.Store.File.read_from/2
-       lib/lazy_river/store.ex:101: LazyRiver.Store.File.open/2
+       lib/blazie/store.ex:208: Blazie.Store.File.read_from/2
+       lib/blazie/store.ex:101: Blazie.Store.File.open/2
 
 *(trace taken at `26b7d3b`; at `75bdf3f` the same line is `store.ex:269`.)*
 

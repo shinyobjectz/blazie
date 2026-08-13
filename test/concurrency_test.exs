@@ -1,4 +1,4 @@
-defmodule LazyRiver.ConcurrencyTest do
+defmodule Blazie.ConcurrencyTest do
   @moduledoc """
   What happens when many things happen at once.
 
@@ -8,7 +8,7 @@ defmodule LazyRiver.ConcurrencyTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Formula, Ledger, Snapshot, Subscription, TestLedger}
+  alias Blazie.{Attribute, Formula, Ledger, Snapshot, Subscription, TestLedger}
 
   setup do
     ledger = TestLedger.open()
@@ -117,7 +117,7 @@ defmodule LazyRiver.ConcurrencyTest do
             send(test_process, {:ready, n})
 
             receive do
-              {:lazy_river, ^ref, answer} ->
+              {:blazie, ^ref, answer} ->
                 send(test_process, {:answered, n, length(answer.facts)})
             after
               5_000 -> send(test_process, {:timeout, n})

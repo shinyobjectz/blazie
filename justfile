@@ -1,4 +1,4 @@
-# Lazy River. Homebrew installs erlang keg-only, so every recipe needs it on
+# blazie. Homebrew installs erlang keg-only, so every recipe needs it on
 # PATH — outside `just`, elixir fails with `exec: erl: not found`.
 export PATH := "/opt/homebrew/opt/erlang/bin:" + env_var('PATH')
 

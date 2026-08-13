@@ -1,4 +1,4 @@
-defmodule LazyRiver.LoadTest do
+defmodule Blazie.LoadTest do
   @moduledoc """
   What it costs at size, measured rather than assumed.
 
@@ -10,7 +10,7 @@ defmodule LazyRiver.LoadTest do
   """
   use ExUnit.Case, async: false
 
-  alias LazyRiver.{Attribute, Ledger, Snapshot, Subscription, TestLedger}
+  alias Blazie.{Attribute, Ledger, Snapshot, Subscription, TestLedger}
 
   @moduletag :load
   @moduletag timeout: 600_000
@@ -60,7 +60,7 @@ defmodule LazyRiver.LoadTest do
       name = {:load, System.unique_integer([:positive])}
 
       {:ok, ledger} =
-        Ledger.open(name, store: {LazyRiver.Store.File, dir: dir}, resident: 5_000)
+        Ledger.open(name, store: {Blazie.Store.File, dir: dir}, resident: 5_000)
 
       {:ok, _} = Ledger.append(ledger, Attribute.seed())
       fill(ledger, 100_000)

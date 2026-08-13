@@ -1,4 +1,4 @@
-defmodule LazyRiver.VitalsTest do
+defmodule Blazie.VitalsTest do
   @moduledoc """
   Observability is facts, which means it is a job.
 
@@ -10,7 +10,7 @@ defmodule LazyRiver.VitalsTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Job, Ledger, Snapshot, TestLedger, Vitals}
+  alias Blazie.{Attribute, Job, Ledger, Snapshot, TestLedger, Vitals}
 
   setup do
     ledger = TestLedger.open()

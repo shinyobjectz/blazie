@@ -1,4 +1,4 @@
-defmodule LazyRiver.ClusterTest do
+defmodule Blazie.ClusterTest do
   @moduledoc """
   One ledger, one owner.
 
@@ -14,7 +14,7 @@ defmodule LazyRiver.ClusterTest do
   """
   use ExUnit.Case, async: false
 
-  alias LazyRiver.{Cluster, Ledger}
+  alias Blazie.{Cluster, Ledger}
 
   setup do
     %{name: "cluster-ledger-#{System.unique_integer([:positive])}"}

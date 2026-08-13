@@ -1,12 +1,12 @@
-defmodule LazyRiver.FormulaTest do
+defmodule Blazie.FormulaTest do
   @moduledoc """
   The doctrine, executable — the blocks about formulas, provenance, and the
   graph being observed rather than declared.
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Fact, Formula, Ledger, Snapshot}
-  alias LazyRiver.TestLedger
+  alias Blazie.{Fact, Formula, Ledger, Snapshot}
+  alias Blazie.TestLedger
 
   setup do
     %{ledger: TestLedger.open()}
@@ -122,14 +122,14 @@ defmodule LazyRiver.FormulaTest do
       {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
       Snapshot.find(Snapshot.open([ledger]), attribute: "height")
 
-      assert Process.get(:lazy_river_reads) == nil
+      assert Process.get(:blazie_reads) == nil
     end
 
     test "tracking is restored after a formula runs", %{ledger: ledger} do
       {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
       Formula.run(doubled(), Snapshot.open([ledger]))
 
-      assert Process.get(:lazy_river_reads) == nil
+      assert Process.get(:blazie_reads) == nil
     end
   end
 end

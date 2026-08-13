@@ -1,4 +1,4 @@
-defmodule LazyRiver.IndexTest do
+defmodule Blazie.IndexTest do
   @moduledoc """
   Facts are reached by a sort order rather than by scanning.
 
@@ -8,7 +8,7 @@ defmodule LazyRiver.IndexTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Ledger, Snapshot, TestLedger}
+  alias Blazie.{Ledger, Snapshot, TestLedger}
 
   setup do
     ledger = TestLedger.open()

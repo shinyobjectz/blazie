@@ -1,4 +1,4 @@
-defmodule LazyRiver.OldShapesTest do
+defmodule Blazie.OldShapesTest do
   @moduledoc """
   An append-only store must read every shape it has ever written, forever.
 
@@ -23,7 +23,7 @@ defmodule LazyRiver.OldShapesTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Fact, Ledger, Snapshot, Store}
+  alias Blazie.{Fact, Ledger, Snapshot, Store}
 
   setup do
     dir = Path.join(System.tmp_dir!(), "lr_shapes_#{System.unique_integer([:positive])}")
@@ -37,6 +37,16 @@ defmodule LazyRiver.OldShapesTest do
   # struct tag so today's compiler cannot quietly correct it.
   defp older_fact(id, attribute, value, tx) do
     %{__struct__: Fact, id: id, attribute: attribute, answer: value, tx: tx, by: nil}
+  end
+
+  # A fact as the project wrote it when it was called something else. The struct
+  # tag is a literal atom because that module does not exist any more — which is
+  # the whole point, and why `term_to_binary` keeping it matters.
+  defp renamed_fact(id, attribute, value, tx, key \\ :value) do
+    Map.merge(
+      %{__struct__: :"Elixir.LazyRiver.Fact", id: id, attribute: attribute, tx: tx, by: nil},
+      %{key => value}
+    )
   end
 
   defp record(facts) do
@@ -250,6 +260,77 @@ defmodule LazyRiver.OldShapesTest do
       # Believed: it covered the whole log, so nothing was rescanned.
       assert stats.checkpoint_at == 1
       assert stats.records_scanned == 0
+    end
+  end
+
+  describe "a log written when the project had another name" do
+    # `term_to_binary` stores which struct a map is, so renaming the project
+    # renamed the row. Every fact written as LazyRiver.Fact is still on disk
+    # under that name and always will be.
+    test "opens, and every fact answers under the name it has now", ctx do
+      write_older_log(ctx, [
+        [renamed_fact("is", "is", "attribute", 1)],
+        [renamed_fact("ada", "height", 180, 2)]
+      ])
+
+      {:ok, store} = Store.File.open(ctx.name, dir: ctx.dir)
+      facts = Store.File.replay(store)
+      Store.File.close(store)
+
+      assert length(facts) == 2
+      assert Enum.all?(facts, &match?(%Fact{}, &1))
+      assert List.last(facts).value == 180
+    end
+
+    test "even when it also predates the value rename", ctx do
+      # Both renames at once: the oldest shape there is.
+      write_older_log(ctx, [[renamed_fact("ada", "height", 180, 1, :answer)]])
+
+      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> Ledger.close(ctx.name) end)
+
+      assert Snapshot.value(Snapshot.open([ledger]), "ada", "height") == 180
+    end
+
+    test "a value of nil or false survives, which a default would have eaten", ctx do
+      write_older_log(ctx, [
+        [renamed_fact("a", "flag", false, 1, :answer)],
+        [renamed_fact("b", "flag", nil, 2)]
+      ])
+
+      {:ok, store} = Store.File.open(ctx.name, dir: ctx.dir)
+      [first, second] = Store.File.replay(store)
+      Store.File.close(store)
+
+      assert first.value == false
+      assert second.value == nil
+    end
+
+    test "and the index is built over them", ctx do
+      write_older_log(ctx, [
+        [renamed_fact("is", "is", "attribute", 1)],
+        [renamed_fact("ada", "height", 180, 2)]
+      ])
+
+      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> Ledger.close(ctx.name) end)
+
+      assert [%Fact{id: "ada"}] = Ledger.find_at(ledger, 2, value: 180)
+    end
+
+    test "translating one directly", _ctx do
+      assert %Fact{id: "ada", attribute: "height", value: 180, tx: 3, by: nil} =
+               Fact.from_stored(renamed_fact("ada", "height", 180, 3))
+
+      assert %Fact{by: "doubling", value: 360} =
+               Fact.from_stored(%{
+                 __struct__: :"Elixir.LazyRiver.Fact",
+                 id: "ada",
+                 attribute: "doubled",
+                 answer: 360,
+                 tx: 4,
+                 by: "doubling"
+               })
     end
   end
 end

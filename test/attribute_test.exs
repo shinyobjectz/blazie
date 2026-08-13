@@ -1,12 +1,12 @@
-defmodule LazyRiver.AttributeTest do
+defmodule Blazie.AttributeTest do
   @moduledoc """
   The doctrine, executable — schema as facts, and every write checked with a
   refusal that carries its repair.
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Ledger, Snapshot}
-  alias LazyRiver.TestLedger
+  alias Blazie.{Attribute, Ledger, Snapshot}
+  alias Blazie.TestLedger
 
   setup do
     ledger = TestLedger.open()

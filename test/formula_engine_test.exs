@@ -1,4 +1,4 @@
-defmodule LazyRiver.Formula.EngineTest do
+defmodule Blazie.Formula.EngineTest do
   @moduledoc """
   The engine decides whether to keep an answer. Nobody declares it.
 
@@ -9,8 +9,8 @@ defmodule LazyRiver.Formula.EngineTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Formula, Ledger, Snapshot, TestLedger}
-  alias LazyRiver.Formula.Engine
+  alias Blazie.{Attribute, Formula, Ledger, Snapshot, TestLedger}
+  alias Blazie.Formula.Engine
 
   setup do
     ledger = TestLedger.open()

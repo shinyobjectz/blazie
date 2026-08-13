@@ -1,4 +1,4 @@
-defmodule LazyRiver.SubscriptionTest do
+defmodule Blazie.SubscriptionTest do
   @moduledoc """
   A subscription is a question the evaluator keeps answering.
 
@@ -7,7 +7,7 @@ defmodule LazyRiver.SubscriptionTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Formula, Ledger, Snapshot, Subscription, TestLedger}
+  alias Blazie.{Attribute, Formula, Ledger, Snapshot, Subscription, TestLedger}
 
   setup do
     ledger = TestLedger.open()
@@ -23,7 +23,7 @@ defmodule LazyRiver.SubscriptionTest do
 
       {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
 
-      assert_receive {:lazy_river, ^ref, answer}
+      assert_receive {:blazie, ^ref, answer}
       assert [%{attribute: "height", value: 180}] = answer.facts
     end
 
@@ -31,7 +31,7 @@ defmodule LazyRiver.SubscriptionTest do
       {:ok, ref} = Subscription.watch([ledger], attribute: "height")
       {:ok, tx} = Ledger.append(ledger, [{42, "height", 180}])
 
-      assert_receive {:lazy_river, ^ref, answer}
+      assert_receive {:blazie, ^ref, answer}
 
       # Keyed by what the ledger is called, not by where it is. That is what
       # makes a name something JSON can carry and something a caller can send
@@ -47,10 +47,10 @@ defmodule LazyRiver.SubscriptionTest do
       {:ok, ref} = Subscription.watch([ledger], attribute: "height")
 
       {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      assert_receive {:lazy_river, ^ref, first}
+      assert_receive {:blazie, ^ref, first}
 
       {:ok, _} = Ledger.append(ledger, [{43, "height", 190}])
-      assert_receive {:lazy_river, ^ref, second}
+      assert_receive {:blazie, ^ref, second}
 
       assert length(first.facts) == 1
       assert length(second.facts) == 2
@@ -63,7 +63,7 @@ defmodule LazyRiver.SubscriptionTest do
 
       {:ok, _} = Ledger.append(ledger, [{42, "colour", "blue"}])
 
-      refute_receive {:lazy_river, ^ref, _}, 50
+      refute_receive {:blazie, ^ref, _}, 50
     end
 
     test "another ledger is silent", %{ledger: watched} do
@@ -73,7 +73,7 @@ defmodule LazyRiver.SubscriptionTest do
       {:ok, ref} = Subscription.watch([watched], attribute: "height")
       {:ok, _} = Ledger.append(other, [{42, "height", 180}])
 
-      refute_receive {:lazy_river, ^ref, _}, 50
+      refute_receive {:blazie, ^ref, _}, 50
     end
   end
 
@@ -86,11 +86,11 @@ defmodule LazyRiver.SubscriptionTest do
       {:ok, ref} = Subscription.watch([a, b], attribute: "height")
 
       {:ok, _} = Ledger.append(a, [{1, "height", 1}])
-      assert_receive {:lazy_river, ^ref, first}
+      assert_receive {:blazie, ^ref, first}
       assert length(first.facts) == 1
 
       {:ok, _} = Ledger.append(b, [{2, "height", 2}])
-      assert_receive {:lazy_river, ^ref, second}
+      assert_receive {:blazie, ^ref, second}
       assert length(second.facts) == 2
     end
   end
@@ -107,7 +107,7 @@ defmodule LazyRiver.SubscriptionTest do
       {:ok, ref} = Subscription.watch([ledger], doubled)
 
       {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      assert_receive {:lazy_river, ^ref, answer}
+      assert_receive {:blazie, ^ref, answer}
       assert [{42, "doubled", 360, "doubled"}] = answer.facts
     end
 
@@ -122,7 +122,7 @@ defmodule LazyRiver.SubscriptionTest do
       {:ok, ref} = Subscription.watch([ledger], doubled)
       {:ok, _} = Ledger.append(ledger, [{42, "colour", "blue"}])
 
-      refute_receive {:lazy_river, ^ref, _}, 50
+      refute_receive {:blazie, ^ref, _}, 50
     end
   end
 
@@ -155,7 +155,7 @@ defmodule LazyRiver.SubscriptionTest do
 
       {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
 
-      refute_receive {:lazy_river, ^ref, _}, 50
+      refute_receive {:blazie, ^ref, _}, 50
     end
 
     test "a subscription dies with whoever asked for it", %{ledger: ledger} do
@@ -178,7 +178,7 @@ defmodule LazyRiver.SubscriptionTest do
       # The subscription goes with it rather than pushing into the void.
       Process.sleep(30)
       {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      refute_receive {:lazy_river, _, _}, 50
+      refute_receive {:blazie, _, _}, 50
     end
   end
 end

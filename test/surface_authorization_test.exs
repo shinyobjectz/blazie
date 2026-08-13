@@ -1,4 +1,4 @@
-defmodule LazyRiver.SurfaceAuthorizationTest do
+defmodule Blazie.SurfaceAuthorizationTest do
   @moduledoc """
   Doctrine 17 at the door.
 
@@ -6,9 +6,9 @@ defmodule LazyRiver.SurfaceAuthorizationTest do
   cannot be the only checkpoint. Every operation that names a ledger checks,
   and the test below forges a name to prove it.
   """
-  use LazyRiver.ConnCase, async: true
+  use Blazie.ConnCase, async: true
 
-  alias LazyRiver.Authority
+  alias Blazie.Authority
 
   setup do
     token = "surface-token-#{System.unique_integer([:positive])}"

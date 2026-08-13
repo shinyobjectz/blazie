@@ -1,4 +1,4 @@
-defmodule LazyRiver.ErasureDurabilityTest do
+defmodule Blazie.ErasureDurabilityTest do
   @moduledoc """
   Erasure has to survive the things that happen to running systems: a
   redeployment, and a restore of the key store from a backup.
@@ -10,7 +10,7 @@ defmodule LazyRiver.ErasureDurabilityTest do
   """
   use ExUnit.Case, async: false
 
-  alias LazyRiver.{Attribute, Erasure, Keyring, Ledger, Snapshot, TestLedger}
+  alias Blazie.{Attribute, Erasure, Keyring, Ledger, Snapshot, TestLedger}
 
   setup do
     subject = "person-#{System.unique_integer([:positive])}"

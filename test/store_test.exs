@@ -1,13 +1,13 @@
-defmodule LazyRiver.StoreTest do
+defmodule Blazie.StoreTest do
   @moduledoc """
   Persistence behind the ledger seam, and what each store honestly gives you.
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Ledger, Snapshot, Store}
+  alias Blazie.{Ledger, Snapshot, Store}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "lazyriver_test_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "blazie_test_#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(dir) end)
     %{dir: dir, name: {:tenant, System.unique_integer([:positive])}}
   end

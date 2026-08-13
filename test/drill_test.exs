@@ -1,7 +1,7 @@
-defmodule LazyRiver.DrillTest.Unreachable do
+defmodule Blazie.DrillTest.Unreachable do
   @moduledoc "A target that answers nothing, which is what a wrong credential looks like."
 
-  @behaviour LazyRiver.Backup.Target
+  @behaviour Blazie.Backup.Target
 
   @impl true
   def put(_opts, _key, _bytes), do: {:error, :unreachable}
@@ -13,7 +13,7 @@ defmodule LazyRiver.DrillTest.Unreachable do
   def list(_opts, _prefix), do: {:error, :unreachable}
 end
 
-defmodule LazyRiver.DrillTest do
+defmodule Blazie.DrillTest do
   @moduledoc """
   A backup is only ever proven by the last restore, so the restore is a job.
 
@@ -30,7 +30,7 @@ defmodule LazyRiver.DrillTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Backup, Drill, Fact, Job, Ledger, Snapshot, Store}
+  alias Blazie.{Attribute, Backup, Drill, Fact, Job, Ledger, Snapshot, Store}
 
   setup do
     root = Path.join(System.tmp_dir!(), "lr_drill_#{System.unique_integer([:positive])}")
@@ -168,7 +168,7 @@ defmodule LazyRiver.DrillTest do
     end
 
     test "a target nobody can list fails with a repair, not a match error", ctx do
-      opts = Keyword.put(ctx.opts, :target, {LazyRiver.DrillTest.Unreachable, []})
+      opts = Keyword.put(ctx.opts, :target, {Blazie.DrillTest.Unreachable, []})
 
       assert {:failed, _tx, reason} =
                Job.run(Drill.job(opts), ctx.journal, Snapshot.open([ctx.journal]), 1000)
@@ -343,7 +343,7 @@ defmodule LazyRiver.DrillTest do
       # restore must never share a path with the facts or the keys it checks,
       # and this is the one mistake an operator makes by typing the wrong
       # environment variable.
-      live = Application.fetch_env!(:lazy_river, :key_dir)
+      live = Application.fetch_env!(:blazie, :key_dir)
 
       assert_raise RuntimeError, ~r/live directory/, fn ->
         Drill.run(Snapshot.open([ctx.journal]), Keyword.put(ctx.opts, :scratch_dir, live))

@@ -234,7 +234,7 @@ against one node's transaction counter is meaningless on another.
 
 #### C2. `open` pairs each ledger with another ledger's transaction
 
-**What goes wrong.** `LazyRiver.Surface.Controller.named/2`:
+**What goes wrong.** `Blazie.Surface.Controller.named/2`:
 
 ```elixir
 defp named(internal, names) do
@@ -6572,11 +6572,11 @@ because they catch new code by construction rather than by enumeration:
 
 ## Section 5 — Sandboxing / untrusted code, and operational / deployment hazards
 
-Research for a claims-based test framework against LazyRiver (immutable append-only
+Research for a claims-based test framework against Blazie (immutable append-only
 fact-log, Elixir/OTP, single node, two-stage Docker image, volume-mounted ledger).
 
 **One finding reframes the whole of Topic 10.** The brief describes "a sandbox" in
-Elixir. `lib/lazy_river/formula/sandbox.ex` does **not** run guest code on the BEAM —
+Elixir. `lib/blazie/formula/sandbox.ex` does **not** run guest code on the BEAM —
 it runs it in **WebAssembly via Wasmex 0.15 (wasmtime through a Rustler NIF)**, with an
 *empty* import map. That is the correct architecture and it moves most classical
 BEAM-escape items to N/A-for-formulas. But it moves the risk somewhere else: the
@@ -6605,7 +6605,7 @@ via out-of-process mechanisms such as containers and hypervisors." JEP 486 then
 permanently disabled it.
 **Conditions.** Any design where untrusted code shares an address space and runtime with
 trusted code and is restrained by a checked policy rather than by absence of capability.
-**Claim + test.** *Claim:* LazyRiver's fence is structural (empty import map), not
+**Claim + test.** *Claim:* Blazie's fence is structural (empty import map), not
 policy — there is no allow/deny list anywhere in the formula path that a future commit
 could widen by editing a constant. *Test:* grep the formula path for any list of
 permitted operations; assert `Sandbox.imports/0` returns `%{}` and that no other
@@ -6623,7 +6623,7 @@ disabled in Python 2.3 for "various known and not readily fixable security holes
 designed with security in mind and security is very hard to retrofit.
 **Conditions.** Any sandbox whose boundary is "the guest cannot *name* the dangerous
 thing," in a language with reflection, dynamic dispatch, or a module registry.
-**Claim + test.** *Claim:* no LazyRiver sandbox control depends on the guest being
+**Claim + test.** *Claim:* no Blazie sandbox control depends on the guest being
 unable to name something. *Test:* the WASM guest's namespace is closed by construction
 (imports it did not receive do not exist), so write the adversarial test as: a `.wat`
 module that imports `env.anything` must fail at `Sandbox.mapping/3` build time with
@@ -6653,7 +6653,7 @@ module is not a security mechanism. Do not use it to run untrusted code." Teams 
 anyway because it looks like a sandbox.
 **Conditions.** Adopting an isolation primitive from its API shape rather than its
 security statement.
-**Claim + test.** *Claim:* every isolation primitive LazyRiver depends on has a written
+**Claim + test.** *Claim:* every isolation primitive Blazie depends on has a written
 security model that covers the threat. *Test:* a docs/link check — assert
 `sandbox.ex`'s moduledoc names wasmtime's security page and its *stated non-goals*
 (side channels, Spectre; see S22). A sandbox whose limits are undocumented in-repo is
@@ -6669,7 +6669,7 @@ Node's custom-inspect function, affecting all versions ≤ 3.9.19. The July 2023
 disclosure led the maintainer to discontinue the project.
 **Conditions.** Sandbox implemented by *wrapping and sanitizing* a rich host API surface
 rather than by *not exposing* one. Every new host feature is a new escape candidate.
-**Claim + test.** *Claim:* LazyRiver's guest surface has cardinality zero, so it does
+**Claim + test.** *Claim:* Blazie's guest surface has cardinality zero, so it does
 not grow when the host does. *Test:* a golden test that snapshots the full set of
 imports and host functions reachable from a formula, and fails on any addition. Pair
 with a written rule that widening is one deliberate import at a time (already stated in
@@ -6729,7 +6729,7 @@ Execution is "not made in a safe environment" and the VM "cannot provide the sam
 services... such as pre-emptive scheduling or memory protection." The docs say "use this
 functionality with extreme care." **Wasmex is itself a Rustler NIF** — so the sandbox's
 own implementation is in the bypass class.
-**Conditions.** Any dependency shipping native code. LazyRiver has at least
+**Conditions.** Any dependency shipping native code. Blazie has at least
 wasmex/rustler/rustler_precompiled.
 **Claim + test.** *Claim:* the set of loaded NIFs and linked-in drivers is known,
 pinned, and reviewed. *Test:* at boot, log `:erlang.system_info(:taints)` (the list of
@@ -6755,7 +6755,7 @@ static — grep for `String.to_atom`, `:erlang.binary_to_atom`, `Module.concat`,
 `binary_to_term` without `:safe` outside test support; assert zero hits on the request
 path. (b) dynamic — record `:erlang.system_info(:atom_count)`, replay 100k requests with
 distinct random attribute/ledger/snapshot names, assert `atom_count` delta is 0. This is
-a strong, cheap, high-signal test and it directly guards the naming surface LazyRiver
+a strong, cheap, high-signal test and it directly guards the naming surface Blazie
 puts in tenants' hands. (`Application.start/2`'s moduledoc already shows awareness —
 ledgers are registered under arbitrary terms in a `Registry` precisely to avoid this. The
 test proves it stayed true.) Also monitor `atom_count` vs `system_info(:atom_limit)`.
@@ -6776,10 +6776,10 @@ is `Plug.Crypto.non_executable_binary_to_term/1,2`, which raises on unsafe terms
 even that does not stop a crafted `Range` designed to burn CPU and memory.
 **Conditions.** Any ETF crossing a trust boundary: signed cookies, cache entries, the
 backup format, an inter-process wire format, a job payload.
-**Claim + test.** *Claim:* LazyRiver never deserializes ETF from outside the trust
+**Claim + test.** *Claim:* Blazie never deserializes ETF from outside the trust
 boundary; where it must (Phoenix signed session/token from `SECRET_KEY_BASE`), it uses
 the non-executable variant. *Test:* (a) grep for `binary_to_term` in
-`lib/lazy_river/wire.ex`, `backup*`, `snapshot.ex`; (b) an adversarial test that feeds a
+`lib/blazie/wire.ex`, `backup*`, `snapshot.ex`; (b) an adversarial test that feeds a
 `term_to_binary(fn a, b -> ... end)` payload to every deserializing entry point and
 asserts a refusal, not an evaluation; (c) assert on-disk ledger/backup format is **not**
 raw ETF, or if it is, that reads go through a validating decoder. **Note the direct
@@ -6817,7 +6817,7 @@ they are freed only when *every* referencing process GCs. A "middleman" process 
 routes binaries acquires a reference to each one and, if it is small and rarely GC'd,
 holds them all. Sub-binaries (a slice of a larger binary) keep the *whole* original
 alive. Result: RSS climbs to OOM while `erlang:memory(:processes)` looks modest.
-**Conditions.** LazyRiver is a fact log — facts are binaries, and the Ledger GenServer,
+**Conditions.** Blazie is a fact log — facts are binaries, and the Ledger GenServer,
 the `Watchers` Registry fan-out, and the Backup worker are all middlemen by construction.
 **Claim + test.** *Claim:* binary memory is bounded under sustained append + watch load.
 *Test:* soak test — append 10^6 facts with 1KB values while a subscriber watches; sample
@@ -6834,7 +6834,7 @@ https://ferd.github.io/recon/recon.html
 without limit; each message is also a GC root, so GC cost rises with queue length, which
 slows processing, which grows the queue. Classic runaway. The EMQX/OTP-23 case in the
 wild: a stuck process's mailbox grew until k8s OOM-killed every pod.
-**Conditions.** `LazyRiver.Formula.Engine` is a single GenServer serialising *every*
+**Conditions.** `Blazie.Formula.Engine` is a single GenServer serialising *every*
 formula answer for *every* ledger (`handle_call({:answer, ...})` runs `Formula.run`
 **inside the server loop**). One slow formula blocks all of them and the mailbox grows.
 **Claim + test.** *Claim:* a slow formula does not stall unrelated formulas. *Test:*
@@ -6950,7 +6950,7 @@ depends on input order. Maps use a *different* order for keys: integers sort bef
 floats, so `#{2 => a} < #{1.0 => a}` is true. Sorting an attribute-name string vs an
 atom is likewise not lexicographic.
 **Conditions.** Any formula or query returning a sorted result over mixed-type answers.
-**Claim + test.** *Claim:* every ordering LazyRiver exposes is defined by an explicit
+**Claim + test.** *Claim:* every ordering Blazie exposes is defined by an explicit
 comparator, not by `<` on raw terms. *Test:* assert `sort([1, 1.0, :a, "a", %{}])` in the
 answer path produces a documented order, and property-test that `usort` never silently
 collapses `1` and `1.0` into an arbitrary one of the two.
@@ -7016,7 +7016,7 @@ fuel instead of epochs) — but none of that is on by default, and **Wasmex 0.15
 `cranelift_opt_level`, `wasm_backtrace_details`, `debug_info`, `memory64`,
 `wasm_component_model`).
 **Conditions.** A formula doing float arithmetic that can produce NaN, or compiled with
-SIMD. LazyRiver's `mapping/3` currently filters `is_integer(fact.answer)` so floats are
+SIMD. Blazie's `mapping/3` currently filters `is_integer(fact.answer)` so floats are
 excluded *today* — the moment that widens to floats, this is live.
 **Claim + test.** *Claim:* formula answers are bit-identical across machines. *Test:*
 run the CI formula suite on x86_64 and arm64 runners and diff the answers byte-for-byte.
@@ -7064,7 +7064,7 @@ overhead, non-deterministic). Wasmex's `EngineConfig` defaults `consume_fuel: fa
 does not stop the guest. The guest keeps burning a scheduler thread (S14) with no owner
 watching. Note wasmtime's own guidance for the determinism-sensitive case: "use
 deterministic fuel-based interruption rather than non-deterministic epoch-based
-interruption" — which matters here because LazyRiver caches answers, and an
+interruption" — which matters here because Blazie caches answers, and an
 epoch-interrupted formula could trap on one run and succeed on the next.
 **Conditions.** Any tenant-supplied formula. It requires no cleverness — a `while(1)`.
 **Claim + test.** *Claim:* a non-terminating formula is refused within a bounded time and
@@ -7143,7 +7143,7 @@ https://bytecodealliance.org/articles/wasmtime-security-advisories
 **What goes wrong.** Wasmtime's security page documents *partial* Spectre mitigations
 (function-table bounds checks, `br_table` determinism, dynamic memory bounds checks) and
 states that full Spectre protection remains incomplete; side channels generally are not
-in the threat model. Concretely for LazyRiver: (a) a formula that can observe elapsed
+in the threat model. Concretely for Blazie: (a) a formula that can observe elapsed
 time can infer facts it was never handed — but with an **empty import map it has no
 clock**, which is a genuine structural win worth asserting; (b) the *host* leaks timing
 — an answer that is a cache hit returns in microseconds and a miss in milliseconds, so an
@@ -7220,9 +7220,9 @@ initialization time**.
 **Conditions.** Any env-var-driven config read at boot into `Application` env and
 consumed elsewhere.
 **Claim + test.** *Claim:* every key `runtime.exs` sets is read by at least one non-test
-module. *Test:* a CI check that enumerates every `config :lazy_river, KEY` in
-`config/runtime.exs` and asserts a `grep -r "Application.get_env(:lazy_river, :KEY)"` hit
-in `lib/`. **LazyRiver has already been bitten by exactly this** — `test/store_default_test.exs`
+module. *Test:* a CI check that enumerates every `config :blazie, KEY` in
+`config/runtime.exs` and asserts a `grep -r "Application.get_env(:blazie, :KEY)"` hit
+in `lib/`. **Blazie has already been bitten by exactly this** — `test/store_default_test.exs`
 opens: *"`ledger_dir` was configured, documented, and never read, so every ledger in
 production was in memory and every restart lost everything — including the grants that
 say who may name what."* That test guards one key. The CI check guards all of them,
@@ -7248,9 +7248,9 @@ is absent" is a *normal* state indistinguishable from "the worker was forgotten.
 `lib/` is either in the supervision tree at boot or is explicitly listed as
 started-on-demand. *Test:* (a) an inventory test — enumerate modules exporting
 `start_link/1`, subtract `DynamicSupervisor`-started ones (Ledger, Subscription), assert
-the remainder appear in `Supervisor.which_children(LazyRiver.Supervisor)` after boot;
+the remainder appear in `Supervisor.which_children(Blazie.Supervisor)` after boot;
 (b) a **prod-shaped** boot test — start the app with `backup_target` and `vitals_every`
-set, and assert `LazyRiver.Backup` and `LazyRiver.Vitals` are running children with
+set, and assert `Blazie.Backup` and `Blazie.Vitals` are running children with
 non-zero pids. Today nothing asserts the backup worker actually starts in the
 configuration production uses.
 **Source.** https://hexdocs.pm/elixir/Supervisor.html
@@ -7259,7 +7259,7 @@ configuration production uses.
 ##### O3. `LEDGER_SYNC` defaults OFF, and the durable path is nearly untested
 **What goes wrong.** The general class: a durability flag defaults off, every test runs
 with it off, and the fsync path is never exercised — so the code that makes data survive
-a crash is the least-tested code in the system. LazyRiver's instance:
+a crash is the least-tested code in the system. Blazie's instance:
 `runtime.exs` sets `ledger_sync: System.get_env("LEDGER_SYNC") == "true"` (absent ⇒
 **false**), `ledger.ex:174` reads it with default `false`, the Dockerfile's `ENV` block
 sets `LEDGER_DIR`, `KEY_DIR`, `PORT` but **not** `LEDGER_SYNC`, and the CI deploy job's
@@ -7345,7 +7345,7 @@ downgrade is not guaranteed after you've set inter.broker.protocol.version to x.
 you cannot revert if messages have been written with a newer log format. etcd made
 downgrade a first-class feature only in v3.6, and it works by *migrating the schema down*
 before the rolling downgrade, with validation first.
-**Conditions.** LazyRiver is append-only with a mounted volume that outlives the
+**Conditions.** Blazie is append-only with a mounted volume that outlives the
 container — so **every** deploy is potentially a mixed-version read of one log, and
 rollback is the normal recovery action.
 **Claim + test.** *Claim:* N-1 compatibility holds in both directions. *Test:* two CI
@@ -7439,7 +7439,7 @@ shows compaction alone leaving the server still rejecting writes.
 job also writing locally. Add inode exhaustion (many small segment files ⇒ `ENOSPC` with
 `df` showing free bytes) and ext4's 5% root-reserved blocks (which is why a non-root
 process hits ENOSPC at 95%).
-**Claim + test.** *Claim:* at disk-full, LazyRiver refuses writes with a repair, keeps
+**Claim + test.** *Claim:* at disk-full, Blazie refuses writes with a repair, keeps
 serving reads, and **restarts cleanly**. *Test:* mount a 64MB `tmpfs`/loopback as
 `LEDGER_DIR`, fill it, assert: (a) append returns a refusal naming ENOSPC and the repair;
 (b) reads still work; (c) `SIGKILL` + restart on the *still-full* volume **boots
@@ -7452,7 +7452,7 @@ https://etcd.io/docs/v3.6/op-guide/maintenance/ · https://github.com/etcd-io/et
 **Applicability.** single-node now. **Third-highest-leverage item in Topic 11.**
 
 ##### O12. Backups compete for the resource they protect
-**What goes wrong.** `LazyRiver.Backup` runs every `BACKUP_EVERY` (default 900s). If the
+**What goes wrong.** `Blazie.Backup` runs every `BACKUP_EVERY` (default 900s). If the
 target is `BACKUP_DIR` it writes to the *same volume* as the ledger, so the backup
 accelerates the ENOSPC it exists to survive. If the target is S3 and it stages locally,
 same. If a backup run overlaps the next tick, they pile up.
@@ -7482,7 +7482,7 @@ an empty directory if the host-side path does not exist. The fact that it doesn'
 error is troublesome." There is also an inode variant: if a deploy tool *deletes and
 recreates* the host directory, the bind mount still points at the old inode and the
 container sees an empty folder.
-**Conditions.** Every deploy. LazyRiver is specifically exposed: `mkdir -p /data/…` in
+**Conditions.** Every deploy. Blazie is specifically exposed: `mkdir -p /data/…` in
 the image guarantees the unmounted case looks healthy, and the container is replaced on
 every deploy while "the ledger is not."
 **Claim + test.** *Claim:* the process refuses to serve if `LEDGER_DIR` or `KEY_DIR` is
@@ -7548,9 +7548,9 @@ default handler **calls `init:stop/0`** — a graceful runtime stop. So an Elixi
 `terminate/2` takes longer than the remaining grace period is `SIGKILL`ed mid-flush;
 (b) supervisor `:shutdown` timeouts (5000ms default per child) can sum past 10s;
 (c) if `CMD` were the shell form, PID 1 would be `/bin/sh` and the signal would never
-reach the BEAM — LazyRiver's `CMD ["/app/bin/lazy_river", "start"]` is exec form, which
+reach the BEAM — Blazie's `CMD ["/app/bin/blazie", "start"]` is exec form, which
 is correct, and worth an explicit test rather than a reviewer's glance;
-(d) `bin/lazy_river start` runs the release in the foreground so it *is* PID 1 — good.
+(d) `bin/blazie start` runs the release in the foreground so it *is* PID 1 — good.
 **Conditions.** Every deploy. "Deploys reset in-flight work" is a standing ground rule in
 this repo.
 **Claim + test.** *Claim:* SIGTERM to the container flushes and closes every ledger
@@ -7577,7 +7577,7 @@ with off-box dependencies"). The failure mode is a probe that proves the HTTP li
 up and nothing else — the process serves 200s while the ledger volume is read-only, the
 disk is full, or the keyring cannot reach KMS. The counter-hazard the same article raises
 is that deep checks produce correlated false positives and can take out a whole fleet.
-**Conditions.** LazyRiver's `HEALTHCHECK` POSTs `/open` and greps for `401`. That proves
+**Conditions.** Blazie's `HEALTHCHECK` POSTs `/open` and greps for `401`. That proves
 routing and authorization are wired — genuinely more than a bare `/health` — but it
 touches **no storage**: a container whose `/data` is unmounted (O13), full (O11), or
 read-only reports healthy indefinitely. (I verified the mechanics: `curl -sf -o /dev/null
@@ -7645,7 +7645,7 @@ discovered that **none of five** backup/replication mechanisms was working or se
 snapshots were enabled on the NFS server but not the DB servers; LVM snapshots were 24h
 old; replication had fallen behind and the WAL had been purged. They lost six hours of
 data. Every one of those is a backup that *existed* and was never *restored from*.
-**Conditions.** LazyRiver has one node and one volume, `BACKUP_EVERY` defaults to 900s,
+**Conditions.** Blazie has one node and one volume, `BACKUP_EVERY` defaults to 900s,
 and the backup worker only starts if a target is configured (O5). Nothing in the tree
 restores.
 **Claim + test.** *Claim:* a backup taken by the running system can be restored into an
@@ -7667,7 +7667,7 @@ the earlier layer. Multi-stage builds discard an intermediate stage's *filesyste
 metadata travels with any layer a later stage references. Docker's own build check says
 "setting secrets in a Dockerfile using `ENV` or `ARG` is insecure because they persist in
 the final image."
-**Conditions.** LazyRiver's Dockerfile sets
+**Conditions.** Blazie's Dockerfile sets
 `ENV SECRET_KEY_BASE=build-time-placeholder-000…` in the **build** stage only, and the
 runtime stage is a fresh `FROM debian` that copies only the release directory — so the
 placeholder does not reach the shipped image, and it is a placeholder anyway. The design
@@ -7680,7 +7680,7 @@ grep, asserting no match for a secret-shaped pattern (`SECRET`, `KEY`, `TOKEN`,
 asserting no secret-named variable is set. Add `--secret` mounts if a build-time
 credential is ever needed. Also assert the release does **not** ship
 `config/runtime.exs`-adjacent dev secrets — `config.exs`'s
-`String.duplicate("lazyriver-not-a-production-secret", 3)` is compiled in; assert it is
+`String.duplicate("blazie-not-a-production-secret", 3)` is compiled in; assert it is
 never the value in use at prod boot.
 **Source.** https://docs.docker.com/build/building/secrets/ ·
 https://docs.docker.com/reference/build-checks/secrets-used-in-arg-or-env/ ·
@@ -7766,7 +7766,7 @@ not."
 **Applicability.** single-node now.
 
 ##### O26. Single-node: state the availability claim rather than discovering it
-**What goes wrong.** `LazyRiver.Cluster` exists in the tree. A single-node append-only
+**What goes wrong.** `Blazie.Cluster` exists in the tree. A single-node append-only
 store has an honest and defensible availability story — one machine, one volume, restore
 from backup — but only if it is *written down and tested*. The undocumented version fails
 the first time someone assumes replication exists.
@@ -7805,7 +7805,7 @@ distributed threat model is not silently in scope.
 
 ## Section 6 — Testing Methodology: how database teams actually gain confidence
 
-Research target: **Lazy River** — single-node, append-only immutable fact-log DB in
+Research target: **blazie** — single-node, append-only immutable fact-log DB in
 Elixir/OTP. Framing `<<size::32, crc32::32, payload>>`, optional fsync, checkpoint
 sidecars written-then-renamed, S3 incremental backup, envelope encryption with Cloud
 KMS, sandboxed pure formulas (Wasmex), scheduled jobs, Phoenix HTTP + websocket
@@ -7824,7 +7824,7 @@ or a Linux CI runner; **NO** = do not attempt, with the reason.
 
 Read from the tree before researching, so the "concrete first test" lines are real:
 
-- `LazyRiver.Store.File.append/2` writes `<<size::32, crc::32, payload>>` and fsyncs
+- `Blazie.Store.File.append/2` writes `<<size::32, crc::32, payload>>` and fsyncs
   only when `sync: true`. `replay/1` returns an in-memory list; `append` does
   `state.facts ++ facts` (O(n) per transaction).
 - Checkpoints: `maybe_checkpoint/1` writes `<tmp>.checkpoint.writing` then
@@ -7919,7 +7919,7 @@ inference rules, but applicable to basically all systems".
 with registers many cycles are simply invisible.
 **Cost.** You must make writes *unique and traceable* — a monotonic per-process
 counter is enough.
-**Practical here?** **YES, and it is nearly free** — a Lazy River ledger *is* an
+**Practical here?** **YES, and it is nearly free** — a blazie ledger *is* an
 append-only list. This is the rare case where the checker's ideal datatype is the
 system's native one. Do not model it as a register.
 **Concrete first test.** As item 2. Ensure the appended value is globally unique
@@ -7991,7 +7991,7 @@ simulated latency and message loss, and verifies *"up to strict serializability"
 Elle anomalies.
 **Cost.** Low to try (a JAR + a stdin/stdout binary), but the *fit* is the problem.
 **Practical here?** **NO, for the real system — YES as a learning/mirror exercise.**
-Lazy River is single-node with an HTTP+websocket surface; wrapping it in a
+blazie is single-node with an HTTP+websocket surface; wrapping it in a
 JSON-over-stdio node means writing an adapter that speaks Maelstrom's message envelope
 and then not using two of the three nemeses (partition is meaningless; kill and pause
 are already better covered by SIGKILL against the real port). The genuinely useful
@@ -8066,9 +8066,9 @@ data files are **byte-for-byte identical across caught-up replicas**.
 **liveness mode** (item 10) — livelocks and resonance bugs.
 **Cost.** Very high; the storage and network layers must be interfaces from day one.
 **Practical here?** **Partially, and the partial part is valuable.** You cannot make
-the BEAM deterministic, but you *can* make `LazyRiver.Store` a fault-injectable
+the BEAM deterministic, but you *can* make `Blazie.Store` a fault-injectable
 interface — it already is a behaviour with three functions. Add
-`LazyRiver.Store.Faulty` implementing `LazyRiver.Store` with a seeded RNG that
+`Blazie.Store.Faulty` implementing `Blazie.Store` with a seeded RNG that
 corrupts, short-writes, delays, or `EIO`s a configurable fraction of appends and
 replays. That gives ~70 % of the VOPR's storage-fault value for ~1 % of the cost,
 because the seam already exists ("*the ledger is the seam*", per the moduledoc).
@@ -8138,7 +8138,7 @@ answer forever*") and nothing currently tests it across a crash.
 **Bugs found.** Interleaving-dependent bugs, reproducibly.
 **Cost.** For Rust, moderate. For us, this is a **design lesson**, not a tool.
 **Practical here?** **NO directly; the lessons transfer.** The transferable ones:
-(1) put the environment behind an interface and swap it in tests — Lazy River already
+(1) put the environment behind an interface and swap it in tests — blazie already
 does this for `Store` and `Keyring` and `Backup.Target`; (2) **randomized scheduling
 beats exhaustive scheduling on real code** (shuttle's thesis) — which is exactly why
 item 20/25 matter more than item 26 here; (3) a **determinism meta-test** is cheap and
@@ -8209,7 +8209,7 @@ Note this is precisely what AWS did for ShardStore crash consistency (item 47) �
 did not simulate the world, they wrote a reference model and injected crashes.
 **Cost.** Low. One module implementing an existing behaviour.
 **Practical here?** **YES. Do this first among the DST-ish items.**
-**Concrete first test.** `LazyRiver.Store.Faulty` with fault modes {`:short_write` (n
+**Concrete first test.** `Blazie.Store.Faulty` with fault modes {`:short_write` (n
 bytes of the record land), `:corrupt_write` (flip a bit), `:eio_on_append`,
 `:eio_on_sync`, `:delay`, `:silent_drop`}. Property over 1000 seeds: recovered log is
 a prefix of acknowledged appends; a `:short_write` never yields a CRC-valid record
@@ -8287,7 +8287,7 @@ must be *simpler* than the implementation or it is worthless; AWS's ShardStore r
 the one to copy: reference models were *"1 % of the implementation code"*, and *"the
 reference model for a log-structured merge tree implementation is a hash map."*
 
-**Practical here?** **YES — this is the single best fit for Lazy River.** The system's
+**Practical here?** **YES — this is the single best fit for blazie.** The system's
 semantics are unusually model-friendly: a ledger is a list, a snapshot is a `{ledger =>
 tx}` map, an answer at a name is a pure function of the facts ≤ tx. The model is
 **one page of Elixir**: `%{ledgers: %{name => [fact]}, erased: MapSet.t()}`.
@@ -8359,7 +8359,7 @@ written by non-formal-methods engineers.
 **Bugs found.** Any divergence: wrong answer, wrong ordering, wrong error, wrong
 post-crash state.
 **Cost.** Low here — **the reference implementation already exists**:
-`LazyRiver.Store.Memory` is a 20-line list-append store implementing the same
+`Blazie.Store.Memory` is a 20-line list-append store implementing the same
 behaviour as `Store.File`. That is a reference model that shipped by accident.
 **Practical here?** **YES, and it is nearly free.** This is the cheapest high-yield
 item after elle-cli.
@@ -8514,7 +8514,7 @@ shared-state operations, finds racing pairs, and replays with reversed orders �
 **Bugs found.** Genuine race conditions and deadlocks — with a proof of absence for the
 scoped test.
 **Cost.** Moderate-high. Erlang escript (`bin/concuerror`), works on Elixir-compiled
-BEAM files with setup (point it at `_build/test/lib/lazy_river/ebin`, call the test
+BEAM files with setup (point it at `_build/test/lib/blazie/ebin`, call the test
 function by MFA). Must isolate a small, terminating, NIF-free unit.
 **Practical here?** **WORK, narrowly scoped.** Do **not** point it at the application;
 Wasmex, `:ssl` and `:crypto` are NIFs and it will crash. Do point it at a hand-built
@@ -8646,7 +8646,7 @@ Applications studied included databases, KV stores, VCS and distributed systems.
 rename is not atomic the way you assumed", "this append is not atomic past a sector".
 **Cost.** ALICE itself is research software and dated; the *checklist* is free.
 **Practical here?** **The tool: NO. The finding: directly applicable, YES.**
-Lazy River's checkpoint protocol is `write(tmp)` → `rename(tmp, final)` with **no
+blazie's checkpoint protocol is `write(tmp)` → `rename(tmp, final)` with **no
 fsync of tmp before the rename and no fsync of the directory after it**. ALICE's whole
 thesis is that this is a crash vulnerability whose severity depends on the filesystem
 and mount options. On ext4 with `data=ordered` you usually get away with it; you should
@@ -8700,7 +8700,7 @@ present—if only some rows are present, this is an atomicity violation."*
 loss.
 **Cost.** Framework is research code; the **checker** is 5 lines.
 **Practical here?** **The checker: YES, verbatim.**
-**Concrete first test.** Lazy River's unit of atomicity is one transaction = one
+**Concrete first test.** blazie's unit of atomicity is one transaction = one
 record. Post-crash assertion: for every transaction in the recovered log, **all** of
 its facts are present or **none** are — never a partial set. Given the `<<size, crc,
 payload>>` framing this *should* hold by construction, which makes it exactly the kind
@@ -8753,7 +8753,7 @@ I/O error to preserve data) was rolled out across the code because of what this 
 **Cost.** Moderate: build a FUSE binary, run as root or in a privileged container,
 drive it over Thrift from a test script (their examples are Python).
 **Practical here?** **WORK — and it is the best fit of the disk-fault tools**, because
-Lazy River's fault surface is *ordinary buffered file I/O in a userspace process*, which
+blazie's fault surface is *ordinary buffered file I/O in a userspace process*, which
 is exactly what CharybdeFS intercepts. Requires a Linux CI runner with FUSE (privileged
 container). Not usable on the macOS dev laptop without a Linux VM.
 **Concrete first test.** Mount CharybdeFS as `LEDGER_DIR`. Three scenarios: (a) EIO on
@@ -8883,7 +8883,7 @@ Numbers worth quoting because they calibrate everything else:
 cheap: **(a)** the advancing-failure-point loop for I/O errors and OOM (item 33's
 exhaustive crash points are the same idea), **(b)** an integrity check after every
 injected failure, **(c)** running with an optimization disabled and requiring identical
-output — which for Lazy River means **running with the index/checkpoint disabled and
+output — which for blazie means **running with the index/checkpoint disabled and
 requiring byte-identical answers** (this is NoREC, item 21, in disguise).
 **Concrete first test.** `LR_NO_CHECKPOINT=1` and `LR_NO_INDEX=1` env switches; run the
 entire suite twice and diff. Any difference is an optimization bug.
@@ -8978,8 +8978,8 @@ nothing; branches whose behaviour nothing pins down.
 **Cost.** Low to try (25 mutations is a few minutes); the open-source coverage is thin
 by design.
 **Practical here?** **YES, as an occasional audit, not a gate.**
-**Concrete first test.** Run muzak restricted to `lib/lazy_river/store.ex` and
-`lib/lazy_river/erasure.ex`. Expected survivors: the CRC comparison
+**Concrete first test.** Run muzak restricted to `lib/blazie/store.ex` and
+`lib/blazie/erasure.ex`. Expected survivors: the CRC comparison
 (`:erlang.crc32(payload) == crc` → `true`) and the `state.since < state.every`
 checkpoint threshold. If mutating the CRC check to always-true does not fail the suite,
 the torn-tail tests are not testing what they claim.
@@ -9027,7 +9027,7 @@ counterexample.
 implementation bugs.
 **Cost.** Days to learn, hours per spec once learned. PlusCal is the friendlier surface.
 **Practical here?** **YES for exactly two things, and it should be scoped that tightly.**
-The two candidates in Lazy River are the ones the brief guessed, and they are the right
+The two candidates in blazie are the ones the brief guessed, and they are the right
 ones:
   1. **The recovery / truncation state machine.** Variables: `log_bytes_written`,
      `log_bytes_durable`, `checkpoint_offset`, `checkpoint_durable`, `acked_txs`.
@@ -9096,7 +9096,7 @@ of scenarios, on AWS Batch) before deployment.
 methods"*.
 **Cost.** Moderate, and — critically — *maintainable by ordinary engineers*.
 **Practical here?** **YES. This is the template for the whole section.** It is the
-closest published analogue to Lazy River's situation: an append-only storage node, one
+closest published analogue to blazie's situation: an append-only storage node, one
 team, continuous change, with a need for real assurance and no appetite for Coq.
 **Concrete first test.** Elevate `Store.Memory` from "the test store" to "**the
 reference model**", document it as such in its moduledoc, and add the three checks:
@@ -9121,7 +9121,7 @@ traditional provable correctness needs *"up to 10x more effort than just buildin
 system itself"*, which is why they built the lightweight approach in item 49 instead.
 **Value anyway.** Read it for what a *correct* crash specification looks like: the
 "private fragment checked out, checked in at commit" framing is a good mental model for
-what a Lazy River transaction promises.
+what a blazie transaction promises.
 **Source.** https://www.usenix.org/system/files/osdi21-chajed.pdf
 
 #### 51. P language, Alloy, stateright — the neighbours
@@ -9202,7 +9202,7 @@ consistency model is not exercised at all.
 **Bugs found.** Wrong capacity plans; a "faster" database that is worse under real
 arrival patterns.
 **Cost.** Low.
-**Practical here?** **YES as methodology; YCSB itself is a poor fit** (Lazy River is not
+**Practical here?** **YES as methodology; YCSB itself is a poor fit** (blazie is not
 a KV store and its interesting operation — "reopen an old snapshot name and re-ask" — has
 no YCSB analogue).
 **Concrete first test.** Define **three** workloads that reflect what the system claims:
@@ -9274,7 +9274,7 @@ found a padding bug that whole-**sector** corruption masked, and "helical" corru
 **Cost.** Depends on the layer: `Store.Faulty` (free), CharybdeFS (moderate), dm-flakey
 / dm-log-writes (Linux CI).
 **Practical here?** **YES — and it should be the centre of the durability strategy**,
-because Lazy River is a single-node database whose entire value proposition is that the
+because blazie is a single-node database whose entire value proposition is that the
 log is true.
 **Concrete first test.** A `just chaos-disk` recipe running the matrix: {bitflip in
 log, bitflip in checkpoint, truncate log, truncate checkpoint, ENOSPC on append, EIO on
@@ -9305,7 +9305,7 @@ problems, and diagnosed *why* the internal suite missed them:
 - **The hardest area was the least tested.** Upgrades — multi-version, rolling —
   produced three of the seven crashes.
 
-The transferable lesson for Lazy River: **instrument the rare paths and fail the build if
+The transferable lesson for blazie: **instrument the rare paths and fail the build if
 the generators never reach them**, corrupt at **bit** granularity as well as record
 granularity, and treat **format/version migration of the ledger file** as the highest-risk
 untested area the moment a second on-disk format version exists.
@@ -9321,8 +9321,8 @@ Every incident below is sourced to a URL with a date, vendor's own writeup where
 one exists. Grouped by **root-cause family**, because the family is what
 generalises: the trigger never repeats, the defect class always does.
 
-Applicability throughout is to **Lazy River** — a single-node immutable
-append-only fact-log in Elixir (`lib/lazy_river/`) with `Store.File` segments,
+Applicability throughout is to **blazie** — a single-node immutable
+append-only fact-log in Elixir (`lib/blazie/`) with `Store.File` segments,
 S3 backup (`Backup`, `Backup.Target.S3`), envelope encryption via Cloud KMS
 (`Keyring`, `Keyring.GCP`), erasure-by-key-destruction (`Erasure`), sandboxed
 pure WASM formulas (`Formula.Sandbox`), scheduled jobs (`Job.Runner`), and an
@@ -9656,7 +9656,7 @@ appear.*
 
 **HERE:** The lesson is the methodology, not the mechanism: **run the
 consistency checker on the happy path.** A property test that only injects
-crashes will miss the class of bug that needs no crash. Lazy River's version:
+crashes will miss the class of bug that needs no crash. blazie's version:
 randomized concurrent writes to overlapping ledgers, snapshots opened
 throughout, and an assertion that every snapshot's answer equals a
 recomputed-from-scratch replay of the ledger prefix it names.
@@ -9741,7 +9741,7 @@ backup bucket 403 — for each, assert the refusal is a structured error with a
 
 ### C. Tenancy and isolation — the request that answered as someone else
 
-This family matters more here than anywhere else, because Lazy River's entire
+This family matters more here than anywhere else, because blazie's entire
 authorization model is one predicate: **which ledgers may this caller name.**
 Every incident below is a case where that kind of check was correct and was
 nevertheless bypassed, because the identity travelled separately from the data.
@@ -9869,7 +9869,7 @@ value is provably principal-independent. A test asserts that for every cache in
 the system, two different principals issuing the identical request never share
 an entry.*
 
-**HERE:** Lazy River's caching story is unusually strong and unusually
+**HERE:** blazie's caching story is unusually strong and unusually
 dangerous. The README says a client "caches on `{name, question}` and never
 invalidates" — which is sound precisely because a snapshot name enumerates its
 ledgers, so the name *is* the authorization scope. That makes the invariant
@@ -10202,7 +10202,7 @@ Template Instance deployment.
 by a separate validator that reimplements the contract. A test round-trips every
 generated artefact through the real consumer before it is considered valid.*
 
-**HERE:** `Formula.Sandbox` builds a `LazyRiver.Formula` from a WASM module and
+**HERE:** `Formula.Sandbox` builds a `Blazie.Formula` from a WASM module and
 an `over:` pattern. The arity contract between "what the pattern yields" and
 "what the guest's `apply` export takes" is exactly CrowdStrike's 21-vs-20. The
 test is to construct formulas with mismatched arity and assert the failure
@@ -10494,7 +10494,7 @@ hardware was deliberately hard to modify.
 unavailable. A test performs restore, key access, and health inspection with the
 network, the KMS, and the primary store each failed in turn.*
 
-**HERE:** The sharpest version of this in Lazy River is `Erasure` +
+**HERE:** The sharpest version of this in blazie is `Erasure` +
 `Keyring.GCP` + `Backup`: a restore needs the KMS to unwrap the master, and the
 KMS credential comes from configuration that lives... where? Test the loop
 explicitly — restore into a *clean* environment with only the bucket and the
@@ -10720,7 +10720,7 @@ the errseq_t hole.
 
 This is not one incident, it is a curated catalogue of them, and it is the
 single most directly reusable source in this document. Harvested, with the
-mechanism and the Lazy River analogue:
+mechanism and the blazie analogue:
 
 | # | Mechanism | Analogue here |
 |---|---|---|
@@ -10955,7 +10955,7 @@ the other.
 durable artefact exists, a test asserts it is strictly derived — deleting it
 entirely and rebuilding must produce identical answers.*
 
-**HERE:** MariaDB's fix *is* Lazy River's architecture, which is worth knowing
+**HERE:** MariaDB's fix *is* blazie's architecture, which is worth knowing
 about: the ledger is the only log, and everything else — checkpoints, the backup
 manifest, `Job.last_run`, the keyring's view of what is erased — is derived from
 facts. The test that pins it: **delete every non-ledger artefact** (checkpoints,
@@ -11606,7 +11606,7 @@ no failover occurs; induce a longer one and assert the old primary refuses write
 before the new one accepts any.*
 
 **HERE:** Single-node means no failover — which is a *feature* worth pinning
-with a test, because `lib/lazy_river/cluster.ex` exists and is where this
+with a test, because `lib/blazie/cluster.ex` exists and is where this
 incident would arrive. Assert that no two nodes can ever own the same ledger for
 write: if `Cluster` provides any handoff, assert the old owner refuses writes
 before the new owner accepts one, and that a node rejoining after a partition

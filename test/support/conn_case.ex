@@ -1,20 +1,20 @@
-defmodule LazyRiver.ConnCase do
+defmodule Blazie.ConnCase do
   @moduledoc "A connection to the surface, and a ledger to point it at."
 
   use ExUnit.CaseTemplate
 
-  alias LazyRiver.{Attribute, Authority, Ledger}
+  alias Blazie.{Attribute, Authority, Ledger}
 
   using do
     quote do
       import Plug.Conn
       import Phoenix.ConnTest
 
-      import LazyRiver.ConnCase
+      import Blazie.ConnCase
 
-      alias LazyRiver.{Attribute, Ledger, Snapshot}
+      alias Blazie.{Attribute, Ledger, Snapshot}
 
-      @endpoint LazyRiver.Surface.Endpoint
+      @endpoint Blazie.Surface.Endpoint
     end
   end
 
@@ -23,7 +23,7 @@ defmodule LazyRiver.ConnCase do
     # carries a caller and `open_ledger/0` grants to it. A test that wants to
     # be refused replaces or drops the header itself.
     token = "conn-token-#{System.unique_integer([:positive])}"
-    Process.put(:lazy_river_test_token, token)
+    Process.put(:blazie_test_token, token)
 
     conn =
       Phoenix.ConnTest.build_conn()
@@ -40,7 +40,7 @@ defmodule LazyRiver.ConnCase do
 
     # Granted to this test's caller, because every operation that names a
     # ledger is checked and a test that skipped this would only ever see 403.
-    if token = Process.get(:lazy_river_test_token), do: Authority.grant(token, name)
+    if token = Process.get(:blazie_test_token), do: Authority.grant(token, name)
 
     ExUnit.Callbacks.on_exit(fn -> Ledger.close(name) end)
     name

@@ -1,4 +1,4 @@
-name = "lazyriver"
+name = "blazie"
 created = "2026-08-12"
 engine = "git+https://github.com/socialite-ml/montology@main#subdirectory=.monty/cli"
 

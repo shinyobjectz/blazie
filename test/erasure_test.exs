@@ -1,4 +1,4 @@
-defmodule LazyRiver.ErasureTest do
+defmodule Blazie.ErasureTest do
   @moduledoc """
   Doctrine 16: everything is additive except erasure.
 
@@ -14,7 +14,7 @@ defmodule LazyRiver.ErasureTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Erasure, Formula, Keyring, Ledger, Snapshot, TestLedger}
+  alias Blazie.{Attribute, Erasure, Formula, Keyring, Ledger, Snapshot, TestLedger}
 
   setup do
     ledger = TestLedger.open()

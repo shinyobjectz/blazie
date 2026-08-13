@@ -1,4 +1,4 @@
-defmodule LazyRiver.AuthorityTest do
+defmodule Blazie.AuthorityTest do
   @moduledoc """
   Doctrine 17: authorization is which ledgers a caller may name. Not row rules,
   not predicates.
@@ -9,7 +9,7 @@ defmodule LazyRiver.AuthorityTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Authority, Ledger}
+  alias Blazie.{Authority, Ledger}
 
   # A token per test rather than a shared reset: grants are keyed by caller, so
   # distinct callers cannot interfere and nothing global has to be torn down.
@@ -94,7 +94,7 @@ defmodule LazyRiver.AuthorityTest do
       Authority.grant(token, "tenant-7")
 
       {:ok, ledger} = Ledger.open(Authority.ledger())
-      facts = LazyRiver.Snapshot.open([ledger]) |> LazyRiver.Snapshot.facts()
+      facts = Blazie.Snapshot.open([ledger]) |> Blazie.Snapshot.facts()
 
       refute Enum.any?(facts, fn fact ->
                token in [fact.id, fact.value]

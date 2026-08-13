@@ -1,4 +1,4 @@
-defmodule LazyRiver.KeyringTest do
+defmodule Blazie.KeyringTest do
   @moduledoc """
   Envelope encryption: a key per fact, wrapped by a key per subject.
 
@@ -12,10 +12,10 @@ defmodule LazyRiver.KeyringTest do
   """
   use ExUnit.Case, async: false
 
-  alias LazyRiver.{Attribute, Erasure, Keyring, Ledger, Snapshot, TestLedger}
+  alias Blazie.{Attribute, Erasure, Keyring, Ledger, Snapshot, TestLedger}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "lazyriver_keys_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "blazie_keys_#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(dir) end)
 
     subject = "person-#{System.unique_integer([:positive])}"

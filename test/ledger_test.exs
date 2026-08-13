@@ -1,11 +1,11 @@
-defmodule LazyRiver.LedgerTest do
+defmodule Blazie.LedgerTest do
   @moduledoc """
   Opening and closing ledgers at runtime, which is what a tenant arriving looks
   like.
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Ledger, Snapshot, TestLedger}
+  alias Blazie.{Ledger, Snapshot, TestLedger}
 
   describe "a ledger is opened at runtime" do
     test "a name can be any term, not just an atom" do

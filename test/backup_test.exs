@@ -1,4 +1,4 @@
-defmodule LazyRiver.BackupTest do
+defmodule Blazie.BackupTest do
   @moduledoc """
   A backup is a job, and a backup nobody has restored is a rumour.
 
@@ -14,7 +14,7 @@ defmodule LazyRiver.BackupTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Backup, Ledger, Snapshot, Store}
+  alias Blazie.{Attribute, Backup, Ledger, Snapshot, Store}
 
   setup do
     root = Path.join(System.tmp_dir!(), "lr_backup_#{System.unique_integer([:positive])}")
@@ -225,14 +225,14 @@ defmodule LazyRiver.BackupTest do
       on_exit(fn -> Ledger.close(journal) end)
 
       {:ok, _} =
-        Ledger.append(ledger, Attribute.seed() ++ LazyRiver.Job.seed() ++ Backup.seed())
+        Ledger.append(ledger, Attribute.seed() ++ Blazie.Job.seed() ++ Backup.seed())
 
       %{journal: ledger, opts: ctx.opts}
     end
 
     test "running it writes what it copied, naming itself", ctx do
       {:ok, tx} =
-        LazyRiver.Job.run(
+        Blazie.Job.run(
           Backup.job(ctx.opts),
           ctx.journal,
           Snapshot.open([ctx.journal]),
@@ -252,17 +252,17 @@ defmodule LazyRiver.BackupTest do
     test "it has a cadence and the runner picks it up", ctx do
       {:ok, _} = Ledger.append(ctx.journal, Backup.declare(every: 900))
 
-      assert LazyRiver.Job.due?(Snapshot.open([ctx.journal]), "backup", 0)
+      assert Blazie.Job.due?(Snapshot.open([ctx.journal]), "backup", 0)
 
       runner =
         start_supervised!(
-          {LazyRiver.Job.Runner,
+          {Blazie.Job.Runner,
            ledger: ctx.journal,
            jobs: [Backup.job(ctx.opts)],
            name: :"backup_#{System.unique_integer([:positive])}"}
         )
 
-      assert {:ok, ["backup"]} = LazyRiver.Job.Runner.tick(runner, 1000)
+      assert {:ok, ["backup"]} = Blazie.Job.Runner.tick(runner, 1000)
     end
 
     test "a target that refuses is recorded, not raised", ctx do
@@ -275,7 +275,7 @@ defmodule LazyRiver.BackupTest do
       broken = Keyword.put(ctx.opts, :target, {Backup.Target.Directory, root: wall})
 
       assert {:failed, _tx, reason} =
-               LazyRiver.Job.run(
+               Blazie.Job.run(
                  Backup.job(broken),
                  ctx.journal,
                  Snapshot.open([ctx.journal]),
@@ -283,9 +283,9 @@ defmodule LazyRiver.BackupTest do
                )
 
       assert reason =~ "backup"
-      assert LazyRiver.Job.failures(Snapshot.open([ctx.journal]), "backup") != []
+      assert Blazie.Job.failures(Snapshot.open([ctx.journal]), "backup") != []
       # A job that failed still ran, and the ledger says so.
-      assert LazyRiver.Job.last_run(Snapshot.open([ctx.journal]), "backup") == 1000
+      assert Blazie.Job.last_run(Snapshot.open([ctx.journal]), "backup") == 1000
     end
   end
 

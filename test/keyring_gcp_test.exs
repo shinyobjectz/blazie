@@ -1,4 +1,4 @@
-defmodule LazyRiver.Keyring.GCPTest do
+defmodule Blazie.Keyring.GCPTest do
   @moduledoc """
   One KMS key, and everything else local.
 
@@ -8,14 +8,14 @@ defmodule LazyRiver.Keyring.GCPTest do
   """
   use ExUnit.Case, async: false
 
-  alias LazyRiver.Keyring.GCP
+  alias Blazie.Keyring.GCP
 
   @moduletag :gcp
 
-  @key "projects/careful-striker-500202-p7/locations/global/keyRings/lazyriver/cryptoKeys/master"
+  @key "projects/careful-striker-500202-p7/locations/global/keyRings/blazie/cryptoKeys/master"
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "lazyriver_gcp_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "blazie_gcp_#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(dir) end)
     %{dir: dir, subject: "person-#{System.unique_integer([:positive])}"}
   end

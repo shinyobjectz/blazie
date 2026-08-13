@@ -1,4 +1,4 @@
-defmodule LazyRiver.AdversarialTest do
+defmodule Blazie.AdversarialTest do
   @moduledoc """
   What a caller sends when it is hostile, broken, or merely wrong.
 
@@ -7,9 +7,9 @@ defmodule LazyRiver.AdversarialTest do
   correct outcome for nearly all of this — what would be a defect is a crash,
   a leak, or a silent success.
   """
-  use LazyRiver.ConnCase, async: true
+  use Blazie.ConnCase, async: true
 
-  alias LazyRiver.{Authority, Wire}
+  alias Blazie.{Authority, Wire}
 
   setup do
     ledger = open_ledger()
@@ -77,7 +77,7 @@ defmodule LazyRiver.AdversarialTest do
         {"/open", %{"ledgers" => [forbidden]}},
         {"/ask", %{"name" => %{forbidden => 0}, "pattern" => %{}}},
         {"/write", %{"ledger" => forbidden, "facts" => []}},
-        {"/open", %{"ledgers" => [LazyRiver.Authority.ledger()]}},
+        {"/open", %{"ledgers" => [Blazie.Authority.ledger()]}},
         {"/ask", %{"name" => %{Authority.ledger() => 0}, "pattern" => %{}}}
       ]
 
@@ -101,8 +101,8 @@ defmodule LazyRiver.AdversarialTest do
 
     test "one caller cannot read another's ledger by guessing its name", %{conn: conn} do
       theirs = "private-#{System.unique_integer([:positive])}"
-      {:ok, _} = LazyRiver.Ledger.open(theirs)
-      on_exit(fn -> LazyRiver.Ledger.close(theirs) end)
+      {:ok, _} = Blazie.Ledger.open(theirs)
+      on_exit(fn -> Blazie.Ledger.close(theirs) end)
 
       # The name is correct. The grant is not.
       conn = post(conn, "/ask", %{"name" => %{theirs => 99}, "pattern" => %{}})

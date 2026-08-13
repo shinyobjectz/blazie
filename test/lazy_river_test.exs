@@ -1,12 +1,12 @@
-defmodule LazyRiverTest do
+defmodule BlazieTest do
   @moduledoc """
   The doctrine, executable. Each test names the block it holds to account, so
   drift in the engine shows up as a failure rather than as prose going stale.
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Fact, Ledger, Snapshot}
-  alias LazyRiver.TestLedger
+  alias Blazie.{Fact, Ledger, Snapshot}
+  alias Blazie.TestLedger
 
   setup do
     %{a: TestLedger.open(), b: TestLedger.open()}

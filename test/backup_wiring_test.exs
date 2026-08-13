@@ -1,4 +1,4 @@
-defmodule LazyRiver.BackupWiringTest do
+defmodule Blazie.BackupWiringTest do
   @moduledoc """
   That the backup is actually *started*, and configured from the environment.
 
@@ -11,7 +11,7 @@ defmodule LazyRiver.BackupWiringTest do
   """
   use ExUnit.Case, async: false
 
-  alias LazyRiver.{Backup, Job, Ledger, Snapshot}
+  alias Blazie.{Backup, Job, Ledger, Snapshot}
 
   describe "the runner is a child, not a module somebody must remember" do
     setup do
@@ -71,9 +71,9 @@ defmodule LazyRiver.BackupWiringTest do
       # The backup's own ledger is in memory here, so give it a file-backed one
       # to find.
       name = {:wiring, System.unique_integer([:positive])}
-      {:ok, ledger} = Ledger.open(name, store: {LazyRiver.Store.File, dir: ledgers})
+      {:ok, ledger} = Ledger.open(name, store: {Blazie.Store.File, dir: ledgers})
       on_exit(fn -> Ledger.close(name) end)
-      {:ok, _} = Ledger.append(ledger, LazyRiver.Attribute.seed())
+      {:ok, _} = Ledger.append(ledger, Blazie.Attribute.seed())
 
       {:ok, _} = Job.Runner.tick(Backup.Runner, 1000)
 
@@ -95,17 +95,17 @@ defmodule LazyRiver.BackupWiringTest do
 
   describe "the target comes from the environment" do
     setup do
-      was = Application.get_env(:lazy_river, :backup_target)
+      was = Application.get_env(:blazie, :backup_target)
 
       on_exit(fn ->
         if was,
-          do: Application.put_env(:lazy_river, :backup_target, was),
-          else: Application.delete_env(:lazy_river, :backup_target)
+          do: Application.put_env(:blazie, :backup_target, was),
+          else: Application.delete_env(:blazie, :backup_target)
       end)
     end
 
     test "run refuses rather than guessing when nothing is configured" do
-      Application.delete_env(:lazy_river, :backup_target)
+      Application.delete_env(:blazie, :backup_target)
 
       assert_raise RuntimeError, ~r/No backup target/, fn -> Backup.run(ledger_dir: "/tmp") end
     end
@@ -115,7 +115,7 @@ defmodule LazyRiver.BackupWiringTest do
       on_exit(fn -> File.rm_rf!(root) end)
 
       Application.put_env(
-        :lazy_river,
+        :blazie,
         :backup_target,
         {Backup.Target.Directory, root: Path.join(root, "remote")}
       )

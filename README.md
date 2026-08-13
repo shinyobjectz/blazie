@@ -1,4 +1,4 @@
-# Lazy River
+# blazie
 
 An immutable fact-log database. Seven things it is made of:
 

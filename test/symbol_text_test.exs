@@ -1,4 +1,4 @@
-defmodule LazyRiver.Symbol.TextTest do
+defmodule Blazie.Symbol.TextTest do
   @moduledoc """
   Text becomes a symbol through a formula, which is the only way a symbol may
   come to exist. The properties that matter are that it is deterministic and
@@ -7,7 +7,7 @@ defmodule LazyRiver.Symbol.TextTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Formula, Ledger, Snapshot, Symbol, TestLedger}
+  alias Blazie.{Attribute, Formula, Ledger, Snapshot, Symbol, TestLedger}
 
   setup do
     ledger = TestLedger.open()

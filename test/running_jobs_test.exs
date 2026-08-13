@@ -1,4 +1,4 @@
-defmodule LazyRiver.RunningJobsTest do
+defmodule Blazie.RunningJobsTest do
   @moduledoc """
   Jobs that are built and never started are jobs that do not run.
 
@@ -9,17 +9,17 @@ defmodule LazyRiver.RunningJobsTest do
   """
   use ExUnit.Case, async: false
 
-  alias LazyRiver.{Attribute, Job, Ledger, Snapshot, Vitals}
+  alias Blazie.{Attribute, Job, Ledger, Snapshot, Vitals}
 
   test "the formula engine is running" do
-    assert pid = Process.whereis(LazyRiver.Formula.Engine),
+    assert pid = Process.whereis(Blazie.Formula.Engine),
            "nothing is running the formula engine, so nothing caches an answer"
 
     assert Process.alive?(pid)
   end
 
   test "the running engine answers and caches" do
-    ledger = LazyRiver.TestLedger.open()
+    ledger = Blazie.TestLedger.open()
     {:ok, _} = Ledger.append(ledger, Attribute.seed())
     {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
     {:ok, _} = Ledger.append(ledger, [{1, "height", 10}])
@@ -27,23 +27,23 @@ defmodule LazyRiver.RunningJobsTest do
     {:ok, agent} = Agent.start_link(fn -> 0 end)
 
     formula =
-      LazyRiver.Formula.new("running-#{System.unique_integer([:positive])}", fn snapshot ->
+      Blazie.Formula.new("running-#{System.unique_integer([:positive])}", fn snapshot ->
         Agent.update(agent, &(&1 + 1))
         for f <- Snapshot.find(snapshot, attribute: "height"), do: {f.id, "doubled", f.value * 2}
       end)
 
-    :ok = LazyRiver.Formula.Engine.register(LazyRiver.Formula.Engine, formula)
+    :ok = Blazie.Formula.Engine.register(Blazie.Formula.Engine, formula)
     snapshot = Snapshot.open([ledger])
 
-    {:ok, first} = LazyRiver.Formula.Engine.answer(LazyRiver.Formula.Engine, formula.id, snapshot)
-    {:ok, again} = LazyRiver.Formula.Engine.answer(LazyRiver.Formula.Engine, formula.id, snapshot)
+    {:ok, first} = Blazie.Formula.Engine.answer(Blazie.Formula.Engine, formula.id, snapshot)
+    {:ok, again} = Blazie.Formula.Engine.answer(Blazie.Formula.Engine, formula.id, snapshot)
 
     assert first == again
     assert Agent.get(agent, & &1) == 1
   end
 
   test "the vitals job is running and taking readings" do
-    assert pid = Process.whereis(LazyRiver.Vitals.Runner),
+    assert pid = Process.whereis(Blazie.Vitals.Runner),
            "nothing is running the vitals job"
 
     assert Process.alive?(pid)
@@ -69,7 +69,7 @@ defmodule LazyRiver.RunningJobsTest do
     {:ok, ledger} = Ledger.open(Vitals.ledger())
     before = length(Snapshot.find(Snapshot.open([ledger]), id: "vitals", attribute: "node"))
 
-    {:ok, ran} = Job.Runner.tick(LazyRiver.Vitals.Runner, System.system_time(:second) + 100_000)
+    {:ok, ran} = Job.Runner.tick(Blazie.Vitals.Runner, System.system_time(:second) + 100_000)
     assert "vitals" in ran
 
     Enum.reduce_while(1..100, nil, fn _, _ ->

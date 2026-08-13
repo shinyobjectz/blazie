@@ -1,4 +1,4 @@
-defmodule LazyRiver.ThroughputTest do
+defmodule Blazie.ThroughputTest do
   @moduledoc """
   What one ledger costs per write, and where that stops working.
 
@@ -19,7 +19,7 @@ defmodule LazyRiver.ThroughputTest do
   """
   use ExUnit.Case, async: false
 
-  alias LazyRiver.{Ledger, Store}
+  alias Blazie.{Ledger, Store}
 
   @moduletag :throughput
   @moduletag timeout: 3_600_000

@@ -1,4 +1,4 @@
-defmodule LazyRiver.WireTest do
+defmodule Blazie.WireTest do
   @moduledoc """
   Translating between what travels and what the engine holds.
 
@@ -8,7 +8,7 @@ defmodule LazyRiver.WireTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Fact, Symbol, Wire}
+  alias Blazie.{Fact, Symbol, Wire}
 
   describe "a caller cannot grow the atom table" do
     test "no attribute name a caller sends ever becomes an atom" do

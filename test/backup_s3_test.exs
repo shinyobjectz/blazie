@@ -1,4 +1,4 @@
-defmodule LazyRiver.BackupS3Test do
+defmodule Blazie.BackupS3Test do
   @moduledoc """
   The backup against real object storage, over the real internet.
 
@@ -22,7 +22,7 @@ defmodule LazyRiver.BackupS3Test do
 
   @moduletag :object_storage
 
-  alias LazyRiver.{Attribute, Backup, Ledger, Snapshot, Store}
+  alias Blazie.{Attribute, Backup, Ledger, Snapshot, Store}
 
   setup_all do
     for var <- ~w(BACKUP_ENDPOINT BACKUP_BUCKET BACKUP_ACCESS_KEY_ID BACKUP_SECRET_ACCESS_KEY) do

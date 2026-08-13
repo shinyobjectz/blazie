@@ -1,4 +1,4 @@
-defmodule LazyRiver.SerialisedCheckTest do
+defmodule Blazie.SerialisedCheckTest do
   @moduledoc """
   A check is only a constraint if the thing that appends runs it.
 
@@ -19,7 +19,7 @@ defmodule LazyRiver.SerialisedCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Fact, Ledger, Snapshot, TestLedger}
+  alias Blazie.{Attribute, Fact, Ledger, Snapshot, TestLedger}
 
   setup do
     ledger = TestLedger.open()

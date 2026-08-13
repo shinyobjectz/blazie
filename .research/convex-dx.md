@@ -1,12 +1,12 @@
 # Convex Developer Experience — a mechanics map
 
-Reference material for designing Lazy River's DX. Researched 2026-08-13 against
+Reference material for designing blazie's DX. Researched 2026-08-13 against
 `docs.convex.dev` (the `llms-full.txt` corpus, ~2.4MB, which is the docs verbatim),
 the `get-convex/convex-backend` source (CLI lives in `npm-packages/convex/src/cli/`),
 and `stack.convex.dev`.
 
 Read this for *mechanics and design decisions*. Section 10 is the only place that
-talks about Lazy River; everything before it is description.
+talks about blazie; everything before it is description.
 
 **A note on dates.** Convex's DX has changed materially over its life. The two
 biggest shifts, both of which invalidate a lot of older writing about it:
@@ -69,7 +69,7 @@ If you read nothing else, these are the load-bearing ideas:
 And the sharpest things to *avoid* (§10.2):
 
 - **There is no rollback**, and the schema gate makes rollback across a narrowing
-  change impossible (§6.8). Lazy River gets this free — deploying is a write, so an
+  change impossible (§6.8). blazie gets this free — deploying is a write, so an
   earlier snapshot name *is* the rollback target — and should claim it as a verb
   before doctrine becomes the only answer.
 - **Invalidation granularity decides your users' schemas** (§9.5). Convex
@@ -90,10 +90,10 @@ And the sharpest things to *avoid* (§10.2):
   §9.10) — Windows broken for a year, no Bun because it would need a third bundler,
   and a userland Zod upgrade that makes your deployment un-pushable.
 
-Two of Convex's self-declared worst problems are things Lazy River has already
+Two of Convex's self-declared worst problems are things blazie has already
 solved structurally: **server-side reactivity** (their "missing primitive… on the
 to-do list for literally five years" is what `Formula` already is) and **auth**
-(their #1 complaint; Lazy River made it "which ledgers a caller may name"). See
+(their #1 complaint; blazie made it "which ledgers a caller may name"). See
 §10.0.
 
 ---
@@ -166,7 +166,7 @@ from the prompt and log strings in that file, the account path is:
   choose an existing project
 
 ? Team:  my-team
-? Project name:  (lazyriver)
+? Project name:  (blazie)
 ? Which type of dev deployment would you like to use?  cloud / local
 
 ⠋ Creating new Convex project...
@@ -1096,7 +1096,7 @@ capability-scoped extension system needs:
 Three things generalise:
 
 - **Isolation is by absence, not by policy** — the same doctrine as the function
-  runtime (§3.3) and as Lazy River's `Lua` host ("the host builds the world out of
+  runtime (§3.3) and as blazie's `Lua` host ("the host builds the world out of
   what it binds"). Applied one level up, to a whole installed module.
 - **A sub-transaction boundary makes third-party code catchable.** A thrown error
   rolls back the component's writes and nothing else. That is what makes it safe to
@@ -1106,7 +1106,7 @@ Three things generalise:
 
 Also note what a component *is*: an npm package containing functions and a schema —
 i.e. **the same artefact a user writes**, installed under a name. There is no
-special plugin API. In Lazy River terms, a component is a bundle of formulas and
+special plugin API. In blazie terms, a component is a bundle of formulas and
 jobs plus its own ledger, installed under a name that scopes what it may open.
 
 **The cost, in Convex's own words** (§9.7) — and this is the thing to design around
@@ -2283,7 +2283,7 @@ And the general-purpose version of the objection, joshstrange on HN 2024-08-15:
 > — <https://news.ycombinator.com/item?id=41260776>
 
 **The lesson is not about licensing.** It is that an escape hatch nobody would
-execute under duress is not an escape hatch. If Lazy River's answer to "what if I
+execute under duress is not an escape hatch. If blazie's answer to "what if I
 want out" is "the facts are yours, here they are", that has to be a tested,
 versioned, first-class operation — which, given `Backup.restore/verify` already
 exists and refuses rather than overwrites, is a real advantage to protect.
@@ -2502,7 +2502,7 @@ Convex's Ian Macartney, 2026-05-13:
 
 **Subscription identity is coupled to code identity.** Deploying anything
 invalidates everything, whether or not the deployed change could affect any given
-query. For Lazy River this is a *design decision to make deliberately now*: since
+query. For blazie this is a *design decision to make deliberately now*: since
 deploying is a write of source facts, a subscription's read set could include the
 specific formula source fact it depends on — in which case only subscribers to
 changed formulas would be disturbed. That falls out of the existing model rather
@@ -2530,7 +2530,7 @@ available, and better than anything a critic wrote:
    awesome client side reactivity, **there really is no good way to have server side
    reactivity in Convex right now**… we kind of have this small list of missing
    primitives that have been on the to-do list for **literally five years**."* Its
-   absence is *why* components hit OCC conflicts. Note that Lazy River's `Formula`
+   absence is *why* components hit OCC conflicts. Note that blazie's `Formula`
    —facts that follow from facts, invalidated by read set — **is** server-side
    reactivity, and is the primitive Convex has wanted for five years.
 5. **Auth is confusing** (§9.9).
@@ -2558,11 +2558,11 @@ Convex's own postmortem, *"How Convex Took Down T3 Chat"* (2025-06-03):
 Two transferable lessons, both cheap to act on early:
 
 - **Invalidation must be triggered by logical data change, never by storage-layer
-  events.** A compaction is not a write. If Lazy River's checkpointing, segment
+  events.** A compaction is not a write. If blazie's checkpointing, segment
   rotation, or backup ever touches the structures a read set is compared against,
   this is the exact landmine.
 - **A reconnecting client must back off on server health, not on TCP connect.**
-  Otherwise every overload becomes a self-inflicted thundering herd. Lazy River has
+  Otherwise every overload becomes a self-inflicted thundering herd. blazie has
   a websocket `watch` and will have exactly this problem.
 
 ### 9.9 Auth — Convex says this is their #1 complaint
@@ -2583,8 +2583,8 @@ Auth has been in beta since launch and was *"put on ice"* — Turner: *"maybe th
 was a mistake."* Auth is also the largest cluster of open issues (#75, #108, #145,
 #259, #242, #402).
 
-**This is the most encouraging finding in the whole document for Lazy River.**
-Convex's worst friction point is the one place Lazy River has already made a
+**This is the most encouraging finding in the whole document for blazie.**
+Convex's worst friction point is the one place blazie has already made a
 structural decision instead of a product decision: *"Authorization is which ledgers
 a caller may name. Not row rules, not predicates."* Convex's problem is that
 identity is a third-party concern bolted to a data model with no natural place for
@@ -2703,13 +2703,13 @@ for literally five years."* **Candour without shipping eventually reads as a shr
 
 ## 10. What transfers, and what does not
 
-### 10.0 Where Lazy River already is
+### 10.0 Where blazie already is
 
 Worth stating first, because it changes what is worth copying. Reading
-`lib/lazy_river/`, the *engine* already has Convex's core mechanisms, sometimes
+`lib/blazie/`, the *engine* already has Convex's core mechanisms, sometimes
 in a cleaner form:
 
-| Convex mechanism | Lazy River equivalent | Status |
+| Convex mechanism | blazie equivalent | Status |
 |---|---|---|
 | Query read set | `Formula` — "the dependency list is not written because it is *observed*" | present |
 | Subscription = read set + log walk | `Subscription` — "a write outside it pushes nothing" | present |
@@ -2724,16 +2724,16 @@ this document**: there is no CLI, no authoring loop, no local run story, no erro
 surface for an author, no test harness. That is what this research is for.
 
 Two of these deserve emphasis, because Convex names them as its own unsolved
-problems (§9.7) and Lazy River has already solved them structurally:
+problems (§9.7) and blazie has already solved them structurally:
 
 - **Server-side reactivity.** Convex's CTO, 2026-02-25: *"there really is no good
   way to have server side reactivity in Convex right now… we kind of have this small
   list of missing primitives that have been on the to-do list for literally five
-  years."* Lazy River's `Formula` — facts that follow from facts, staleness decided
+  years."* blazie's `Formula` — facts that follow from facts, staleness decided
   by an observed read set — **is** that primitive. It is also, per §9.7, the missing
   piece that causes Convex's components to hit OCC conflicts.
 - **Auth.** Convex's self-declared #1 complaint (§9.9), with four competing options
-  and a first-party solution "on ice." Lazy River made it a structural decision
+  and a first-party solution "on ice." blazie made it a structural decision
   instead: *"Authorization is which ledgers a caller may name. Not row rules, not
   predicates."* **Do not grow four options.**
 
@@ -2741,7 +2741,7 @@ problems (§9.7) and Lazy River has already solved them structurally:
 
 **1. The dev loop's watch set is the last build's read set.** (§1.4)
 Convex watches exactly the files the push actually read, and an event only
-triggers a rebuild if it overlaps. Lazy River has this concept *already*, one
+triggers a rebuild if it overlaps. blazie has this concept *already*, one
 level down, in `Formula` — "running a formula records what it read." Use the same
 idea one level up: a `river dev` should watch what the last deploy-write actually
 read (the formula sources, the job sources, whatever files they included), not a
@@ -2758,7 +2758,7 @@ error taxonomy is not `error`/`warning`; it is *which input is wrong*:
 {"invalid filesystem or db data": {tableName}}  → watch files AND that table
 ```
 
-Lazy River's refusals already carry `%{problem:, repair:}`. Add a third field —
+blazie's refusals already carry `%{problem:, repair:}`. Add a third field —
 the *input* — and a `river dev` can race a file watcher against a `watch`
 subscription on the ledger that the refusal named. A formula that refuses because
 an attribute doesn't declare its space would then retry by itself the moment
@@ -2768,7 +2768,7 @@ free; Convex had to build one for the CLI.**
 **3. Generated code should be a manifest, not a projection.** (§2.2) The reason
 `convex/_generated/` is not a merge-conflict swamp is structural: `api.js` is three
 lines, and `api.d.ts` has *one line per module file*. Adding a function changes
-nothing. If Lazy River ever emits a client-side surface (typed formula/job
+nothing. If blazie ever emits a client-side surface (typed formula/job
 references for an Elixir or TS caller), emit **the list of names**, not a
 projection of each name's shape, and let the consumer's type system or runtime do
 the rest. Also: sort with a platform-stable comparator so the artefact is
@@ -2776,13 +2776,13 @@ byte-identical everywhere, and put the regeneration command in the file header.
 
 **4. A missing input produces a weaker artefact that explains itself, not an
 error.** (§2.3) `dataModel.d.ts` with no `schema.ts` is `Doc = any` plus a comment
-saying why and linking the fix. Applies directly to Lazy River: an attribute with
+saying why and linking the fix. Applies directly to blazie: an attribute with
 no declared space, a formula with no recorded read set yet, a ledger with no facts
 — each should produce a working-but-weak answer that names its own weakness.
 
 **5. Long operations are progress bars that link to somewhere better.** (§5.2)
 `Backfilling indexes (3/7 ready) and checking that documents match your schema...`,
-and after ten seconds it appends a URL. Any Lazy River operation that scans a
+and after ten seconds it appends a URL. Any blazie operation that scans a
 ledger — a backfill, a `verify`, a formula's first run over a large snapshot —
 should stream `(n/m)` and, past a threshold, tell you where to watch it. The
 `watch` channel is the obvious place to publish that from.
@@ -2799,7 +2799,7 @@ exit as soon as it works." Both are needed and they are not the same flag.
 **8. Non-interactive + unauthenticated is a signal, not an error.** (§1.8)
 Convex's rule — *"when no deployment is already configured and `CONVEX_DEPLOY_KEY`
 isn't set, the CLI defaults to provisioning a local deployment automatically"* —
-is exactly right for a world where agents run your CLI. Lazy River is a single
+is exactly right for a world where agents run your CLI. blazie is a single
 node with a `LEDGER_DIR`; the equivalent default is "no `LEDGER_DIR`, no
 credentials, non-interactive → start an in-memory node and point at it." The
 README already says an in-memory ledger "is right for a test"; make it right for
@@ -2807,7 +2807,7 @@ an agent too.
 
 **9. Per-worker isolation as the default, with a TTL.** (§6.7, §1.8) One
 deployment per developer, per branch, per agent worktree, and
-`--expiration "in 5 days"` on the create call. For Lazy River the cheap analogue
+`--expiration "in 5 days"` on the create call. For blazie the cheap analogue
 is a **ledger namespace per worker**, since authorization is already "which
 ledgers a caller may name" — an agent gets a token that can name only its own
 ledgers, and those ledgers have an expiry fact.
@@ -2815,14 +2815,14 @@ ledgers, and those ledgers have an expiry fact.
 **10. Declared configuration is separate from set configuration.** (§6.6) Convex's
 newer `defineApp({ env: { GIPHY_KEY: v.string() } })` declares *what must exist and
 of what shape* in the repo, while the values live only in the deployment — and the
-declaration then prevents `env remove` from breaking things. Lazy River's config
+declaration then prevents `env remove` from breaking things. blazie's config
 table in the README is currently prose. Making it a declaration the node reads at
 boot, which refuses a deploy that would remove a required variable, is the same
 move.
 
 **11. The migration runner is a function you happened to write.** (§5.5) No
 `convex migrate` verb; you run a migration with `npx convex run`, the same command
-you run anything with. Its status is a *reactive query*. For Lazy River this is
+you run anything with. Its status is a *reactive query*. For blazie this is
 nearly free and philosophically identical: a backfill is a **job**, its progress is
 facts, and `watch` on those facts is the progress bar. Copy the operational
 semantics — resume from the failed batch by default, `reset` to restart,
@@ -2832,12 +2832,12 @@ default with parallelism opt-in.
 **12. Naming: the typed surface is sugar over a stable string namespace.** (§3.2)
 `api.foo.myQueries.myQuery` is always also `"foo/myQueries:myQuery"`. That string
 is what the CLI takes, what non-TS clients use, and what makes an OpenAPI export
-possible. Lazy River should fix the canonical string name of a formula/job **now**,
+possible. blazie should fix the canonical string name of a formula/job **now**,
 before any client library exists, because everything else becomes sugar over it.
 
 **13. `--cmd` inverts build ordering to solve a chicken-and-egg.** (§6.4) Whenever
 a downstream build needs a value that only the deploy can produce, the deploy tool
-should own the build rather than the reverse. If Lazy River ever grows a client
+should own the build rather than the reverse. If blazie ever grows a client
 that must be told a ledger name or a node URL that the deploy creates, this is the
 shape.
 
@@ -2851,7 +2851,7 @@ npx convex run --inline-query 'await ctx.db.query("messages").take(5)'
 > The function call is also completely sandboxed, so it can only read data and
 > cannot modify the database or access the network.
 
-For Lazy River this is *trivially* available and enormously valuable: `river ask
+For blazie this is *trivially* available and enormously valuable: `river ask
 --lua 'return facts{attribute="height"}'` is just `Lua.run(source, as: :formula)`
 against a snapshot. It is a REPL that cannot break anything, and it falls out of
 the formula/job split for free. **Ship this early — it is the cheapest possible
@@ -2873,7 +2873,7 @@ component is a package of ordinary functions plus its own schema, and
 absence ("can't read data that is not explicitly provided to it"), and each call
 is a **sub-transaction**, so a thrown error rolls back the component's writes and
 nothing else — which is what makes installing someone else's code into your
-transaction survivable. For Lazy River: a bundle of formulas and jobs plus a
+transaction survivable. For blazie: a bundle of formulas and jobs plus a
 ledger, installed under a name, where the name is what the existing
 "authorization is which ledgers a caller may name" rule already scopes. **You get
 this nearly free; Convex had to build a sandbox boundary for it.**
@@ -2901,7 +2901,7 @@ data at rest, once you have narrowed a schema you *cannot* redeploy the old code
 Their answer is a doctrine — additive-only, push schema separately from code — and
 doctrine is not a mechanism.
 
-Lazy River is in a much better position and should not squander it: **deploying is
+blazie is in a much better position and should not squander it: **deploying is
 a write, source is a fact, and facts are immutable and named.** A rollback is
 therefore *already* expressible as "open at the earlier snapshot name" or "write
 the earlier source fact again." Make that a first-class verb (`river rollback
@@ -2913,7 +2913,7 @@ already reached outside.
 **2. Determinism at the runtime level does not make the dependency graph
 honest.** (§4.5) Convex freezes `Date.now()` inside a query — and then has to tell
 you in Best Practices *"Don't use `Date.now()` in queries"*, because time is not in
-the read set, so the answer never invalidates. Lazy River is already stricter (`os`
+the read set, so the answer never invalidates. blazie is already stricter (`os`
 is *absent* from a formula, not frozen), which is the right call — but the general
 lesson stands: **anything a formula can observe that is not part of the snapshot is
 a silent staleness bug.** Audit the whole bound world of `as: :formula` against
@@ -2922,9 +2922,9 @@ that test, not just the clock.
 **3. Inference-heavy generated types are a scaling trap with an ugly exit.**
 (§2.6) Convex's `api` object is beautiful and got slow, and the escape hatch
 (`staticApi: true`) costs jump-to-definition, return-type inference, and TS enums.
-The lesson for Lazy River: if you generate anything for a typed client, **prefer
+The lesson for blazie: if you generate anything for a typed client, **prefer
 the materialised form from the start** and accept the staleness, or design so
-nothing needs generating at all. Lazy River's string-named formulas over a dynamic
+nothing needs generating at all. blazie's string-named formulas over a dynamic
 Lua surface may simply not have this problem — that is a reason to keep it that
 way, not an accident to fix.
 
@@ -2932,12 +2932,12 @@ way, not an accident to fix.
 (§2.5) `npx convex codegen` refuses with `Codegen requires an existing deployment
 so doesn't support CONVEX_DEPLOY_KEY.` — i.e. it does not work in CI. They mitigate
 with "commit the generated code and diff it," which works but is a workaround.
-**Whatever Lazy River generates must be derivable from the repo alone.**
+**Whatever blazie generates must be derivable from the repo alone.**
 
 **5. `.env.local` holding the deployment identity is convenient and leaky.** It
 makes per-developer deployments free (good) but it also means "which backend am I
 talking to" is invisible state on a developer's disk. Convex compensates with the
-loud colour-coded interlock prompt before any prod deploy (§6.2). If Lazy River
+loud colour-coded interlock prompt before any prod deploy (§6.2). If blazie
 puts the node URL and ledger set in a dotfile, **copy the interlock too** — print
 the target, print what it serves, and default the confirmation to the safe answer.
 Their index-deletion prompt defaults to **No**; theirs is the right instinct.
@@ -2946,7 +2946,7 @@ Their index-deletion prompt defaults to **No**; theirs is the right instinct.
 `"use node"`, files that may not import each other, an ESLint rule to catch it, a
 `--debug-node-apis` flag with a slower bundler to explain the failures, and a
 separate memory/timeout/argument-size regime. This exists because their fast
-runtime cannot run arbitrary npm. **Lazy River has one runtime (Luerl on the BEAM)
+runtime cannot run arbitrary npm. **blazie has one runtime (Luerl on the BEAM)
 and should fight hard to keep it that way** — the moment there is a second place
 code can run, you have inherited the whole partition problem, plus its error
 messages.
@@ -2956,7 +2956,7 @@ transactional, not retried, must not be called from the client, and multiple
 `runQuery` calls from one action are not a consistent snapshot. Convex's answer is
 a *pattern* (mutation writes intent + schedules action → action → mutation records
 progress) and later a set of components (Workpool, Workflow) to make the pattern
-survivable. Lazy River's `Job` already writes its answer and its failures as facts,
+survivable. blazie's `Job` already writes its answer and its failures as facts,
 which is that pattern **built in rather than prescribed**. Keep it that way, and
 resist any convenience that lets a caller invoke a job and await its answer
 inline — that is the exact door Convex left open and then spent documentation
@@ -2976,7 +2976,7 @@ there is no wall.
 
 **9. The read set is the subscription, so over-reading is over-subscribing —
 and it is also the bill.** (§4.4) `.collect()` on a large table subscribes you to
-the whole table. Lazy River inherits this exactly, since `Subscription` is a read
+the whole table. blazie inherits this exactly, since `Subscription` is a read
 set. The mitigations Convex reached for, in order: an ESLint rule
 (`no-collect-in-query`), a Best Practice, a transaction limit that errors, and a
 warning before the limit. **Build the warning and the limit before you need the
@@ -2998,7 +2998,7 @@ schemas.** (§9.5) Convex invalidates per *document* and per *index range*, so a
 write to any field re-runs every query that touched that document, and a query over
 an empty range still re-runs when anything enters the range. The user-visible
 consequence is that people are told to split "hot" and "cold" fields into separate
-tables — **the data model gets deformed by write frequency.** Lazy River's unit is a
+tables — **the data model gets deformed by write frequency.** blazie's unit is a
 fact `{entity, attribute, answer}`, not a document, so attribute-level granularity
 is available *for free* and should be taken deliberately rather than by accident.
 The same choice also decides whether a "hot attribute" forces a user to restructure
@@ -3007,7 +3007,7 @@ their ledgers.
 **12. Never let a storage-layer event trigger invalidation.** (§9.8) Convex took
 down its largest customer because a *search index compaction* — which changes no
 logical data — invalidated every subscription touching a search-indexed field,
-taking a 50 qps deployment to 20,000+ qps. Lazy River has checkpoints, segment
+taking a 50 qps deployment to 20,000+ qps. blazie has checkpoints, segment
 rotation, and a backup job that all touch the structures reads are compared
 against. **Write the test now**: perform every maintenance operation and assert
 that no subscription fires.
@@ -3015,18 +3015,18 @@ that no subscription fires.
 **13. A reconnecting client must back off on server health, not on TCP connect.**
 (§9.8) The second half of the same outage was a self-inflicted DDOS: clients
 reconnected, issued expensive queries, got dropped by an overloaded server, and
-immediately repeated. Lazy River's `watch` channel will have exactly this failure
+immediately repeated. blazie's `watch` channel will have exactly this failure
 mode.
 
 **14. `strictTableNameTypes: false` and `schemaValidation: false` are two knobs
 that quietly turn off different things.** The second also disables *index
-reference checking*, which is not what its name says. If Lazy River grows any
+reference checking*, which is not what its name says. If blazie grows any
 "trust me" escape hatch, make each one name exactly the check it removes.
 
 **15. A concurrency remedy that costs a migration is very expensive.** (§9.4) Every
 OCC fix Convex prescribes — shard the counter, split hot and cold fields, narrow the
 read — is a schema change, and a schema change is a widen→backfill→narrow
-multi-deploy dance (§5.3). The two problems multiply. Lazy River's append-only,
+multi-deploy dance (§5.3). The two problems multiply. blazie's append-only,
 attribute-grained model means "the schema" is much less of a thing, which is an
 advantage worth *keeping* rather than spending: resist any feature that makes a
 contention fix require restructuring what a user already wrote.
@@ -3035,7 +3035,7 @@ contention fix require restructuring what a user already wrote.
 Convex's cofounder said in 2022 that incrementality "would be very difficult… since
 we're dealing with a general purpose programming language", and named differential
 dataflow as the aspiration; four years later a query still re-runs whole. **Lua is
-also a general-purpose language, so Lazy River inherits exactly this.** The
+also a general-purpose language, so blazie inherits exactly this.** The
 `Formula` moduledoc already anticipates it — *"This one re-executes… an incremental
 evaluator would slot in underneath without any formula changing"* — and the escape
 route is visible in `Sandbox.mapping`: a *restricted shape* ("applies an exported
@@ -3046,7 +3046,7 @@ everything is written as free-form Lua.
 
 **17. A limit that lives in documentation can be lowered retroactively, and
 Convex did it.** (§9.2) Mutation write throughput was cut 16 → 4 → 1 MiB in a week
-in 2026 by editing a docs page, then partly restored. Whatever Lazy River's
+in 2026 by editing a docs page, then partly restored. Whatever blazie's
 transaction/deadline/heap limits are, they should be **stated where they are
 enforced** — in the refusal — and the refusal should name the actual number it
 enforced, not a documented one.
@@ -3055,13 +3055,13 @@ enforced, not a documented one.
 function call, and *subscription updates are function calls*, so the price of a
 query is a function of other people's writes. Their CEO conceded on the record that
 estimating cost is genuinely hard and promised a calculator that still does not
-exist. The Lazy River analogue is not billing but **resource attribution**: if a
+exist. The blazie analogue is not billing but **resource attribution**: if a
 formula's cost depends on write traffic it does not control, that has to be
 observable (a fact) before anyone is surprised by it.
 
 ### 10.3 Does not transfer — TypeScript/JS-toolchain artefacts
 
-These are large parts of Convex's DX that solve problems Lazy River does not have.
+These are large parts of Convex's DX that solve problems blazie does not have.
 Listing them is useful mainly so they are not cargo-culted:
 
 - **The whole bundling apparatus** — esbuild, tree-shaking, 32 MiB code limits,
@@ -3075,13 +3075,13 @@ Listing them is useful mainly so they are not cargo-culted:
   keeping — it is where wrappers get installed — but it should be a host-side
   concept, not a generated file.
 - **Typecheck-before-push, `tsc --noEmit`, TypeScript 7, `generateTrace`, and the
-  entire "Typecheck Performance" page.** The equivalent question for Lazy River is
+  entire "Typecheck Performance" page.** The equivalent question for blazie is
   much smaller: does the Lua parse, and does it name only bound functions? Both are
   fast and both are answerable without a compiler. **But do keep the shape:** there
   *is* a static check that runs before the deploy-write lands, and its failure is a
   refusal with a repair.
 - **The `api`/`internal` split enforced by `FilterApi` in generated types.**
-  Public-vs-internal reachability is real and worth having, but Lazy River should
+  Public-vs-internal reachability is real and worth having, but blazie should
   express it as an attribute of the fact that declares the formula/job — a
   property of the thing, checked at the surface — rather than as a type-level
   filter that only one client language can see. The Convex version is invisible to
@@ -3093,17 +3093,17 @@ Listing them is useful mainly so they are not cargo-culted:
   speculative write), but the hook shape does not.
 - **Vercel/Netlify/Cloudflare preview-deployment integration.** Convex's preview
   system exists because their users deploy frontends to those platforms and want
-  a backend per PR. Lazy River is a single node with an HTTP/WS surface; the
+  a backend per PR. blazie is a single node with an HTTP/WS surface; the
   transferable core is "a throwaway environment with a TTL, seeded by a function,
   named after the branch," not the host integrations.
 
 ### 10.4 The four operations, mapped
 
-Concretely, where each Convex idea lands on Lazy River's surface. **The command
+Concretely, where each Convex idea lands on blazie's surface. **The command
 names below are placeholders for shape, not proposals** — nothing here has been
 through `monty onto check`, and `river` in particular is an unchecked name.
 
-| Convex | Lazy River |
+| Convex | blazie |
 |---|---|
 | `npx convex dev` watch loop | a `river dev` that watches the source files the last deploy-write read, races that against a `watch` subscription on the ledger a refusal named, 500ms quiescence, prints `HH:MM:SS ready (Nms)` |
 | `npx convex run <fn> [args]` | `river ask <name> <question>` — already the `ask` operation |
@@ -3121,7 +3121,7 @@ through `monty onto check`, and `river` in particular is an unchecked name.
 
 The recurring shape: **Convex had to build a control plane beside the database
 (CLI protocol, deploy2 endpoints, `_system/cli/*` queries, a subscription just for
-the dev loop). Lazy River's four operations already are that control plane**,
+the dev loop). blazie's four operations already are that control plane**,
 because source is facts and progress is facts. The work is not building the
 mechanism; it is deciding the command names and the output, and making refusals
 name their input.

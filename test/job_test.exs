@@ -1,12 +1,12 @@
-defmodule LazyRiver.JobTest do
+defmodule Blazie.JobTest do
   @moduledoc """
   The doctrine, executable — the outside world happens once, only a job has a
   schedule, and there is no queue anywhere.
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Fact, Job, Ledger, Snapshot, Attribute}
-  alias LazyRiver.TestLedger
+  alias Blazie.{Fact, Job, Ledger, Snapshot, Attribute}
+  alias Blazie.TestLedger
 
   setup do
     ledger = TestLedger.open()
