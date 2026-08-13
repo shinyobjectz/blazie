@@ -27,10 +27,11 @@ export const onRequestDelete: PagesFunction<Control> = async ({ env, request, pa
   }
 
   const destroy = new URL(request.url).searchParams.get("destroy") === "1"
+  let machineGone = true
 
   if (destroy) {
     if (cluster.host?.vendor === "upcloud" && env.UPCLOUD_TOKEN) {
-      await upcloud.close({ token: env.UPCLOUD_TOKEN }, cluster.host.uuid)
+      machineGone = await upcloud.close({ token: env.UPCLOUD_TOKEN }, cluster.host.uuid)
     }
 
     if (env.CLOUDFLARE_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_ZONE_ID) {
@@ -46,6 +47,19 @@ export const onRequestDelete: PagesFunction<Control> = async ({ env, request, pa
         hostname,
       )
     }
+  }
+
+  // The machine is refused rather than forgotten when it would not go, because
+  // dropping the record is what makes it invisible — and an invisible machine
+  // still bills. The tunnel and the name are already gone by here, so the
+  // cluster is unreachable either way; what must not happen is losing the only
+  // record of which UpCloud server it was.
+  if (destroy && !machineGone) {
+    return refuse(
+      "machine_remains",
+      `The tunnel and the name were removed, but ${cluster.name}'s machine would not stop and delete. The record has been kept so the machine can still be found — its id is ${cluster.host?.uuid ?? "unknown"}. Ask again, or remove it from the UpCloud console.`,
+      502,
+    )
   }
 
   await keep(env, session.login, all.filter((c) => c.id !== id))

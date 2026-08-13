@@ -167,13 +167,57 @@ export async function open(
   }
 }
 
-/** Take the machine away. Used when opening failed part-way, and when forgetting. */
-export async function close(credentials: Credentials, uuid: string) {
-  await fetch(`${API}/server/${uuid}/?storages=1`, {
-    method: "DELETE",
-    headers: { authorization: basic(credentials) },
+/**
+ * Take the machine away, and its disk.
+ *
+ * Stopped first, because UpCloud refuses to delete a running server — measured,
+ * after a destroy that removed the tunnel and the DNS record and left the
+ * machine running and billing. That is precisely the outcome this whole design
+ * claims to avoid, and it survived because the delete's failure was swallowed:
+ * `.catch(() => undefined)` on a call whose success nobody checked.
+ *
+ * `hard`, not `soft`. A machine being destroyed is one nothing is expected from,
+ * and a soft stop waits on a guest that may be the reason it is being destroyed.
+ */
+export async function close(credentials: Credentials, uuid: string): Promise<boolean> {
+  await fetch(`${API}/server/${uuid}/stop`, {
+    method: "POST",
+    headers: { authorization: basic(credentials), "content-type": "application/json" },
+    body: JSON.stringify({ stop_server: { stop_type: "hard" } }),
     signal: AbortSignal.timeout(30_000),
   }).catch(() => undefined)
+
+  // Polled rather than assumed. Stopping is not instant and a delete sent too
+  // early is refused exactly as it was before.
+  for (let i = 0; i < 30; i++) {
+    const state = await stateOf(credentials, uuid)
+
+    // Already gone, which is a success rather than a case to handle.
+    if (state === null) return true
+    if (state === "stopped") break
+
+    await new Promise((wake) => setTimeout(wake, 4_000))
+  }
+
+  const gone = await fetch(`${API}/server/${uuid}/?storages=1&backups=delete`, {
+    method: "DELETE",
+    headers: { authorization: basic(credentials) },
+    signal: AbortSignal.timeout(60_000),
+  }).catch(() => null)
+
+  return Boolean(gone?.ok)
+}
+
+async function stateOf(credentials: Credentials, uuid: string): Promise<string | null> {
+  const said = await fetch(`${API}/server/${uuid}`, {
+    headers: { authorization: basic(credentials) },
+    signal: AbortSignal.timeout(20_000),
+  }).catch(() => null)
+
+  if (!said?.ok) return null
+
+  const body = (await said.json().catch(() => null)) as { server?: { state?: string } } | null
+  return body?.server?.state ?? null
 }
 
 /**
