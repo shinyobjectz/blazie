@@ -41,3 +41,17 @@ onto-sync:
 # Any monty command through the pinned engine.
 monty *ARGS:
     @{{monty}} {{ARGS}}
+
+# Regenerate the README banner from the running site, so it cannot drift from
+# the hero it is meant to look like. Needs `just web` running on :3111.
+banner:
+    @echo "open http://localhost:3111/banner at 1200x420 and capture to priv/static/brand/banner.png"
+    @echo "the page is web/app/banner/page.tsx — it renders the same shader and the same wordmark"
+
+# The console, in development.
+web:
+    cd web && pnpm dev --port 3111
+
+# Build the console for a static host.
+web-build:
+    cd web && pnpm build

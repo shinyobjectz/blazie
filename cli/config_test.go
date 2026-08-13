@@ -193,7 +193,12 @@ func TestATokenInTheEnvironmentBeatsTheStoredOne(t *testing.T) {
 // tempConfig points the CLI at a throwaway config for the length of one test.
 func tempConfig(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "blazie", "config.json")
+	dir := filepath.Join(t.TempDir(), "blazie")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, "config.json")
 	t.Setenv("BLAZIE_CONFIG", path)
 	return path
 }

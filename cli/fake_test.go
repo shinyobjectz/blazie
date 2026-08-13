@@ -114,6 +114,8 @@ func pending(interval any) reply {
 	return reply{status: http.StatusAccepted, body: body}
 }
 
+func strPtr(s string) *string { return &s }
+
 func refused(problem, repair string) reply {
 	return reply{
 		status: http.StatusUnprocessableEntity,

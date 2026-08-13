@@ -7,17 +7,24 @@ import { useEffect } from "react"
 import { GradientBackground } from "@/components/ui/paper-design-shader-background"
 import { Wordmark } from "@/components/ui/wordmark"
 import { readToken } from "@/lib/blazie"
+import { mintState } from "@/lib/oauth"
 
 const CLIENT_ID =
   process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID ?? "Ov23liU8M5D4hy3RFrRM"
 
 const REDIRECT_URI = "https://blazie.dev/callback/github"
 
-const AUTHORIZE =
-  "https://github.com/login/oauth/authorize" +
-  `?client_id=${encodeURIComponent(CLIENT_ID)}` +
-  `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-  "&scope=read:user"
+function authorizeUrl() {
+  const state = mintState()
+
+  return (
+    "https://github.com/login/oauth/authorize" +
+    `?client_id=${encodeURIComponent(CLIENT_ID)}` +
+    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+    "&scope=read:user" +
+    `&state=${encodeURIComponent(state)}`
+  )
+}
 
 export default function Login() {
   const router = useRouter()
@@ -50,13 +57,16 @@ export default function Login() {
             are in.
           </p>
 
-          <a
-            href={AUTHORIZE}
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href = authorizeUrl()
+            }}
             className="mt-9 inline-flex w-full items-center justify-center gap-3 rounded-md bg-white px-6 py-3.5 text-sm font-semibold tracking-tight text-black transition-transform hover:scale-[1.02]"
           >
             <GithubMark />
             continue with github
-          </a>
+          </button>
 
           <p className="mt-6 text-xs leading-relaxed text-white/45">
             read:user only. blazie records the login your token was minted under

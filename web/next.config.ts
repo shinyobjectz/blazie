@@ -14,6 +14,10 @@ const nextConfig: NextConfig = {
   // must never be resampled.
   images: { unoptimized: true },
   trailingSlash: true,
+  // The dev overlay badge sits in a corner and lands in any capture taken
+  // from the running app — including the README banner, which is rendered
+  // from `/banner` rather than drawn.
+  devIndicators: false,
 };
 
 export default nextConfig;

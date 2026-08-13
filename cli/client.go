@@ -205,13 +205,28 @@ func (c *Client) Me(ctx context.Context) (*Me, error) {
 // never the bytes, which is why an answer can be cached against it forever.
 type SnapshotName map[string]int64
 
-// Fact is the only row shape there is.
+// Fact is the only row shape there is: an id, an attribute said about it, the
+// answer, and the transaction that recorded it — plus, optionally, the formula
+// or job that produced it.
+//
+// By is a pointer so that null survives `--json` as null. A fact that came from
+// outside names no formula, and "produced by nothing" and "produced by a
+// formula called nothing" are not the same claim to a script reading this.
 type Fact struct {
-	ID        any    `json:"id"`
-	Attribute string `json:"attribute"`
-	Value     any    `json:"value"`
-	Tx        int64  `json:"tx"`
-	By        string `json:"by"`
+	ID        any     `json:"id"`
+	Attribute string  `json:"attribute"`
+	Value     any     `json:"value"`
+	Tx        int64   `json:"tx"`
+	By        *string `json:"by"`
+}
+
+// Producer is the formula or job behind this fact, or "" when it came from
+// outside — which is every fact a client ever writes.
+func (f Fact) Producer() string {
+	if f.By == nil {
+		return ""
+	}
+	return *f.By
 }
 
 // Pattern is what an ask puts to a snapshot: fields named are fields matched,

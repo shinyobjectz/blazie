@@ -26,7 +26,10 @@ func TestRenderRefusalPrintsTheRepair(t *testing.T) {
 	if !strings.Contains(text, "not_granted") {
 		t.Fatalf("the problem is missing:\n%s", text)
 	}
-	if !strings.Contains(text, "Grant it, or name only what it holds.") {
+	// Compared with whitespace collapsed, because the repair is wrapped to the
+	// terminal and the words are what has to survive, not the line breaks.
+	flat := strings.Join(strings.Fields(text), " ")
+	if !strings.Contains(flat, "Grant it, or name only what it holds.") {
 		t.Fatalf("the repair is missing, which is the only part that was actionable:\n%s", text)
 	}
 	if !strings.Contains(text, "403") {
@@ -120,7 +123,7 @@ func TestRenderFactsKeepsTypesDistinguishable(t *testing.T) {
 	var out bytes.Buffer
 	RenderFacts(&out, []Fact{
 		{ID: float64(1), Attribute: "height", Value: float64(180), Tx: 7},
-		{ID: "person-2", Attribute: "name", Value: "Ada", Tx: 8, By: "$backup"},
+		{ID: "person-2", Attribute: "name", Value: "Ada", Tx: 8, By: strPtr("$backup")},
 		{ID: float64(3), Attribute: "known", Value: true, Tx: 9},
 	})
 

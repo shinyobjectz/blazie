@@ -123,7 +123,7 @@ func RenderFacts(w io.Writer, facts []Fact) {
 
 	rows := make([][]string, 0, len(facts))
 	for _, f := range facts {
-		by := f.By
+		by := f.Producer()
 		if by == "" {
 			// Empty means no formula and no job produced it — it came from
 			// outside. Shown rather than blank, because provenance is the

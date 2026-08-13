@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="priv/static/brand/banner.png" alt="blazie — the backend agents run on" width="100%">
+</p>
+
 # blazie
 
 **The backend agents run on.**

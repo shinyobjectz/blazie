@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react"
 
 import { GradientBackground } from "@/components/ui/paper-design-shader-background"
 import { RefusalNote } from "@/components/ui/refusal-note"
+import { takeState } from "@/lib/oauth"
 import { Wordmark } from "@/components/ui/wordmark"
 import { Refusal, authGithub, storeToken } from "@/lib/blazie"
 
@@ -38,6 +39,20 @@ async function exchange(): Promise<string> {
       "no_code",
       "github redirected here without a code. Start the sign-in again from /login — this page is only ever reached from github.",
       422,
+    )
+  }
+
+  // The state proves this callback belongs to the sign-in this browser began.
+  // Without it, a link somebody sends you completes THEIR sign-in in YOUR
+  // browser and you end up holding a token you never asked for. Consumed
+  // whatever happens next, so a single value cannot be replayed.
+  const expected = takeState()
+
+  if (!expected || params.get("state") !== expected) {
+    throw new Refusal(
+      "state_mismatch",
+      "this sign-in did not start in this browser, so it was not completed. That is what should happen if you followed a sign-in link somebody sent you. Start again from /login.",
+      403,
     )
   }
 

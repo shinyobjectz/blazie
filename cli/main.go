@@ -45,12 +45,13 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return 2
 	}
 
-	command, rest := args[0], args[1:]
+	command, rest, err := hoistGlobals(args)
+	if err != nil {
+		RenderRefusal(errOut, unwrapUsage(err))
+		return 2
+	}
 
-	var (
-		err    error
-		asJSON bool
-	)
+	var asJSON bool
 
 	switch command {
 	case "login":
@@ -104,6 +105,61 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	return 1
 }
 
+// hoistGlobals lets `--url` and `--json` come before the command as well as
+// after it.
+//
+// `blazie --url http://node whoami` and `blazie whoami --url http://node` are
+// the same intent, and a CLI that takes only one of them makes somebody read
+// the usage to find out which. The flags that mean the same thing everywhere
+// are moved onto the command's own arguments; anything else in front of a
+// command is a mistake, and gets a repair saying where it belongs.
+func hoistGlobals(args []string) (command string, rest []string, err error) {
+	var hoisted []string
+
+	for len(args) > 0 {
+		arg := args[0]
+		if len(arg) < 2 || arg[0] != '-' {
+			break
+		}
+
+		name, _, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+
+		switch name {
+		case "help", "h", "version", "v":
+			// Not a global flag but a command spelled like one, which is what
+			// somebody reaching for `--version` means.
+			return arg, nil, nil
+
+		case "json":
+			hoisted, args = append(hoisted, arg), args[1:]
+
+		case "url":
+			if hasValue || len(args) == 1 {
+				hoisted, args = append(hoisted, arg), args[1:]
+				continue
+			}
+			hoisted, args = append(hoisted, arg, args[1]), args[2:]
+
+		default:
+			return "", nil, &usageError{&Refusal{
+				Problem: "flag_before_command",
+				Repair: fmt.Sprintf("%s is a flag on a command rather than on blazie itself — "+
+					"put it after the command, as in `blazie ask <ledger> %s`. Only --url and "+
+					"--json may come first.", arg, arg),
+			}}
+		}
+	}
+
+	if len(args) == 0 {
+		return "", nil, &usageError{&Refusal{
+			Problem: "no_command",
+			Repair:  "Name an operation. Run `blazie help` for the ones there are.",
+		}}
+	}
+
+	return args[0], append(args[1:], hoisted...), nil
+}
+
 func unwrapUsage(err error) error {
 	if u, ok := err.(*usageError); ok {
 		return u.Refusal
@@ -134,13 +190,66 @@ func newFlags(name string) *common {
 }
 
 func (c *common) parse(args []string) error {
-	if err := c.set.Parse(args); err != nil {
+	if err := c.set.Parse(permute(c.set, args)); err != nil {
 		return &usageError{&Refusal{
 			Problem: "bad_flags",
 			Repair:  fmt.Sprintf("%v. Run `blazie help`.", err),
 		}}
 	}
 	return nil
+}
+
+// permute moves flags in front of the positional arguments.
+//
+// Go's flag package stops at the first thing that is not a flag, so
+// `blazie ask tenant-7 --attribute height` would otherwise reach the node as a
+// request to open three ledgers, one of them called "--attribute". The node
+// refuses that correctly and with a repair, which is the system working — and
+// is still a terrible thing to hand somebody who typed the obvious command.
+//
+// Whether a flag swallows the next argument depends on whether it is boolean,
+// which the FlagSet knows. An unrecognised flag is left where it is so the
+// parser produces its own error about it rather than this guessing.
+func permute(set *flag.FlagSet, args []string) []string {
+	flags := make([]string, 0, len(args))
+	positional := make([]string, 0, len(args))
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		// Everything after a bare `--` is positional by convention, which is
+		// how an id that begins with a dash gets written.
+		if arg == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+
+		if len(arg) < 2 || arg[0] != '-' {
+			positional = append(positional, arg)
+			continue
+		}
+
+		name := strings.TrimLeft(arg, "-")
+		name, _, hasValue := strings.Cut(name, "=")
+
+		flags = append(flags, arg)
+
+		found := set.Lookup(name)
+		if found == nil || hasValue {
+			continue
+		}
+		if boolean, ok := found.Value.(interface{ IsBoolFlag() bool }); ok && boolean.IsBoolFlag() {
+			continue
+		}
+		if i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+
+	// The separator matters: without it a positional beginning with a dash —
+	// an id like `-7` — would be read as a flag on the second pass.
+	return append(append(flags, "--"), positional...)
 }
 
 // client builds a client for a command that needs a token, refusing early and
