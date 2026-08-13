@@ -1,32 +1,24 @@
 import Link from "next/link";
 
+import { CopyButton } from "@/components/ui/copy-button";
 import { GradientBackground } from "@/components/ui/paper-design-shader-background";
+import { IllustrationCardGrid } from "@/components/ui/illustration-card-grid";
+import { OrganicButton } from "@/components/ui/organic-button";
 import { Wordmark } from "@/components/ui/wordmark";
 
-const capabilities = [
+/** The three the illustrated cards do not already carry. */
+const rest = [
   {
     title: "memory that keeps being wrong",
     body: "nothing is ever rewritten. a correction is a later fact, and the earlier one still answers where it was written — so “what did it believe on tuesday” is a question, not a log search.",
   },
   {
-    title: "every fact knows what made it",
-    body: "provenance is a slot in the row, not a convention. an answer either came from outside or names the code that produced it, and there is no third option to forget.",
-  },
-  {
-    title: "a graph you did not have to model",
-    body: "an edge is a fact whose value is another id. there is no node type and no edge type because there is nothing left to add — and no second store to keep in step.",
-  },
-  {
-    title: "code runs where it cannot reach",
-    body: "agent code runs in lua or webassembly with no clock, no network and no filesystem. isolation is the absence of anything to reach, so there is no rule to misconfigure.",
-  },
-  {
-    title: "one line touches the outside world",
-    body: "a job is the only thing handed the network, and the only thing a schedule attaches to. what an agent did to the world is a list you can read, with its failures on it.",
-  },
-  {
     title: "it tells you when something changed",
     body: "watch a question and it answers again as facts land — the same question, not a different mechanism. an agent reacts instead of polling.",
+  },
+  {
+    title: "erasure that actually erases",
+    body: "a value is sealed under a key belonging to whoever it is about. erasing destroys the key, so the bytes become noise, nothing is rewritten, and backups are covered because the key was never in them.",
   },
 ];
 
@@ -75,16 +67,15 @@ export default function Home() {
             agent, give it a cadence, and read back everything it did.
           </p>
 
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-            <Link
-              href="/login"
-              className="rounded-md bg-white px-6 py-3 text-sm font-semibold tracking-tight text-black transition-transform hover:scale-[1.02]"
-            >
-              open a cluster
-            </Link>
-            <code className="font-mono rounded-md border border-white/20 bg-black/50 px-4 py-3 text-sm text-white/80 backdrop-blur">
-              brew install blazie
-            </code>
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+            <OrganicButton href="/login" label="open a cluster" size="lg" />
+
+            <div className="flex items-center gap-1 rounded-md border border-white/20 bg-black/50 pl-4 pr-1 backdrop-blur">
+              <code className="font-mono py-3 text-sm text-white/80">
+                brew install blazie
+              </code>
+              <CopyButton value="brew install blazie" />
+            </div>
           </div>
         </section>
       </main>
@@ -98,19 +89,21 @@ export default function Home() {
             not a database with an agent story bolted on. the parts an agent
             needs, in one runtime, where they already agree with each other.
           </p>
+        </div>
 
-          <div className="grid gap-x-10 gap-y-10 sm:grid-cols-2">
-            {capabilities.map(({ title, body }) => (
-              <div key={title} className="border-l-2 border-flame/50 pl-5">
-                <h3 className="text-base font-medium tracking-tight text-white">
-                  {title}
-                </h3>
-                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                  {body}
-                </p>
-              </div>
-            ))}
-          </div>
+        <IllustrationCardGrid />
+
+        <div className="mx-auto mt-12 grid max-w-5xl gap-x-10 gap-y-8 sm:grid-cols-3">
+          {rest.map(({ title, body }) => (
+            <div key={title} className="border-l-2 border-flame/50 pl-5">
+              <h3 className="text-base font-medium tracking-tight text-white">
+                {title}
+              </h3>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                {body}
+              </p>
+            </div>
+          ))}
         </div>
       </section>
 

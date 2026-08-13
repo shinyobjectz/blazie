@@ -50,20 +50,6 @@ and twenty-four numbered doctrines, linted against the code by `just check`.
 There are no other design documents in the tree, because a document describing
 the system is a second source that drifts.
 
-## Signing in
-
-GitHub OAuth, both ways round. A browser gets a redirect and a code; a terminal
-gets a device flow. Both end at the same door, so the rule about who may hold a
-token is written once.
-
-    POST /auth/github        code            -> token
-    POST /auth/device                        -> a code a human types
-    POST /auth/device/token  device_code     -> token, once they have
-    GET  /me                                 -> who you are, and what you may name
-
-`GITHUB_LOGINS` is the whole access policy. An empty one admits nobody, which
-is the right failure for a setting somebody forgot.
-
 The vocabulary lives in `.monty/ontology.db` and is enforced by `just check`.
 There are no design documents: claims are doctrine in that database, choices
 are in the commit that made them, and mechanism is in the moduledoc beside the
@@ -107,8 +93,6 @@ artefact runs anywhere and carries no secret.
 | `KEY_DIR` | Where key-encryption keys live. **Must be persistent storage.** |
 | `KMS_KEY` | A Cloud KMS key. Setting it selects the KMS-backed keyring. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | A service account key, for the KMS. |
-| `GITHUB_CLIENT_ID` | With `GITHUB_CLIENT_SECRET`. Absent means nobody can sign in. |
-| `GITHUB_LOGINS` | Comma-separated logins allowed a token. **Empty admits nobody.** |
 | `BACKUP_BUCKET` | With `BACKUP_ENDPOINT`, `BACKUP_ACCESS_KEY_ID`, `BACKUP_SECRET_ACCESS_KEY`, and optionally `BACKUP_REGION` and `BACKUP_PREFIX`. |
 | `BACKUP_DIR` | A directory to copy into instead — a second disk, or a test. |
 | `BACKUP_EVERY` | Seconds between runs. Defaults to 900. |
