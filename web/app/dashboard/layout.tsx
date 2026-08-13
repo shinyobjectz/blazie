@@ -22,6 +22,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { Wordmark } from "@/components/ui/wordmark"
+import { SIGN_IN } from "@/lib/blazie"
 
 import { ClusterHeld, useClusterState } from "./cluster"
 
@@ -35,7 +36,7 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { cluster, error, retry } = useClusterState()
+  const { held, error, retry } = useClusterState()
   const { width, setWidth, remember } = useSidebarWidth()
 
   if (error) {
@@ -43,29 +44,31 @@ export default function DashboardLayout({
       <main className="mx-auto max-w-3xl px-6 py-20">
         <Wordmark size="sm" className="mb-10 opacity-70" />
         <h1 className="mb-6 text-2xl font-medium tracking-tight text-white">
-          the cluster would not answer for this token
+          the console could not read what you hold
         </h1>
         <RefusalNote error={error} retry={retry} />
       </main>
     )
   }
 
-  if (!cluster) {
+  if (!held) {
     return (
       <main className="px-6 py-20">
         <p className="font-mono mx-auto max-w-3xl text-sm text-muted-foreground">
-          asking the cluster who you are…
+          reading what you hold…
         </p>
       </main>
     )
   }
 
+  if (!held.who.login) return <SignIn can={held.who.can.sign_in} />
+
   return (
-    <ClusterHeld value={cluster}>
+    <ClusterHeld value={held}>
       {/* `--sidebar-width` is the variable the sidebar and its spacer already
           read, so driving it from the drag handle is the whole of the resize. */}
       <SidebarProvider style={{ "--sidebar-width": `${width}px` } as React.CSSProperties}>
-        <AppSidebar login={cluster.who.login} />
+        <AppSidebar login={held.who.login} />
         <SidebarResizer width={width} onWidth={setWidth} onSettled={remember} />
 
         <SidebarInset className="min-w-0">
@@ -73,7 +76,7 @@ export default function DashboardLayout({
             <SidebarTrigger />
             <Separator orientation="vertical" className="h-4" />
 
-            {cluster.who.worlds.length === 0 ? (
+            {held.worlds.length === 0 ? (
               <span className="font-mono text-xs text-muted-foreground">
                 no worlds yet
               </span>
@@ -83,20 +86,20 @@ export default function DashboardLayout({
                   {/* The one avatar worth a shader: it is the answer to "which
                       world am I writing into", and it is on screen on every
                       page whether or not the menu is ever opened. */}
-                  {cluster.world ? (
-                    <WorldAvatar live world={cluster.world} />
+                  {held.world ? (
+                    <WorldAvatar live world={held.world} />
                   ) : null}
-                  {cluster.world ?? "choose a world"}
+                  {held.world ?? "choose a world"}
                   <ChevronDown className="size-3.5 text-muted-foreground" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="font-mono text-xs">
-                  {cluster.who.worlds.map((one) => (
-                    <DropdownMenuItem key={one} onSelect={() => cluster.choose(one)}>
+                  {held.worlds.map((one: string) => (
+                    <DropdownMenuItem key={one} onSelect={() => held.choose(one)}>
                       <WorldAvatar size="sm" world={one} />
                       {one}
                       <Check
                         className={
-                          one === cluster.world
+                          one === held.world
                             ? "ml-auto size-3.5 text-flame"
                             : "ml-auto size-3.5 opacity-0"
                         }
@@ -109,9 +112,9 @@ export default function DashboardLayout({
 
             {/* Where the last run read. A caller holds the name, never the
                 bytes, so this is the one value on screen worth quoting. */}
-            {cluster.at ? (
+            {held.at ? (
               <span className="font-mono ml-auto shrink-0 truncate text-xs text-muted-foreground">
-                {Object.entries(cluster.at)
+                {Object.entries(held.at)
                   .map(([world, tx]) => `${world}@${tx}`)
                   .join(" ")}
               </span>
@@ -122,5 +125,44 @@ export default function DashboardLayout({
         </SidebarInset>
       </SidebarProvider>
     </ClusterHeld>
+  )
+}
+
+/**
+ * Nobody is signed in.
+ *
+ * Github, and through the control plane rather than through a cluster — which is
+ * the change that makes "no clusters yet" a state you can be in. Signing in used
+ * to mean asking a blazie node to trade a code, so having no cluster meant
+ * having no way to reach the page that would have let you open one.
+ */
+function SignIn({ can }: { can: boolean }) {
+  return (
+    <main className="mx-auto max-w-3xl px-6 py-24">
+      <Wordmark size="sm" className="mb-10 opacity-70" />
+      <h1 className="mb-4 text-3xl font-medium tracking-tight text-white">
+        sign in
+      </h1>
+      <p className="mb-8 max-w-lg text-sm leading-relaxed text-muted-foreground">
+        github says who you are. what you hold — your clusters, and the
+        credentials that reach them — is kept here rather than on any of them, so
+        this works before you have opened one.
+      </p>
+
+      {can ? (
+        <a
+          href={SIGN_IN}
+          className="inline-flex items-center gap-2 rounded-md bg-white px-5 py-2.5 text-sm font-semibold tracking-tight text-black transition-transform hover:scale-[1.02]"
+        >
+          continue with github
+        </a>
+      ) : (
+        <p className="font-mono max-w-lg rounded-lg border border-flame/30 bg-flame/5 p-4 text-xs leading-relaxed text-flame">
+          this deployment has no github credentials set, so there is nothing to
+          sign in with. set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET with
+          `wrangler pages secret put`.
+        </p>
+      )}
+    </main>
   )
 }

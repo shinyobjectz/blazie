@@ -56,7 +56,8 @@ export type Host = {
 export type Shown = Omit<Held, "token">
 
 export function shown(cluster: Held): Shown {
-  const { token: _token, ...rest } = cluster
+  const rest = { ...cluster } as Held & { token?: string }
+  delete rest.token
   return rest
 }
 

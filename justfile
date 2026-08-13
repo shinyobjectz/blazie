@@ -141,6 +141,9 @@ web-build:
 
 # Ship the console to Cloudflare Pages. The account id is explicit because
 # this wrangler login can see two accounts and picking the wrong one is silent.
+# The output directory and the KV binding are in web/wrangler.jsonc now, so
+# there is no directory argument — passing one would deploy the pages without
+# the control plane beside them, which looks identical until you sign in.
 web-deploy: web-build
     cd web && CLOUDFLARE_ACCOUNT_ID=6d4b74aeb10f455fbf88141901e7595d \
-      npx wrangler pages deploy out --project-name blazie --branch main --commit-dirty=true
+      npx wrangler pages deploy --project-name blazie --branch main --commit-dirty=true

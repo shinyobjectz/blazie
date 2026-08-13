@@ -8,7 +8,7 @@ import { CopyButton } from "@/components/ui/copy-button"
 import { RefusalNote } from "@/components/ui/refusal-note"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WorldOrbit } from "@/components/ui/world-avatar"
-import { claim, run } from "@/lib/blazie"
+import { claim } from "@/lib/blazie"
 import { showCount } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -66,7 +66,7 @@ type Census = {
 }
 
 export default function Worlds() {
-  const { who, world: chosen, choose, refresh } = useCluster()
+  const { cluster, worlds, world: chosen, choose, refresh } = useCluster()
   const [name, setName] = useState("")
   const [error, setError] = useState<unknown>(null)
   const [claiming, setClaiming] = useState(false)
@@ -79,7 +79,8 @@ export default function Worlds() {
     setClaiming(true)
     setError(null)
     try {
-      await claim(wanted)
+      if (!cluster) return
+      await claim(cluster.id, wanted)
       setName("")
       refresh()
       choose(wanted)
@@ -122,14 +123,14 @@ export default function Worlds() {
 
       {error ? <RefusalNote error={error} className="mb-10" /> : null}
 
-      {who.worlds.length === 0 ? (
+      {worlds.length === 0 ? (
         <Nothing icon={Database} title="none yet">
           make one above. it is yours as soon as it exists — claiming grants it
           to you, and to nobody else.
         </Nothing>
       ) : (
         <div className="grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 xl:grid-cols-3">
-          {who.worlds.map((one) => (
+          {worlds.map((one) => (
             <Holding
               key={one}
               world={one}
@@ -182,6 +183,7 @@ function Holding({
   chosen: boolean
   onChoose: () => void
 }) {
+  const { run } = useCluster()
   const [attempt, setAttempt] = useState(0)
   const asking = `${world} ${attempt}`
   const [answered, setAnswered] = useState<{ to: string; census: Census | null; error: unknown } | null>(null)
@@ -196,7 +198,7 @@ function Holding({
     return () => {
       live = false
     }
-  }, [world, asking])
+  }, [world, asking, run])
 
   const read = useCallback(() => setAttempt((n) => n + 1), [])
 

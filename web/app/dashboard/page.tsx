@@ -9,7 +9,6 @@ import { Nothing, PageHead } from "@/components/dashboard/page-shell"
 import { CopyButton } from "@/components/ui/copy-button"
 import { RefusalNote } from "@/components/ui/refusal-note"
 import { WorldSystem } from "@/components/ui/world-system"
-import { run } from "@/lib/blazie"
 import { showCount, showWhen } from "@/lib/format"
 import {
   BANDS,
@@ -37,7 +36,7 @@ import { useCluster } from "./cluster"
  *
  * Every number on this page came back from a run against the world it is drawn
  * on. There is no summary table to read instead — a count kept beside the facts
- * is a second account of them that can be wrong — so this page is `who.worlds`
+ * is a second account of them that can be wrong — so this page is `worlds`
  * chunks of Lua, one per world, each independent. One world refusing must not
  * blank the sky.
  *
@@ -55,7 +54,7 @@ type Looking = { world: string; body: Body | null }
 const ZOOM = { least: 0.35, most: 1.6, step: 0.2 }
 
 export default function Orbit() {
-  const { who, world: chosen, choose } = useCluster()
+  const { worlds, run, world: chosen, choose } = useCluster()
 
   const viewport = useRef<HTMLDivElement>(null)
   const onScreen = useInView(viewport)
@@ -74,19 +73,19 @@ export default function Orbit() {
    * worlds go to the outside because the middle of your console should be
    * yours.
    */
-  const worlds = useMemo(
+  const ordered = useMemo(
     () =>
-      [...who.worlds].sort(
+      [...worlds].sort(
         (a, b) =>
           Number(a.startsWith("$")) - Number(b.startsWith("$")) || a.localeCompare(b),
       ),
-    [who.worlds],
+    [worlds],
   )
 
   const ask = useCallback(() => {
     let live = true
 
-    for (const world of worlds) {
+    for (const world of ordered) {
       run(world, ORBIT)
         .then((result) => {
           if (live) {
@@ -104,7 +103,7 @@ export default function Orbit() {
     return () => {
       live = false
     }
-  }, [worlds])
+  }, [ordered, run])
 
   useEffect(ask, [ask])
 
@@ -127,10 +126,10 @@ export default function Orbit() {
    */
   const focus = useCallback(
     (world: string) => {
-      const place = placeOf(worlds.indexOf(world))
+      const place = placeOf(ordered.indexOf(world))
       setPan({ x: -place.x * zoom, y: -place.y * zoom })
     },
-    [worlds, zoom],
+    [ordered, zoom],
   )
 
   /**
@@ -158,14 +157,14 @@ export default function Orbit() {
     return () => held.removeEventListener("wheel", wheel)
   }, [])
 
-  if (worlds.length === 0) {
+  if (ordered.length === 0) {
     return (
       <>
         <Head />
         <Nothing icon={OrbitIcon} title="nothing in the sky yet">
           a world is where data lives.{" "}
           <Link
-            href="/dashboard/worlds"
+            href="/dashboard/ordered"
             className="text-white underline decoration-white/30 underline-offset-4"
           >
             make one
@@ -213,7 +212,7 @@ export default function Orbit() {
             transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
           }}
         >
-          {worlds.map((world, index) => {
+          {ordered.map((world, index) => {
             const place = placeOf(index)
             const answer = answers[world]
 

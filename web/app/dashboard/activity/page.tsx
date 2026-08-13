@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Nothing, PageHead } from "@/components/dashboard/page-shell"
 import { RefusalNote } from "@/components/ui/refusal-note"
 import { Skeleton } from "@/components/ui/skeleton"
-import { type Value, run } from "@/lib/blazie"
+import type { Value } from "@/lib/blazie"
 import { showBytes, showCount, showWhen } from "@/lib/format"
 
 import { useCluster } from "../cluster"
@@ -68,7 +68,7 @@ const PANELS: Panel[] = [
 ]
 
 export default function Activity() {
-  const { who } = useCluster()
+  const { worlds } = useCluster()
 
   return (
     <>
@@ -83,7 +83,7 @@ export default function Activity() {
           <PanelView
             key={panel.world}
             panel={panel}
-            granted={who.worlds.includes(panel.world)}
+            granted={worlds.includes(panel.world)}
           />
         ))}
       </div>
@@ -92,6 +92,7 @@ export default function Activity() {
 }
 
 function PanelView({ panel, granted }: { panel: Panel; granted: boolean }) {
+  const { run } = useCluster()
   const [attempt, setAttempt] = useState(0)
   const asking = `${panel.world} ${panel.entity} ${attempt}`
 
@@ -121,7 +122,7 @@ return out`
     return () => {
       live = false
     }
-  }, [panel, granted, asking])
+  }, [panel, granted, asking, run])
 
   const read = useCallback(() => setAttempt((n) => n + 1), [])
 

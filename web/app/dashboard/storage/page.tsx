@@ -15,7 +15,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { run } from "@/lib/blazie"
 import { showBytes, showCount } from "@/lib/format"
 
 import { useCluster } from "../cluster"
@@ -50,8 +49,8 @@ type Row = {
 }
 
 export default function Storage() {
-  const { who } = useCluster()
-  const granted = who.worlds.includes("$storage")
+  const { worlds, run } = useCluster()
+  const granted = worlds.includes("$storage")
 
   const [attempt, setAttempt] = useState(0)
   const asking = String(attempt)
@@ -68,7 +67,7 @@ export default function Storage() {
     return () => {
       live = false
     }
-  }, [granted, asking])
+  }, [granted, asking, run])
 
   const read = useCallback(() => setAttempt((n) => n + 1), [])
 

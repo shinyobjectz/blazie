@@ -1,0 +1,14 @@
+{
+  // The functions are Workers, not the browser — different globals, different
+  // types. Kept apart from the app's tsconfig so neither has to pretend the
+  // other's environment exists, and `exclude` is restated because the app's
+  // excludes these very files.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types"],
+    "lib": ["ES2022", "WebWorker"],
+    "noEmit": true
+  },
+  "include": ["**/*.ts", "../lib/control/**/*.ts"],
+  "exclude": ["../node_modules"]
+}

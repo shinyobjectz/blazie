@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 
 import { Detail, Nothing, PageHead } from "@/components/dashboard/page-shell"
 import { Copyable } from "@/components/ui/copyable"
-import { clusterUrl, forgetToken } from "@/lib/blazie"
+import { signOut } from "@/lib/blazie"
 
 import { useCluster } from "../cluster"
 
@@ -18,7 +18,7 @@ import { useCluster } from "../cluster"
  */
 export default function Settings() {
   const router = useRouter()
-  const { who } = useCluster()
+  const { who, worlds, cluster } = useCluster()
 
   return (
     <>
@@ -35,20 +35,22 @@ export default function Settings() {
           </p>
         </Detail>
 
-        <Detail label="caller">
-          <Copyable text={who.caller} label={short(who.caller)} />
+        <Detail label="cluster">
+          <p className="font-mono py-2 text-sm text-white/85">
+            {cluster?.name ?? "none chosen"}
+          </p>
         </Detail>
 
-        <Detail label="cluster">
-          <Copyable text={clusterUrl} />
+        <Detail label="address">
+          <Copyable text={cluster?.address ?? "—"} />
         </Detail>
       </div>
 
       <p className="mt-5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        the caller is a sha256 of the token, not the token — the cluster stores
-        the fingerprint so that a leak of what it holds is not a leak of what you
-        hold. it is also what a grant is written against, so it is the value to
-        quote when asking for one.
+        the token this cluster answers to is not shown here and is not held by
+        this browser. it lives in the control plane, which is why a cluster needs
+        no port open to the internet — the only thing that can present it is the
+        thing that made it.
       </p>
 
       <section className="mt-14">
@@ -60,7 +62,7 @@ export default function Settings() {
           is read. there is no partial answer and nothing underneath to filter.
         </p>
 
-        {who.worlds.length === 0 ? (
+        {worlds.length === 0 ? (
           <Nothing icon={KeyRound} title="granted nothing">
             a caller is granted, never registered — signing in proves who you
             are and grants nothing on its own. quote the caller fingerprint
@@ -68,7 +70,7 @@ export default function Settings() {
           </Nothing>
         ) : (
           <div className="overflow-hidden rounded-lg border border-border">
-            {who.worlds.map((world) => (
+            {worlds.map((world) => (
               <p
                 key={world}
                 className="font-mono border-b border-border px-4 py-3 text-sm text-white/85 last:border-b-0"
@@ -83,26 +85,20 @@ export default function Settings() {
       <section className="mt-14 border-t border-border pt-8">
         <button
           type="button"
-          onClick={() => {
-            forgetToken()
-            router.replace("/login")
+          onClick={async () => {
+            await signOut()
+            router.refresh()
           }}
           className="rounded-md border border-border px-4 py-2 text-sm text-white transition-colors hover:border-flame/50 hover:bg-flame/5"
         >
-          forget this token
+          sign out
         </button>
         <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
-          this browser stops holding it. the cluster is not told — a token is
-          revoked where grants are written, not from the thing holding it.
+          the session is given back and this browser holds nothing. your clusters
+          keep running — signing out of a console is not a thing that should be
+          able to stop a database.
         </p>
       </section>
     </>
   )
-}
-
-/** A sha256 fingerprint is 64 characters. Show the ends, copy the whole. */
-function short(fingerprint: string) {
-  return fingerprint.length > 20
-    ? `${fingerprint.slice(0, 10)}…${fingerprint.slice(-6)}`
-    : fingerprint
 }

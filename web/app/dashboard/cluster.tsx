@@ -1,6 +1,5 @@
 "use client"
 
-import { useRouter } from "next/navigation"
 import {
   createContext,
   useCallback,
@@ -12,74 +11,95 @@ import {
 } from "react"
 
 import {
-  type Me,
+  type Cluster,
   type RunResult,
   type SnapshotName,
-  me,
-  readToken,
-  run,
+  type Who,
+  clusters as askClusters,
+  run as runOn,
+  who as askWho,
+  worldsOn,
 } from "@/lib/blazie"
 
 /**
- * Which world the console is pointed at, and how to run against it.
+ * Which cluster the console is pointed at, which world within it, and how to run.
  *
- * An earlier version held one snapshot name for the whole console and froze
- * every page at it. That was true to how blazie works and wrong for a console:
- * it meant nothing ever changed on screen without pressing a button nobody
- * understood the need for. The immutability is still there and still reachable
- * — a run returns the name it read at, and pinning it re-answers forever — but
- * the default is what a person expects, which is that the data page shows the
- * data.
+ * Two choices, not one, and they nest: a cluster holds worlds, so choosing a
+ * cluster can invalidate the chosen world and does. That was one choice until
+ * there could be more than one cluster, and collapsing them again would mean a
+ * console that shows you one cluster's world list while running against
+ * another's.
+ *
+ * `run` is bound to the chosen cluster on purpose. A page that imported the bare
+ * client could address a cluster that is not the one on screen, which is the one
+ * mistake a console with a switcher in it must not make possible.
  */
 
-type Cluster = {
-  who: Me
-  /** Which world every page on the console is looking at. */
+type Held = {
+  who: Who
+  /** Every cluster you hold. Empty is a real and expected state. */
+  clusters: Cluster[]
+  /** The one on screen, or null when you hold none. */
+  cluster: Cluster | null
+  chooseCluster: (id: string) => void
+  /** Which worlds this caller may name on the chosen cluster. */
+  worlds: string[]
+  /** Which world every page is looking at, within that cluster. */
   world: string | null
   choose: (world: string) => void
   /** Where the last run read. Shown in the header so a page can be cited. */
   at: SnapshotName | null
-  /** Run Lua against the chosen world. */
+  /** Run Lua against the chosen world of the chosen cluster. */
   ask: (source: string) => Promise<RunResult>
-  /** Re-read `/me`, for when a world has just been claimed. */
-  refresh: () => void
+  /** Run against a named world of the chosen cluster. */
+  run: (world: string, source: string) => Promise<RunResult>
+  /** Re-read what is held, for when a cluster or world has just been made. */
+  refresh: () => Promise<void>
 }
 
-const Held = createContext<Cluster | null>(null)
+const Context = createContext<Held | null>(null)
 
-export function useCluster(): Cluster {
-  const cluster = useContext(Held)
-  if (!cluster) {
-    throw new Error("useCluster is only usable under the dashboard layout")
-  }
-  return cluster
+export function useCluster(): Held {
+  const held = useContext(Context)
+  if (!held) throw new Error("useCluster is only usable under the dashboard layout")
+  return held
 }
 
-const CHOSEN = "blazie.world"
+const CHOSEN_CLUSTER = "blazie.cluster"
+const CHOSEN_WORLD = "blazie.world"
 
 export function useClusterState() {
-  const router = useRouter()
-  const [who, setWho] = useState<Me | null>(null)
-  const [world, setLedger] = useState<string | null>(null)
+  const [who, setWho] = useState<Who | null>(null)
+  const [clusters, setClusters] = useState<Cluster[]>([])
+  const [clusterId, setClusterId] = useState<string | null>(null)
+  const [found, setFound] = useState<{ on: string; worlds: string[] } | null>(null)
+  const [world, setWorld] = useState<string | null>(null)
   const [at, setAt] = useState<SnapshotName | null>(null)
   const [error, setError] = useState<unknown>(null)
 
-  // Strict mode runs effects twice and both runs would ask `/me`.
+  // Strict mode runs effects twice and both runs would ask.
   const started = useRef(false)
 
   const load = useCallback(async () => {
     setError(null)
+
     try {
-      const found = await me()
+      const found = await askWho()
       setWho(found)
 
-      // Whatever was chosen last, if it is still granted. Otherwise the first
-      // one, so a console with exactly one world needs no choosing at all.
-      setLedger((held) => {
-        if (held && found.worlds.includes(held)) return held
-        const remembered = window.localStorage.getItem(CHOSEN)
-        if (remembered && found.worlds.includes(remembered)) return remembered
-        return found.worlds[0] ?? null
+      if (!found.login) {
+        setClusters([])
+        return
+      }
+
+      const { clusters: held } = await askClusters()
+      setClusters(held)
+
+      setClusterId((chosen) => {
+        if (chosen && held.some((c) => c.id === chosen)) return chosen
+        const remembered = window.localStorage.getItem(CHOSEN_CLUSTER)
+        if (remembered && held.some((c) => c.id === remembered)) return remembered
+        return held[0]?.id ?? null
       })
     } catch (thrown) {
       setError(thrown)
@@ -87,46 +107,102 @@ export function useClusterState() {
   }, [])
 
   useEffect(() => {
-    if (!readToken()) {
-      router.replace("/login")
-      return
-    }
     if (started.current) return
     started.current = true
     void load()
-  }, [router, load])
+  }, [load])
 
-  const choose = useCallback((next: string) => {
-    window.localStorage.setItem(CHOSEN, next)
-    setLedger(next)
+  const cluster = useMemo(
+    () => clusters.find((c) => c.id === clusterId) ?? null,
+    [clusters, clusterId],
+  )
+
+  const chooseCluster = useCallback((id: string) => {
+    window.localStorage.setItem(CHOSEN_CLUSTER, id)
+    setClusterId(id)
+    // The chosen world belonged to the cluster you left. Keeping it would point
+    // every page at a name the new cluster may not hold, and the first thing you
+    // would see is a refusal about a world you never chose.
+    setWorld(null)
+    setAt(null)
   }, [])
 
-  const ask = useCallback(
-    async (source: string) => {
-      if (!world) {
-        throw new Error("no world chosen")
-      }
-      const result = await run(world, source)
+  const choose = useCallback((next: string) => {
+    window.localStorage.setItem(CHOSEN_WORLD, next)
+    setWorld(next)
+  }, [])
+
+  const run = useCallback(
+    async (against: string, source: string) => {
+      if (!cluster) throw new Error("no cluster chosen")
+      const result = await runOn(cluster.id, against, source)
       setAt(result.name)
       return result
     },
-    [world],
+    [cluster],
   )
 
-  const cluster = useMemo<Cluster | null>(
-    () => (who ? { who, world, choose, at, ask, refresh: load } : null),
-    [who, world, choose, at, ask, load],
+  const ask = useCallback(
+    (source: string) => {
+      if (!world) throw new Error("no world chosen")
+      return run(world, source)
+    },
+    [run, world],
   )
 
-  return { cluster, error, retry: load }
+  // Which worlds a cluster holds is a question for the cluster rather than
+  // something the session could know: grants live in that cluster's own
+  // `$authority`, and a control plane that cached them would be answering from
+  // a copy of a thing whose whole point is that it is the record.
+  useEffect(() => {
+    if (!cluster) return
+    let live = true
+    const on = cluster.id
+
+    worldsOn(on)
+      .then((answered) => {
+        if (!live) return
+        setFound({ on, worlds: answered.worlds })
+        setWorld((held) => {
+          if (held && answered.worlds.includes(held)) return held
+          const remembered = window.localStorage.getItem(CHOSEN_WORLD)
+          if (remembered && answered.worlds.includes(remembered)) return remembered
+          return answered.worlds[0] ?? null
+        })
+      })
+      .catch(() => live && setFound({ on, worlds: [] }))
+
+    return () => {
+      live = false
+    }
+  }, [cluster])
+
+  // Only the list that came from the cluster on screen. Clearing it by hand when
+  // the cluster changed was a synchronous setState inside an effect; this says
+  // the same thing by construction and cannot show one cluster's worlds against
+  // another's data.
+  const worlds = useMemo(
+    () => (found && cluster && found.on === cluster.id ? found.worlds : []),
+    [found, cluster],
+  )
+
+  const held = useMemo<Held | null>(
+    () =>
+      who
+        ? { who, clusters, cluster, chooseCluster, worlds, world, choose, at, ask, run, refresh: load }
+        : null,
+    [who, clusters, cluster, chooseCluster, worlds, world, choose, at, ask, run, load],
+  )
+
+  return { held, error, retry: load }
 }
 
 export function ClusterHeld({
   value,
   children,
 }: {
-  value: Cluster
+  value: Held
   children: React.ReactNode
 }) {
-  return <Held.Provider value={value}>{children}</Held.Provider>
+  return <Context.Provider value={value}>{children}</Context.Provider>
 }

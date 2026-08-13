@@ -7,6 +7,7 @@ import {
   Fingerprint,
   HardDrive,
   Orbit,
+  Server,
   Settings,
   SquareTerminal,
   Table2,
@@ -14,7 +15,7 @@ import {
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
-import { Wordmark } from "@/components/ui/wordmark"
+import { ClusterSwitcher } from "@/components/dashboard/cluster-switcher"
 import {
   Sidebar,
   SidebarContent,
@@ -43,6 +44,7 @@ import {
 
 const items: { href: string; label: string; icon: typeof Table2 }[] = [
   { href: "/dashboard", label: "orbit", icon: Orbit },
+  { href: "/dashboard/clusters", label: "clusters", icon: Server },
   { href: "/dashboard/data", label: "data", icon: Table2 },
   { href: "/dashboard/editor", label: "editor", icon: SquareTerminal },
   { href: "/dashboard/agents", label: "agents", icon: Bot },
@@ -61,10 +63,11 @@ export function AppSidebar({ login }: { login: string | null }) {
           the one under the snapshot bar are the same line across the page. That
           only reads correctly now that a border is the border token rather than
           currentColor — as a white stroke it was a highlight, not a hairline. */}
-      <SidebarHeader className="h-14 justify-center border-b">
-        <Link href="/" className="flex items-center px-2 py-1.5">
-          <Wordmark size="sm" />
-        </Link>
+      {/* The switcher, where the wordmark was. A console holding several
+          clusters has to say which one is on screen somewhere every page
+          shares, and this is the only such place. */}
+      <SidebarHeader className="h-14 justify-center border-b px-1">
+        <ClusterSwitcher />
       </SidebarHeader>
 
       <SidebarContent>
