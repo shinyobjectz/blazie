@@ -34,6 +34,37 @@ if config_env() == :prod do
     kms_key: System.get_env("KMS_KEY"),
     gcp_credentials: System.get_env("GOOGLE_APPLICATION_CREDENTIALS")
 
+  # Where copies go. Configured or absent — there is no default, because a
+  # default destination is a bucket somebody did not choose, and a backup
+  # nobody chose the location of is one nobody checks.
+  backup_target =
+    cond do
+      bucket = System.get_env("BACKUP_BUCKET") ->
+        {LazyRiver.Backup.Target.S3,
+         endpoint: System.fetch_env!("BACKUP_ENDPOINT"),
+         bucket: bucket,
+         region: System.get_env("BACKUP_REGION") || "auto",
+         access_key_id: System.fetch_env!("BACKUP_ACCESS_KEY_ID"),
+         secret_access_key: System.fetch_env!("BACKUP_SECRET_ACCESS_KEY"),
+         prefix: System.get_env("BACKUP_PREFIX")}
+
+      dir = System.get_env("BACKUP_DIR") ->
+        {LazyRiver.Backup.Target.Directory, root: dir}
+
+      true ->
+        nil
+    end
+
+  config :lazy_river,
+    backup_target: backup_target,
+    backup_every: String.to_integer(System.get_env("BACKUP_EVERY") || "900")
+
+  if backup_target == nil do
+    IO.warn(
+      "No backup target is configured, so nothing is being copied anywhere. Losing /data loses every fact and every key. Set BACKUP_BUCKET (with BACKUP_ENDPOINT and credentials) or BACKUP_DIR."
+    )
+  end
+
   if System.get_env("KEY_DIR") == nil do
     IO.warn(
       "KEY_DIR is not set; keys will be written to /data/keys. That path must be persistent storage — if it is not, a redeploy erases every subject."

@@ -20,6 +20,16 @@ defmodule LazyRiver.Application do
     end
   end
 
+  # Only when there is somewhere to put the bytes. A backup job with no target
+  # is a crash loop at boot rather than a backup — and the failure a deployment
+  # must never have is the one where it looks configured and copies nothing.
+  defp backup do
+    case Application.get_env(:lazy_river, :backup_target) do
+      nil -> []
+      _target -> [{LazyRiver.Backup, every: Application.get_env(:lazy_river, :backup_every, 900)}]
+    end
+  end
+
   @impl true
   def start(_type, _args) do
     children =
@@ -39,7 +49,7 @@ defmodule LazyRiver.Application do
         {LazyRiver.Formula.Engine, name: LazyRiver.Formula.Engine},
         {Phoenix.PubSub, name: LazyRiver.PubSub},
         LazyRiver.Surface.Endpoint
-      ] ++ vitals()
+      ] ++ vitals() ++ backup()
 
     # Three restarts in five seconds is too tight for a system where restarting
     # a component is a legitimate operation rather than only a symptom. Ten

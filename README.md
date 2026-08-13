@@ -53,6 +53,9 @@ artefact runs anywhere and carries no secret.
 | `KEY_DIR` | Where key-encryption keys live. **Must be persistent storage.** |
 | `KMS_KEY` | A Cloud KMS key. Setting it selects the KMS-backed keyring. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | A service account key, for the KMS. |
+| `BACKUP_BUCKET` | With `BACKUP_ENDPOINT`, `BACKUP_ACCESS_KEY_ID`, `BACKUP_SECRET_ACCESS_KEY`, and optionally `BACKUP_REGION` and `BACKUP_PREFIX`. |
+| `BACKUP_DIR` | A directory to copy into instead — a second disk, or a test. |
+| `BACKUP_EVERY` | Seconds between runs. Defaults to 900. |
 
 Without `LEDGER_DIR` a ledger is in memory, which is right for a test and
 wrong for everything else. Without `KMS_KEY` the keyring keeps its keys in a
@@ -78,6 +81,42 @@ before an erasure is corrected rather than trusted.
 The one thing it cannot do is stated plainly: a fact written before its
 subject was declared is not covered. Subject is decided at write time or not
 at all.
+
+## Backup
+
+Copying the facts somewhere else is a **job**, because it reaches outside. That
+is not a technicality: it means a backup has a cadence, writes what it copied
+as ordinary facts, writes a failure as an ordinary fact, and answers "when did
+this last succeed" with `Job.last_run/2` like anything else. None of that had
+to be built.
+
+A ledger is append-only, so a run copies the byte range it has not copied yet
+and names the segment for the range it holds. The cost of a backup is what
+changed rather than what exists, which is what lets the cadence be minutes.
+A copy stops at the last complete record, because the tail of a live log may be
+half-written and half a record is not a fact.
+
+Checkpoints are not copied — they are derived, and opening without one is
+correct and merely slower. Keys are, whole, every run: facts without them are
+noise. What lands in the bucket is already encrypted under a master the KMS
+holds, so whoever owns the bucket cannot open it, and an old key store cannot
+resurrect an erased subject because the keyring reconciles against erasure
+tombstones every time it opens.
+
+    Backup.run(...)       copy what has not been copied
+    Backup.verify(...)    what the target holds against what is here
+    Backup.restore(...)   pull it back — refuses to land on top of live facts
+
+`verify` compares *readable* local bytes, and what a target holds is the
+contiguous run from zero rather than the highest segment boundary. Those are
+the same number until a put fails after a later one succeeds, and then the
+difference is a backup claiming bytes it cannot give back. Stopping at the hole
+costs a re-copy and heals it.
+
+Restoring refuses rather than overwrites, and names what is in the way. Pass
+`only: :keys` or `only: :ledgers` to restore one half — losing a key store
+while the facts are fine is a real thing, and not the same operation as
+restoring a machine.
 
 ## Deployment
 

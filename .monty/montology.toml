@@ -11,4 +11,9 @@ design = "block"   # rogue values vs tokens — only fires when tokens exist
 # which word kinds a code declaration may NOT be named after
 enforced_kinds = ["core", "inner"]
 # symbols allowed to share a word's name (each entry is a recorded decision)
-allow = []
+#
+# job — `Backup.job/1` and `Vitals.job/0` each return a `%Job{}`. They do not
+# take the word to mean something else; they denote exactly the thing the word
+# denotes, which is the case this list exists for. A function that hands back a
+# job and is called anything but `job` would be the drift, not the fix.
+allow = ["job"]
