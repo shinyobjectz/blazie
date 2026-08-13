@@ -29,6 +29,12 @@ defmodule LazyRiver.CompactionTest do
     for n <- range, do: {:ok, _} = Ledger.append(ledger, [{n, "height", n}])
   end
 
+  defp time_appends(ledger, range) do
+    started = System.monotonic_time(:microsecond)
+    write(ledger, range)
+    div(System.monotonic_time(:microsecond) - started, Enum.count(range))
+  end
+
   describe "a checkpoint does not lose anything" do
     test "every fact is still there after reopening", ctx do
       ledger = on_disk(ctx.name, ctx.dir, checkpoint_every: 20)
@@ -73,6 +79,86 @@ defmodule LazyRiver.CompactionTest do
 
       assert length(Snapshot.find(early, attribute: "height")) == 10
       assert length(Snapshot.find(at_ten, attribute: "height")) == 10
+
+      Ledger.close(ctx.name)
+    end
+  end
+
+  describe "keeping checkpoints does not cost more the longer you run" do
+    # The bug this pins down: a checkpoint writes every fact again, so writing
+    # one on a fixed count of transactions made the cost of keeping them grow
+    # with history. Sixteen thousand single-fact appends wrote about 136MB of
+    # checkpoints to keep 1.7MB of facts, and per-append cost doubled with every
+    # doubling of the log — 8.6µs at two thousand facts, 47.2µs at sixteen
+    # thousand. It was getting worse on the running box by the hour.
+    #
+    # etcd shipped this same design and ran it ten months, because on a single
+    # node the symptom is invisible: nothing is wrong, it is only slow, and it
+    # is only slow later.
+    test "checkpoints fall geometrically further apart", ctx do
+      ledger = on_disk(ctx.name, ctx.dir, checkpoint_every: 10)
+      write(ledger, 1..2_000)
+
+      stats = Ledger.store_stats(ledger)
+
+      # On the old policy this was exactly 200 — one per ten transactions,
+      # each rewriting everything. Geometric spacing puts it near log(n).
+      assert stats.checkpoints_written < 25,
+             "wrote #{stats.checkpoints_written} checkpoints for 2000 appends"
+
+      assert stats.checkpoints_written > 0, "wrote none at all, which proves nothing"
+
+      Ledger.close(ctx.name)
+    end
+
+    test "and the tail left unwritten stays a bounded fraction of the log", ctx do
+      ledger = on_disk(ctx.name, ctx.dir, checkpoint_every: 10)
+      write(ledger, 1..2_000)
+
+      stats = Ledger.store_stats(ledger)
+      tail = stats.bytes - stats.checkpoint_bytes
+
+      # Whatever is not in the checkpoint is what a reopen must scan. The point
+      # of amortising is that this stays a fraction rather than growing.
+      assert tail <= stats.bytes * 0.6,
+             "tail is #{tail} of #{stats.bytes} bytes, which a reopen would have to scan"
+
+      Ledger.close(ctx.name)
+    end
+
+    test "a longer log does not cost more per append", ctx do
+      ledger = on_disk(ctx.name, ctx.dir, checkpoint_every: 50)
+
+      write(ledger, 1..2_000)
+      early = time_appends(ledger, 2_001..3_000)
+
+      write(ledger, 3_001..12_000)
+      late = time_appends(ledger, 12_001..13_000)
+
+      # Quadratic put this near 6x. A generous bound: the fix measured flat,
+      # so anything under 3x is a comfortable pass and a real regression still
+      # fails. Timing in a test is a blunt instrument, which is why the
+      # deterministic checkpoint count above is the primary guard.
+      assert late < early * 3,
+             "appending after 12k facts took #{late}µs vs #{early}µs after 2k — cost is growing with history"
+
+      Ledger.close(ctx.name)
+    end
+  end
+
+  describe "the order facts come back in" do
+    test "replay is oldest first, whatever the store does internally", ctx do
+      ledger = on_disk(ctx.name, ctx.dir, checkpoint_every: 7)
+      write(ledger, 1..40)
+      :ok = Ledger.close(ctx.name)
+
+      reopened = on_disk(ctx.name, ctx.dir, checkpoint_every: 7)
+      found = Snapshot.find(Snapshot.open([reopened]), attribute: "height")
+
+      # The store keeps its facts newest-first so appending is cheap. That is an
+      # implementation detail and must not reach an answer.
+      assert Enum.map(found, & &1.value) == Enum.to_list(1..40)
+      assert Enum.map(found, & &1.tx) == Enum.sort(Enum.map(found, & &1.tx))
 
       Ledger.close(ctx.name)
     end

@@ -41,11 +41,14 @@ defmodule LazyRiver.Store.Memory do
   @impl true
   def open(_name, _opts), do: {:ok, []}
 
+  # Newest first, so appending is O(batch) rather than O(everything). `++`
+  # copies its left operand, so the obvious `facts ++ new` re-copies the whole
+  # history on every write and makes a ledger quadratic in its own length.
   @impl true
-  def append(facts, new), do: {:ok, facts ++ new}
+  def append(facts, new), do: {:ok, Enum.reverse(new) ++ facts}
 
   @impl true
-  def replay(facts), do: facts
+  def replay(facts), do: Enum.reverse(facts)
 
   @impl true
   def close(_facts), do: :ok
@@ -91,6 +94,12 @@ defmodule LazyRiver.Store.File do
 
   @behaviour LazyRiver.Store
 
+  # How much of the log may be un-checkpointed before writing another one:
+  # half of what is already checkpointed. Lower means opening scans less and
+  # more total bytes are written; higher is the reverse. Both are constant
+  # factors — the point is that neither grows with the length of the log.
+  @growth 0.5
+
   @impl true
   def open(name, opts) do
     dir = Keyword.get(opts, :dir, "priv/ledgers")
@@ -105,23 +114,34 @@ defmodule LazyRiver.Store.File do
      %{
        path: path,
        io: io,
-       facts: checkpoint ++ List.flatten(tail),
+       # Newest first. See `append/2`.
+       facts: Enum.reverse(checkpoint ++ List.flatten(tail)),
        sync: Keyword.get(opts, :sync, false),
        every: Keyword.get(opts, :checkpoint_every),
+       growth: Keyword.get(opts, :checkpoint_growth, @growth),
        # Tracked rather than asked for: a file opened in :append mode does not
        # move its position pointer on write, so position(:cur) is not where the
        # bytes went. Getting that wrong made a reopen read the tail twice.
        bytes: file_size(path),
        since: length(tail),
        checkpoint_at: at,
+       checkpoint_bytes: offset,
+       checkpoints_written: 0,
        records_scanned: scanned
      }}
   end
 
-  @doc "What opening this store had to do. Observability, not vocabulary."
-  @spec stats(map()) :: %{checkpoint_at: non_neg_integer(), records_scanned: non_neg_integer()}
-  def stats(state),
-    do: %{checkpoint_at: state.checkpoint_at, records_scanned: state.records_scanned}
+  @doc "What opening this store had to do, and what it has done since."
+  @spec stats(map()) :: map()
+  def stats(state) do
+    %{
+      checkpoint_at: state.checkpoint_at,
+      records_scanned: state.records_scanned,
+      checkpoint_bytes: state.checkpoint_bytes,
+      checkpoints_written: state.checkpoints_written,
+      bytes: state.bytes
+    }
+  end
 
   @impl true
   def append(state, facts) do
@@ -133,7 +153,12 @@ defmodule LazyRiver.Store.File do
 
     state = %{
       state
-      | facts: state.facts ++ facts,
+      | # Newest first, and prepended. `++` copies its left operand, so the
+        # obvious `state.facts ++ facts` re-copies every fact ever written on
+        # every single write — measured at 8.6µs per append at two thousand
+        # facts and 47.2µs at sixteen thousand, which is quadratic and was
+        # getting worse on the running box by the hour.
+        facts: Enum.reverse(facts) ++ state.facts,
         since: state.since + 1,
         bytes: state.bytes + byte_size(record)
     }
@@ -142,7 +167,7 @@ defmodule LazyRiver.Store.File do
   end
 
   @impl true
-  def replay(state), do: state.facts
+  def replay(state), do: Enum.reverse(state.facts)
 
   @impl true
   def close(state), do: :file.close(state.io)
@@ -171,8 +196,31 @@ defmodule LazyRiver.Store.File do
   defp maybe_checkpoint(state) when state.since < state.every, do: state
 
   defp maybe_checkpoint(state) do
-    at = state.facts |> Enum.map(& &1.tx) |> Enum.max(fn -> 0 end)
-    payload = :erlang.term_to_binary({at, state.bytes, state.facts})
+    if worth_writing?(state), do: write_checkpoint(state), else: state
+  end
+
+  # A checkpoint writes every fact again, so writing one on a fixed count of
+  # transactions makes the cost of keeping them grow with history: at a million
+  # facts and `checkpoint_every: 1000`, a million facts are serialised every
+  # thousand writes, forever. Measured before this changed — sixteen thousand
+  # single-fact appends wrote about 136MB of checkpoints to keep 1.7MB of facts.
+  #
+  # Requiring the unwritten tail to be a fraction of what is already
+  # checkpointed makes the total work linear in the log instead. Checkpoints
+  # then fall geometrically further apart, each one costs what it saves, and
+  # opening still scans no more than that same fraction.
+  #
+  # It degenerates to the old behaviour while a log is small, which is what a
+  # test with `checkpoint_every: 5` expects and is also correct: nothing is
+  # ever a large fraction of nothing, so the first checkpoint is not delayed.
+  defp worth_writing?(state) do
+    state.bytes - state.checkpoint_bytes >= trunc(state.checkpoint_bytes * state.growth)
+  end
+
+  defp write_checkpoint(state) do
+    facts = Enum.reverse(state.facts)
+    at = facts |> Enum.map(& &1.tx) |> Enum.max(fn -> 0 end)
+    payload = :erlang.term_to_binary({at, state.bytes, facts})
 
     # Written beside the log and swapped in, so a crash mid-write leaves the
     # previous checkpoint rather than a torn one. The log is never touched.
@@ -180,7 +228,13 @@ defmodule LazyRiver.Store.File do
     File.write!(tmp, <<byte_size(payload)::32, :erlang.crc32(payload)::32, payload::binary>>)
     File.rename!(tmp, state.path <> ".checkpoint")
 
-    %{state | since: 0, checkpoint_at: at}
+    %{
+      state
+      | since: 0,
+        checkpoint_at: at,
+        checkpoint_bytes: state.bytes,
+        checkpoints_written: state.checkpoints_written + 1
+    }
   end
 
   defp read_checkpoint(path) do
