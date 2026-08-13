@@ -69,15 +69,31 @@ defmodule Blazie.RunningJobsTest do
     {:ok, ledger} = Ledger.open(Vitals.ledger())
     before = length(Snapshot.find(Snapshot.open([ledger]), id: "vitals", attribute: "node"))
 
+    # A tick refuses a job already in flight, so a previous run still finishing
+    # makes `ran` empty and this test fail for a reason that is not a bug.
+    # Wait for the runner to be idle before asking it to run again.
+    settle(Blazie.Vitals.Runner)
+
     {:ok, ran} = Job.Runner.tick(Blazie.Vitals.Runner, System.system_time(:second) + 100_000)
     assert "vitals" in ran
 
-    Enum.reduce_while(1..100, nil, fn _, _ ->
-      now = length(Snapshot.find(Snapshot.open([ledger]), id: "vitals", attribute: "node"))
-      if now > before, do: {:halt, :ok}, else: {:cont, Process.sleep(20)}
-    end)
+    # And wait for the work itself rather than for a fixed budget. `tick`
+    # returns what it *started* — the reading lands when the task finishes, and
+    # a two-second guess at how long that takes is what made this flake about
+    # one run in fifteen.
+    settle(Blazie.Vitals.Runner)
 
     assert length(Snapshot.find(Snapshot.open([ledger]), id: "vitals", attribute: "node")) >
              before
+  end
+
+  # Blocks until the runner has nothing in flight. Polls because "in flight" is
+  # the runner's own state and it has no other way to say so.
+  defp settle(runner, remaining \\ 200) do
+    case {Job.Runner.in_flight(runner), remaining} do
+      {[], _} -> :ok
+      {busy, 0} -> flunk("runner still busy with #{inspect(busy)}")
+      _ -> Process.sleep(25) && settle(runner, remaining - 1)
+    end
   end
 end

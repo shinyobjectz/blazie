@@ -19,7 +19,8 @@ defmodule Blazie.MixProject do
           "Home" => "https://blazie.dev",
           "GitHub" => "https://github.com/shinyobjectz/blazie"
         },
-        files: ~w(lib priv/static/brand .monty/ontology.db mix.exs README.md DESIGN.md LICENSE NOTICE)
+        files:
+          ~w(lib priv/static/brand .monty/ontology.db mix.exs README.md DESIGN.md LICENSE NOTICE)
       ],
       docs: [
         main: "readme",
