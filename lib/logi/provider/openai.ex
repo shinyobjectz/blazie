@@ -1,0 +1,110 @@
+defmodule Logi.Provider.OpenAI do
+  @moduledoc """
+  OpenAI, and anything speaking its shape.
+
+  The chat-completions and embeddings shapes are the closest thing this space
+  has to a lingua franca — Groq, Together, OpenRouter, vLLM and Ollama all
+  answer them — so `base_url:` makes this module reach most endpoints that
+  exist without a second one being written.
+  """
+
+  @behaviour Logi.Provider
+
+  alias Logi.{Model, Provider}
+
+  @base "https://api.openai.com/v1"
+
+  @impl true
+  def generate(%Model{} = model, messages, opts) do
+    with {:ok, answered} <-
+           Provider.post(url(opts, "/chat/completions"), headers(opts), %{
+             "model" => model.name,
+             "messages" => messages,
+             "temperature" => Keyword.get(opts, :temperature, 0.0)
+           }) do
+      text(answered)
+    end
+  end
+
+  @impl true
+  def object(%Model{} = model, messages, schema, opts) do
+    # `json_schema` with `strict` is the provider enforcing the shape, rather
+    # than us asking nicely and parsing hopefully. A model that cannot honour it
+    # answers with a refusal instead of prose that looks like json.
+    body = %{
+      "model" => model.name,
+      "messages" => messages,
+      "temperature" => Keyword.get(opts, :temperature, 0.0),
+      "response_format" => %{
+        "type" => "json_schema",
+        "json_schema" => %{
+          "name" => "answer",
+          "strict" => true,
+          "schema" => Logi.Schema.json(schema)
+        }
+      }
+    }
+
+    with {:ok, answered} <- Provider.post(url(opts, "/chat/completions"), headers(opts), body),
+         {:ok, raw} <- text(answered) do
+      case Jason.decode(raw) do
+        {:ok, decoded} when is_map(decoded) ->
+          {:ok, decoded}
+
+        _ ->
+          {:error,
+           %{
+             problem: :not_the_shape_asked_for,
+             repair: "The model answered #{String.slice(raw, 0, 200)}, which is not an object."
+           }}
+      end
+    end
+  end
+
+  @impl true
+  def embed(%Model{} = model, texts, opts) do
+    with {:ok, answered} <-
+           Provider.post(url(opts, "/embeddings"), headers(opts), %{
+             "model" => model.name,
+             "input" => texts
+           }) do
+      vectors(answered)
+    end
+  end
+
+  defp text(%{"choices" => [%{"message" => %{"content" => content}} | _]}) when is_binary(content),
+    do: {:ok, content}
+
+  defp text(answered),
+    do:
+      {:error,
+       %{
+         problem: :no_answer,
+         repair: "The provider answered without a message: #{inspect(answered) |> String.slice(0, 200)}"
+       }}
+
+  # Sorted by index, because the order embeddings come back in is not promised
+  # and a caller zipping them against its inputs would silently mislabel every
+  # vector if it ever changed.
+  defp vectors(%{"data" => data}) when is_list(data) do
+    {:ok,
+     data
+     |> Enum.sort_by(&Map.get(&1, "index", 0))
+     |> Enum.map(&Map.fetch!(&1, "embedding"))}
+  end
+
+  defp vectors(answered),
+    do:
+      {:error,
+       %{
+         problem: :no_vectors,
+         repair: "The provider answered without embeddings: #{inspect(answered) |> String.slice(0, 200)}"
+       }}
+
+  defp url(opts, path), do: Keyword.get(opts, :base_url, @base) <> path
+
+  defp headers(opts) do
+    key = Keyword.get(opts, :api_key) || System.get_env("OPENAI_API_KEY") || ""
+    [{"authorization", "Bearer " <> key}]
+  end
+end
