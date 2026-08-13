@@ -22,3 +22,8 @@ config :blazie, key_dir: if(config_env() == :test, do: "tmp/test_keys", else: "p
 # Vitals take a reading on this cadence. Unset means the job does not run at
 # all, which is right for tests and wrong for anything watching itself.
 config :blazie, vitals_every: if(config_env() == :test, do: 3600, else: 60)
+
+# Storage is measured less often than the node is: a file's size moves with
+# writes rather than with time, so a reading a minute would be five identical
+# facts for every one that said anything.
+config :blazie, storage_every: if(config_env() == :test, do: 3600, else: 300)

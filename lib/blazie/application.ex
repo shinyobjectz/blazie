@@ -20,6 +20,14 @@ defmodule Blazie.Application do
     end
   end
 
+  # Same shape as vitals, and off in test for the same reason.
+  defp storage do
+    case Application.get_env(:blazie, :storage_every) do
+      nil -> []
+      every -> [{Blazie.Storage, every: every}]
+    end
+  end
+
   # Only when there is somewhere to put the bytes. A backup job with no target
   # is a crash loop at boot rather than a backup — and the failure a deployment
   # must never have is the one where it looks configured and copies nothing.
@@ -62,7 +70,7 @@ defmodule Blazie.Application do
         {Blazie.Formula.Engine, name: Blazie.Formula.Engine},
         {Phoenix.PubSub, name: Blazie.PubSub},
         Blazie.Surface.Endpoint
-      ] ++ vitals() ++ backup() ++ drill()
+      ] ++ vitals() ++ storage() ++ backup() ++ drill()
 
     # Three restarts in five seconds is too tight for a system where restarting
     # a component is a legitimate operation rather than only a symptom. Ten

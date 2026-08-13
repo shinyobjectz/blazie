@@ -21,7 +21,7 @@ defmodule Blazie do
   seam with checkpointing, sort orders and resident bounds inside the world, a
   `Surface` of four operations with an `Authority` deciding which ledgers a
   caller may name, a `Job.Runner`, `Subscription`, `Formula.Engine`,
-  `Formula.Sandbox` for code we do not trust, `Erasure` with its `Keyring`,
+  `Erasure` with its `Keyring`,
   `Cluster` for one-world-one-owner, and `Vitals`.
 
   ## What is not true yet, in one place

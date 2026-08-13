@@ -20,7 +20,7 @@ defmodule Blazie.Symbol.Text do
   is chosen by the caller and this module never learns a model's name. A static
   embedder — a token table looked up and averaged, no matmul, no network — is
   the shape that fits: it is deterministic, it needs no GPU, and it is the only
-  shape that could later run inside `Formula.Sandbox`, whose guest world is
+  shape that could later run inside a sandbox, whose guest world is
   built from the imports the host hands in and which is handed none.
 
       formula =
@@ -57,7 +57,7 @@ defmodule Blazie.Symbol.Text do
   @doc """
   A formula turning every text answer under `over` into a symbol under `into`.
 
-  Named `mapping` for its SHAPE, the way `Sandbox.mapping/3` is: both build a
+  Named `mapping` for its SHAPE: it builds a
   formula that applies one function to every answer matching a pattern. The
   two names it is not are both words — `formula` is what it returns and
   `embedding` is what the caller's function makes, and a function named after

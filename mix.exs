@@ -52,10 +52,18 @@ defmodule Blazie.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
-  # Dependencies arrive in a deliberate order, and the order they arrive in is deliberate: storage
-  # (SlateDB via Rustler), then the surface (Phoenix), then sandboxing (Wasmex)
-  # when tenant code actually exists. The reasoning rides in the commits
-  # that add each one.
+  # Two of these are here for what is next rather than for what runs.
+  #
+  # `wasmex` is the sandbox a JOB will spawn — Lua is the authoring surface for
+  # formulas, jobs and queries, and WebAssembly is what an agent image runs in.
+  # Nothing calls it yet. That is a plan, and it is written here as one.
+  #
+  # SlateDB used to be named here as "the destination" for storage, which read
+  # like a decision and was never one. What actually ships is `Store.File` on
+  # local disk, with `Backup.Target.S3` copying byte ranges into S3-compatible
+  # object storage — R2 included, and hand-signed rather than dragging a
+  # vendor SDK in. Putting the database ITSELF in object storage is a separate,
+  # unmade decision; when it is made it belongs in a commit, not a comment.
   defp deps do
     [
       {:phoenix, "~> 1.8"},
