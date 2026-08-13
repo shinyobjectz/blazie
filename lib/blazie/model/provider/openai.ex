@@ -1,4 +1,4 @@
-defmodule Logi.Provider.OpenAI do
+defmodule Blazie.Model.Provider.OpenAI do
   @moduledoc """
   OpenAI, and anything speaking its shape.
 
@@ -8,14 +8,14 @@ defmodule Logi.Provider.OpenAI do
   exist without a second one being written.
   """
 
-  @behaviour Logi.Provider
+  @behaviour Blazie.Model.Provider
 
-  alias Logi.{Model, Provider}
+  alias Blazie.Model.{Provider, Reference}
 
   @base "https://api.openai.com/v1"
 
   @impl true
-  def generate(%Model{} = model, messages, opts) do
+  def generate(%Reference{} = model, messages, opts) do
     with {:ok, answered} <-
            Provider.post(url(opts, "/chat/completions"), headers(opts), %{
              "model" => model.name,
@@ -27,7 +27,7 @@ defmodule Logi.Provider.OpenAI do
   end
 
   @impl true
-  def object(%Model{} = model, messages, schema, opts) do
+  def object(%Reference{} = model, messages, schema, opts) do
     # `json_schema` with `strict` is the provider enforcing the shape, rather
     # than us asking nicely and parsing hopefully. A model that cannot honour it
     # answers with a refusal instead of prose that looks like json.
@@ -40,7 +40,7 @@ defmodule Logi.Provider.OpenAI do
         "json_schema" => %{
           "name" => "answer",
           "strict" => true,
-          "schema" => Logi.Schema.json(schema)
+          "schema" => Blazie.Model.Schema.json(schema)
         }
       }
     }
@@ -62,7 +62,7 @@ defmodule Logi.Provider.OpenAI do
   end
 
   @impl true
-  def embed(%Model{} = model, texts, opts) do
+  def embed(%Reference{} = model, texts, opts) do
     with {:ok, answered} <-
            Provider.post(url(opts, "/embeddings"), headers(opts), %{
              "model" => model.name,

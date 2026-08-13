@@ -1,4 +1,4 @@
-defmodule Logi.LiveTest do
+defmodule Blazie.Model.LiveTest do
   @moduledoc """
   The one thing a stub cannot prove: that this reaches a model and comes back.
 
@@ -10,7 +10,7 @@ defmodule Logi.LiveTest do
   use ExUnit.Case, async: false
 
   alias Blazie.{Attribute, Snapshot, Symbol, World}
-  alias Logi.Embedding
+  alias Blazie.Embedding
 
   @moduletag :live
 
@@ -18,7 +18,7 @@ defmodule Logi.LiveTest do
   @embed "openrouter:openai/text-embedding-3-small"
 
   test "text comes back" do
-    assert {:ok, said} = Logi.generate(@chat, "Reply with exactly the word: pong")
+    assert {:ok, said} = Blazie.Model.generate(@chat, "Reply with exactly the word: pong")
     assert said =~ "pong"
   end
 
@@ -26,7 +26,7 @@ defmodule Logi.LiveTest do
     # No prompt says "answer with a string" — the declaration is the schema, and
     # this asserts the provider actually enforced it rather than returning prose.
     assert {:ok, %{"value" => severity}} =
-             Logi.object(@chat, "The server is on fire and nobody can log in.",
+             Blazie.Model.object(@chat, "The server is on fire and nobody can log in.",
                answers: "name",
                describe: "severity: exactly one of low, medium or high"
              )
@@ -36,7 +36,7 @@ defmodule Logi.LiveTest do
 
   test "a shape blazie can decide is enforced as a number" do
     assert {:ok, %{"value" => count}} =
-             Logi.object(@chat, "How many legs does a spider have?", answers: "integer")
+             Blazie.Model.object(@chat, "How many legs does a spider have?", answers: "integer")
 
     assert is_integer(count)
   end

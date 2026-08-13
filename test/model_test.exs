@@ -1,4 +1,4 @@
-defmodule LogiTest do
+defmodule Blazie.AgentDeclarationTest do
   @moduledoc """
   The model call, and the agent that is declared rather than written.
 
@@ -10,7 +10,8 @@ defmodule LogiTest do
   use ExUnit.Case, async: true
 
   alias Blazie.{Attribute, Snapshot, World}
-  alias Logi.{Agent, Model, Schema}
+  alias Blazie.Agent
+  alias Blazie.Model.{Reference, Schema}
 
   setup do
     name = "logi-#{System.unique_integer([:positive])}"
@@ -25,18 +26,18 @@ defmodule LogiTest do
 
   describe "a model reference" do
     test "is one string, parsed" do
-      assert {:ok, %Model{provider: :openai, name: "gpt-4o-mini"}} = Model.from("openai:gpt-4o-mini")
+      assert {:ok, %Reference{provider: :openai, name: "gpt-4o-mini"}} = Reference.from("openai:gpt-4o-mini")
     end
 
     test "an unknown provider says which are known" do
-      assert {:error, refusal} = Model.from("nope:x")
+      assert {:error, refusal} = Reference.from("nope:x")
       assert refusal.repair =~ "anthropic, openai"
     end
 
     test "a provider name from outside cannot mint an atom" do
       # `to_existing_atom` guards this: an atom is never collected, so a
       # provider taken from a request would be a way to exhaust the table.
-      assert {:error, _} = Model.from("definitely_not_a_provider_#{System.unique_integer()}:x")
+      assert {:error, _} = Reference.from("definitely_not_a_provider_#{System.unique_integer()}:x")
     end
   end
 

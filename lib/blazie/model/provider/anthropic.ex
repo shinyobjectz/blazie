@@ -1,4 +1,4 @@
-defmodule Logi.Provider.Anthropic do
+defmodule Blazie.Model.Provider.Anthropic do
   @moduledoc """
   Anthropic's messages API.
 
@@ -8,15 +8,15 @@ defmodule Logi.Provider.Anthropic do
   as conditionals in a shared one.
   """
 
-  @behaviour Logi.Provider
+  @behaviour Blazie.Model.Provider
 
-  alias Logi.{Model, Provider}
+  alias Blazie.Model.{Provider, Reference}
 
   @base "https://api.anthropic.com/v1"
   @version "2023-06-01"
 
   @impl true
-  def generate(%Model{} = model, messages, opts) do
+  def generate(%Reference{} = model, messages, opts) do
     {system, rest} = split_system(messages)
 
     body =
@@ -34,14 +34,14 @@ defmodule Logi.Provider.Anthropic do
   end
 
   @impl true
-  def object(%Model{} = model, messages, schema, opts) do
+  def object(%Reference{} = model, messages, schema, opts) do
     # Anthropic shapes an answer through a tool rather than a response format.
     # Asking for the tool and forcing its use is the same guarantee arrived at
     # differently, which is exactly what a provider module is for.
     tool = %{
       "name" => "answer",
       "description" => "Answer with this shape.",
-      "input_schema" => Logi.Schema.json(schema)
+      "input_schema" => Blazie.Model.Schema.json(schema)
     }
 
     {system, rest} = split_system(messages)

@@ -1,4 +1,4 @@
-defmodule Logi.EmbeddingTest do
+defmodule Blazie.Model.EmbeddingTest do
   @moduledoc """
   Text into a symbol.
 
@@ -13,7 +13,7 @@ defmodule Logi.EmbeddingTest do
   use ExUnit.Case, async: true
 
   alias Blazie.{Attribute, Snapshot, Symbol, World}
-  alias Logi.Embedding
+  alias Blazie.Embedding
 
   setup do
     name = "embed-#{System.unique_integer([:positive])}"

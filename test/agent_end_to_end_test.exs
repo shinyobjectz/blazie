@@ -1,4 +1,4 @@
-defmodule Logi.AgentEndToEndTest do
+defmodule Blazie.Model.AgentEndToEndTest do
   @moduledoc """
   A declared agent, run by the machinery that already existed.
 
@@ -14,7 +14,7 @@ defmodule Logi.AgentEndToEndTest do
 
   alias Blazie.{Attribute, Job, Snapshot, World}
   alias Blazie.Job.Generative
-  alias Logi.Agent
+  alias Blazie.Agent
 
   setup do
     name = "e2e-#{System.unique_integer([:positive])}"

@@ -133,3 +133,38 @@ body {
 img[src*="blazie-mark"] {
   image-rendering: pixelated;
 }
+
+/* What circles a world, on the worlds page: a ring of dots that turns once a
+   minute. Slow enough to be a property of the page rather than something that
+   pulls the eye off a table.
+
+   Longhand rather than the `animation` shorthand, because `orbit-held` sets
+   only the play state and a shorthand would reset it back to running depending
+   on which utility Tailwind happened to emit first. Two declarations that
+   fight over emission order is not a thing worth debugging later. */
+@keyframes orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@utility orbiting {
+  animation-name: orbit;
+  animation-duration: 60s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+/* Held while the ring is off screen. A console is left open all day and a
+   compositor animation nobody can see is still a compositor animation. */
+@utility orbit-held {
+  animation-play-state: paused;
+}
+
+/* Stopped outright, in CSS, so it is never briefly true on first paint the way
+   a JS media query read after mount would be. */
+@media (prefers-reduced-motion: reduce) {
+  .orbiting {
+    animation-name: none;
+  }
+}

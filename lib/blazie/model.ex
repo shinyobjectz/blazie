@@ -1,6 +1,6 @@
-defmodule Logi do
+defmodule Blazie.Model do
   @moduledoc """
-  Agents, and the one thing blazie could not do without help: call a model.
+  Calling a model, which is the one thing blazie could not do without help.
 
   Everything an agent needs was already here — memory is facts in a world,
   attention is a job's read set, waking is `Job.due?` staleness, hands are a
@@ -8,18 +8,19 @@ defmodule Logi do
   every fact it wrote. What was missing was narrow and unglamorous: an HTTP
   request to somebody's inference endpoint.
 
-  So this is not an agent framework sitting over blazie. It is the model call,
-  plus the small amount of Lua vocabulary that turns "a job that happens to be
-  generative" into "an agent that watches something".
+  This was briefly its own library. It is not one — it reads snapshots, writes
+  facts and leans on `Job`, `Symbol` and `Attribute`, so it could never be used
+  without blazie, and a second name for something that ships in the same tree
+  with the same tests and the same deploy is a name that buys nothing.
 
   ## Why there is no client dependency
 
   `req_llm` is the right shape and the wrong ownership. Twenty-one providers is
-  twenty-one ways for somebody else's release to change what a formula answers,
-  and a model call is the one place in this tree where a silent behaviour change
-  is indistinguishable from the model itself drifting. The tree already signs
-  SigV4 by hand and parses GitHub's OAuth by hand for the same reason —
-  `:httpc` and `Jason`, no SDK — and the providers below are the same bet.
+  twenty-one ways for somebody else's release to change what a job answers, and
+  a model call is the one place in this tree where a silent behaviour change is
+  indistinguishable from the model itself drifting. The tree already signs SigV4
+  by hand and parses GitHub's OAuth by hand for the same reason — `:httpc` and
+  `Jason`, no SDK — and the providers here are the same bet.
 
   What was copied is the shape: a model named `provider:name`, one call for
   text, one for a schema-shaped answer, one for an embedding, and a provider
@@ -30,23 +31,23 @@ defmodule Logi do
   `Symbol`'s prose says a symbol is "produced by a formula". It cannot be: an
   embedding is a network call, and a formula has no network by construction.
   What `Symbol.check/1` actually enforces is *provenance* — that something ran
-  and named itself — which a job satisfies exactly. So the rule holds and the
-  wording was loose, and this is the one place the difference matters.
+  and named itself — which a job satisfies exactly. So the rule held and the
+  wording was loose. See `Blazie.Embedding`.
   """
 
-  alias Logi.{Model, Provider}
+  alias Blazie.Model.{Provider, Reference}
 
   @type refusal :: %{problem: atom(), repair: String.t()}
 
   @doc """
   Ask a model for text.
 
-      Logi.generate("openai:gpt-4o-mini", "Say hello")
+      Blazie.Model.generate("openai:gpt-4o-mini", "Say hello")
   """
   @spec generate(String.t(), String.t() | [map()], keyword()) ::
           {:ok, String.t()} | {:error, refusal()}
   def generate(model, prompt, opts \\ []) do
-    with {:ok, %Model{} = model} <- Model.from(model) do
+    with {:ok, %Reference{} = model} <- Reference.from(model) do
       Provider.for(model).generate(model, messages(prompt), opts)
     end
   end
@@ -62,7 +63,7 @@ defmodule Logi do
   @spec object(String.t(), String.t(), keyword(), keyword()) ::
           {:ok, map()} | {:error, refusal()}
   def object(model, prompt, schema, opts \\ []) do
-    with {:ok, %Model{} = model} <- Model.from(model) do
+    with {:ok, %Reference{} = model} <- Reference.from(model) do
       Provider.for(model).object(model, messages(prompt), schema, opts)
     end
   end
@@ -77,7 +78,7 @@ defmodule Logi do
   @spec embed(String.t(), String.t() | [String.t()], keyword()) ::
           {:ok, [[float()]]} | {:error, refusal()}
   def embed(model, text, opts \\ []) do
-    with {:ok, %Model{} = model} <- Model.from(model) do
+    with {:ok, %Reference{} = model} <- Reference.from(model) do
       Provider.for(model).embed(model, List.wrap(text), opts)
     end
   end

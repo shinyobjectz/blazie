@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { RefusalNote } from "@/components/ui/refusal-note"
 import { Separator } from "@/components/ui/separator"
+import { WorldAvatar } from "@/components/ui/world-avatar"
 import {
   SidebarInset,
   SidebarProvider,
@@ -78,21 +79,28 @@ export default function DashboardLayout({
               </span>
             ) : (
               <DropdownMenu>
-                <DropdownMenuTrigger className="font-mono inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-white transition-colors hover:border-white/40 hover:bg-white/5">
+                <DropdownMenuTrigger className="font-mono inline-flex items-center gap-2 rounded-md border border-border py-1 pl-1 pr-3 text-xs text-white transition-colors hover:border-white/40 hover:bg-white/5">
+                  {/* The one avatar worth a shader: it is the answer to "which
+                      world am I writing into", and it is on screen on every
+                      page whether or not the menu is ever opened. */}
+                  {cluster.world ? (
+                    <WorldAvatar live world={cluster.world} />
+                  ) : null}
                   {cluster.world ?? "choose a world"}
                   <ChevronDown className="size-3.5 text-muted-foreground" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="font-mono text-xs">
                   {cluster.who.worlds.map((one) => (
                     <DropdownMenuItem key={one} onSelect={() => cluster.choose(one)}>
+                      <WorldAvatar size="sm" world={one} />
+                      {one}
                       <Check
                         className={
                           one === cluster.world
-                            ? "size-3.5 text-flame"
-                            : "size-3.5 opacity-0"
+                            ? "ml-auto size-3.5 text-flame"
+                            : "ml-auto size-3.5 opacity-0"
                         }
                       />
-                      {one}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>

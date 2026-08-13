@@ -1,4 +1,4 @@
-defmodule Logi.Provider do
+defmodule Blazie.Model.Provider do
   @moduledoc """
   What a provider has to be able to do, and nothing more.
 
@@ -12,17 +12,17 @@ defmodule Logi.Provider do
   adding the twenty-second changes no existing file.
   """
 
-  alias Logi.Model
+  alias Blazie.Model.Reference
 
   @type refusal :: %{problem: atom(), repair: String.t()}
 
-  @callback generate(Model.t(), [map()], keyword()) :: {:ok, String.t()} | {:error, refusal()}
-  @callback object(Model.t(), [map()], keyword(), keyword()) :: {:ok, map()} | {:error, refusal()}
-  @callback embed(Model.t(), [String.t()], keyword()) :: {:ok, [[float()]]} | {:error, refusal()}
+  @callback generate(Reference.t(), [map()], keyword()) :: {:ok, String.t()} | {:error, refusal()}
+  @callback object(Reference.t(), [map()], keyword(), keyword()) :: {:ok, map()} | {:error, refusal()}
+  @callback embed(Reference.t(), [String.t()], keyword()) :: {:ok, [[float()]]} | {:error, refusal()}
 
   @doc "The module for a model."
-  @spec for(Model.t()) :: module()
-  def for(%Model{} = model), do: Model.module(model)
+  @spec for(Reference.t()) :: module()
+  def for(%Reference{} = model), do: Reference.module(model)
 
   @doc """
   A json request, signed by hand.

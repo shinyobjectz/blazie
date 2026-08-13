@@ -1,4 +1,4 @@
-defmodule Logi.Provider.OpenRouter do
+defmodule Blazie.Model.Provider.OpenRouter do
   @moduledoc """
   OpenRouter, which is the OpenAI shape pointed somewhere else.
 
@@ -13,9 +13,9 @@ defmodule Logi.Provider.OpenRouter do
   key would fail with somebody else's 401.
   """
 
-  @behaviour Logi.Provider
+  @behaviour Blazie.Model.Provider
 
-  alias Logi.Provider.OpenAI
+  alias Blazie.Model.Provider.OpenAI
 
   @base "https://openrouter.ai/api/v1"
 

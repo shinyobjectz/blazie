@@ -1,4 +1,4 @@
-defmodule Logi.Schema do
+defmodule Blazie.Model.Schema do
   @moduledoc """
   A blazie declaration, as the shape a model is asked for.
 

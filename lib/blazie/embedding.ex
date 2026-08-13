@@ -1,4 +1,4 @@
-defmodule Logi.Embedding do
+defmodule Blazie.Embedding do
   @moduledoc """
   Text into a symbol, which is a job and could never have been a formula.
 
@@ -71,7 +71,7 @@ defmodule Logi.Embedding do
         pending ->
           texts = Enum.map(pending, fn {_id, text} -> text end)
 
-          case Logi.embed(model, texts, opts) do
+          case Blazie.Model.embed(model, texts, opts) do
             {:ok, vectors} when length(vectors) == length(pending) ->
               pending
               |> Enum.zip(vectors)

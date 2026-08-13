@@ -1,4 +1,4 @@
-defmodule Logi.Model do
+defmodule Blazie.Model.Reference do
   @moduledoc """
   Which model, at which provider — `"openai:gpt-4o-mini"`.
 
@@ -17,9 +17,9 @@ defmodule Logi.Model do
   # request that would mint one. An atom is never collected, so a provider taken
   # from outside would be a way to exhaust the atom table from the wire.
   @known %{
-    "openai" => Logi.Provider.OpenAI,
-    "anthropic" => Logi.Provider.Anthropic,
-    "openrouter" => Logi.Provider.OpenRouter
+    "openai" => Blazie.Model.Provider.OpenAI,
+    "anthropic" => Blazie.Model.Provider.Anthropic,
+    "openrouter" => Blazie.Model.Provider.OpenRouter
   }
   @provider_atoms [:openai, :anthropic, :openrouter]
   @doc false

@@ -1,4 +1,4 @@
-defmodule Logi.Agent do
+defmodule Blazie.Agent do
   @moduledoc """
   An agent, which is a job with memory — declared rather than written.
 
@@ -152,7 +152,7 @@ defmodule Logi.Agent do
       shape = [answers: Snapshot.value(declared, field, "answers") || "any"]
 
       for id <- due(snapshot, field) do
-        case Logi.object(model, asking(snapshot, field, id), shape, opts) do
+        case Blazie.Model.object(model, asking(snapshot, field, id), shape, opts) do
           {:ok, %{"value" => value}} -> {id, field, value}
           {:ok, answered} -> raise "#{field} answered #{inspect(answered)}, which has no value"
           {:error, refusal} -> raise refusal.repair
