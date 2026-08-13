@@ -148,15 +148,28 @@ defmodule Blazie.Agent do
   @spec work(Snapshot.t(), String.t(), keyword()) :: (Snapshot.t(), pos_integer() -> [tuple()])
   def work(%Snapshot{} = declared, field, opts \\ []) do
     fn snapshot, _attempt ->
-      model = Snapshot.value(declared, field, "asks")
-      shape = [answers: Snapshot.value(declared, field, "answers") || "any"]
+      # Asked before anything is called, because after is a bill. A refused run
+      # writes WHY — an agent that went quiet and one that stopped itself look
+      # identical from outside and mean opposite things.
+      case Blazie.Spend.allowed?(snapshot, field) do
+        {:error, refusal} ->
+          Blazie.Spend.refused(field, refusal, field)
 
-      for id <- due(snapshot, field) do
-        case Blazie.Model.object(model, asking(snapshot, field, id), shape, opts) do
-          {:ok, %{"value" => value}} -> {id, field, value}
-          {:ok, answered} -> raise "#{field} answered #{inspect(answered)}, which has no value"
-          {:error, refusal} -> raise refusal.repair
-        end
+        :ok ->
+          ask_for_each(declared, snapshot, field, opts)
+      end
+    end
+  end
+
+  defp ask_for_each(declared, snapshot, field, opts) do
+    model = Snapshot.value(declared, field, "asks")
+    shape = [answers: Snapshot.value(declared, field, "answers") || "any"]
+
+    for id <- due(snapshot, field) do
+      case Blazie.Model.object(model, asking(snapshot, field, id), shape, opts) do
+        {:ok, %{"value" => value}} -> {id, field, value}
+        {:ok, answered} -> raise "#{field} answered #{inspect(answered)}, which has no value"
+        {:error, refusal} -> raise refusal.repair
       end
     end
   end

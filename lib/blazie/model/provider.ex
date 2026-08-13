@@ -90,6 +90,23 @@ defmodule Blazie.Model.Provider do
     end
   end
 
+  @doc """
+  What a call spent, from whatever shape the provider reported it in.
+
+  Zero when a provider says nothing. That is a real limitation and it is stated
+  rather than guessed at: a spend of zero means "not reported", and a budget
+  built on guesses would refuse the wrong runs.
+  """
+  @spec spent(map()) :: %{in: non_neg_integer(), out: non_neg_integer()}
+  def spent(%{"usage" => usage}) when is_map(usage) do
+    %{
+      in: Map.get(usage, "prompt_tokens") || Map.get(usage, "input_tokens") || 0,
+      out: Map.get(usage, "completion_tokens") || Map.get(usage, "output_tokens") || 0
+    }
+  end
+
+  def spent(_answered), do: %{in: 0, out: 0}
+
   @doc "The refusal a provider gives when it cannot do a thing at all."
   @spec cannot(String.t(), String.t()) :: {:error, refusal()}
   def cannot(what, provider) do
