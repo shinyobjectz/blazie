@@ -66,13 +66,21 @@ ship host="209.50.60.180":
     just check >/dev/null
     echo "   {{ "green" }}"
 
+    # Counted from the FILES on disk, not from `open_worlds` — that reports what
+    # happens to be open, which varies with what has been touched since boot. A
+    # gate on a number that moves on its own is a gate that cries wolf, and
+    # worse, would not notice a world going missing if nothing had opened it.
     echo "== what the node can see now =="
     before=$(ssh -o BatchMode=yes root@{{host}} 'docker exec blazie /app/bin/blazie rpc "
-      IO.puts(Enum.map(Blazie.World.open_worlds(), fn w ->
-        {:ok, r} = Blazie.World.open(w)
-        length(Blazie.Snapshot.find(Blazie.Snapshot.open([r]), []))
-      end) |> Enum.sum())"' 2>/dev/null | tr -d "[:space:]")
-    echo "   ${before} facts across every open world"
+      dir = Application.get_env(:blazie, :ledger_dir)
+      IO.puts(File.ls!(dir)
+        |> Enum.filter(&String.ends_with?(&1, \".ledger\"))
+        |> Enum.map(fn file ->
+             name = file |> String.trim_trailing(\".ledger\") |> Base.url_decode64!(padding: false) |> :erlang.binary_to_term()
+             {:ok, r} = Blazie.World.open(name)
+             length(Blazie.Snapshot.find(Blazie.Snapshot.open([r]), []))
+           end) |> Enum.sum())"' 2>/dev/null | tr -d "[:space:]")
+    echo "   ${before} facts on disk, across every world"
 
     echo "== sync and build =="
     rsync -az --delete --exclude '.git' --exclude '_build' --exclude 'deps' \
@@ -95,10 +103,14 @@ ship host="209.50.60.180":
 
     echo "== can it still read what it had? =="
     after=$(ssh -o BatchMode=yes root@{{host}} 'docker exec blazie /app/bin/blazie rpc "
-      IO.puts(Enum.map(Blazie.World.open_worlds(), fn w ->
-        {:ok, r} = Blazie.World.open(w)
-        length(Blazie.Snapshot.find(Blazie.Snapshot.open([r]), []))
-      end) |> Enum.sum())"' 2>/dev/null | tr -d "[:space:]")
+      dir = Application.get_env(:blazie, :ledger_dir)
+      IO.puts(File.ls!(dir)
+        |> Enum.filter(&String.ends_with?(&1, \".ledger\"))
+        |> Enum.map(fn file ->
+             name = file |> String.trim_trailing(\".ledger\") |> Base.url_decode64!(padding: false) |> :erlang.binary_to_term()
+             {:ok, r} = Blazie.World.open(name)
+             length(Blazie.Snapshot.find(Blazie.Snapshot.open([r]), []))
+           end) |> Enum.sum())"' 2>/dev/null | tr -d "[:space:]")
     echo "   ${after} facts (was ${before})"
 
     # A node that came up healthy and empty is the failure this exists to catch.
