@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { CitableSection } from "@/components/ui/citable-section";
 import { CopyButton } from "@/components/ui/copy-button";
 import { GradientBackground } from "@/components/ui/paper-design-shader-background";
 import { IllustrationCardGrid } from "@/components/ui/illustration-card-grid";
@@ -20,13 +21,6 @@ const rest = [
     title: "erasure that actually erases",
     body: "a value is sealed under a key belonging to whoever it is about. erasing destroys the key, so the bytes become noise, nothing is rewritten, and backups are covered because the key was never in them.",
   },
-];
-
-const operations = [
-  ["open", "which ledgers", "a snapshot name"],
-  ["ask", "name, question", "facts"],
-  ["watch", "name, question", "facts again as the name advances"],
-  ["write", "name, facts", "a new name"],
 ];
 
 export default function Home() {
@@ -107,39 +101,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="border-t border-border px-6 py-20 sm:px-10">
-        <div className="mx-auto max-w-5xl">
-          <h2 className="mb-3 text-3xl font-medium tracking-tight text-white">
-            an answer you can cite
-          </h2>
-          <p className="mb-10 max-w-2xl text-sm text-muted-foreground">
-            a caller holds the snapshot&apos;s name, never its bytes. the same
-            question at the same name gives the same facts forever — so an agent
-            can cite what it read, and the citation still holds next month.
-          </p>
-
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[34rem] text-left text-sm">
-              <tbody>
-                {operations.map(([op, takes, gives]) => (
-                  <tr key={op} className="border-b border-border/60">
-                    <td className="font-pixel py-3 pr-8 text-lg lowercase text-flame">
-                      {op}
-                    </td>
-                    <td className="font-mono py-3 pr-8 text-muted-foreground">{takes}</td>
-                    <td className="font-mono py-3 text-white/80">→ {gives}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <p className="mt-8 max-w-2xl text-sm text-muted-foreground">
-            authorization is which ledgers a caller may name. not row rules, not
-            predicates — so an agent&apos;s reach is a list you can read.
-          </p>
-        </div>
-      </section>
+      <CitableSection />
 
       <footer className="flex flex-col items-center gap-3 border-t border-border px-6 py-10 text-sm text-muted-foreground sm:flex-row sm:justify-between sm:px-10">
         <Wordmark size="sm" className="opacity-70" />
