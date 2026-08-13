@@ -621,9 +621,7 @@ func sourceFrom(args []string, file string) (string, error) {
 
 func cmdWatch(ctx context.Context, args []string, out, errOut io.Writer) (bool, error) {
 	flags := newFlags("watch")
-	attribute := flags.set.String("attribute", "", "watch this attribute only")
-	id := flags.set.String("id", "", "watch this id only")
-	stringly := flags.set.Bool("string", false, "take --id as a string, never as JSON")
+	file := flags.set.String("f", "", "read the lua from a file, or - for stdin")
 	if err := flags.parse(args); err != nil {
 		return false, err
 	}
@@ -631,9 +629,9 @@ func cmdWatch(ctx context.Context, args []string, out, errOut io.Writer) (bool, 
 	ledgers := flags.set.Args()
 	if len(ledgers) == 0 {
 		return flags.asJSON, &usageError{&Refusal{
-			Problem: "no_ledgers",
-			Repair: "Name the ledgers to watch. Watching none is not watching everything — " +
-				"`blazie watch <ledger> [<ledger>...]`.",
+			Problem: "no_ledger",
+			Repair: "Name the ledger to watch, and the lua to keep answering — " +
+				"`blazie watch <ledger> '<lua>'`.",
 		}}
 	}
 
@@ -642,12 +640,15 @@ func cmdWatch(ctx context.Context, args []string, out, errOut io.Writer) (bool, 
 		return flags.asJSON, err
 	}
 
-	pattern := Pattern{Attribute: *attribute}
-	if isSet(flags.set, "id") {
-		pattern.ID = parseID(*id, *stringly)
+	// The first argument is the ledger, and everything after it is the chunk —
+	// the same shape as `run`, because watching IS a run kept and a client that
+	// learned one should not discover the other wants something else.
+	source, err := sourceFrom(ledgers[1:], *file)
+	if err != nil {
+		return flags.asJSON, err
 	}
 
-	return flags.asJSON, client.Watch(ctx, out, errOut, ledgers, pattern, flags.asJSON)
+	return flags.asJSON, client.Watch(ctx, out, errOut, ledgers[:1], source, flags.asJSON)
 }
 
 // ── config ──────────────────────────────────────────────────────────────────
@@ -816,7 +817,7 @@ func writeUsage(out io.Writer) {
   blazie ledger new <name>        take a name, and hold what you took
   blazie run <ledger> '<lua>'     run it, and print what it returned
   blazie run <ledger> -f <file>   the same, from a file (- for stdin)
-  blazie watch <ledger>...        answered again as things land
+  blazie watch <ledger> '<lua>'   the same chunk, answered again as things land
 
 %s
   ada.height = 180                     a field is a field
@@ -826,11 +827,9 @@ func writeUsage(out io.Writer) {
   at(42).ada.height                    what it was then
 
 %s
-  -f <file>            read the lua from a file, or - for stdin   (run)
+  -f <file>            read the lua from a file, or - for stdin (run, watch)
   --at <name>          read at this snapshot, as json             (run)
   --as job             give it a clock and http                   (run)
-  --attribute <name>   match one attribute                     (watch)
-  --id <id>            match one id                            (watch)
   --json               print what the node said, unshaped  (every command)
   --url <url>          the node to talk to
   --no-browser         never offer to open a browser           (login)

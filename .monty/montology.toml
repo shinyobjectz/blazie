@@ -46,4 +46,9 @@ enforced_kinds = ["core", "inner"]
 # name, value — value type and noun, both used for exactly what they denote:
 # `Snapshot.name/1` returns the name, `Snapshot.value/3` returns a fact's
 # value. Kept deliberately consistent rather than renamed for distinctness.
-allow = ["job", "open", "write", "watch", "ask", "name", "value"]
+#
+# world — `Lua.world/2` builds one and hands it back. Same case as `job`: the
+# noun collides with the function that constructs the thing it names, which is
+# one thing wearing one name rather than two. `Lua.World` the module is the
+# word spelled as a module, which is what a module for a noun should be called.
+allow = ["job", "open", "write", "watch", "ask", "name", "value", "world"]

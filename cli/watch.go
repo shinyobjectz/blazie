@@ -11,46 +11,6 @@ import (
 	"time"
 )
 
-// Fact and Pattern live here, and only here.
-//
-// The watch channel is the last fact-shaped surface blazie has: `run` replaced
-// open/ask/write and speaks Lua, but a subscription still pushes rows. When the
-// channel learns to push what a chunk would have returned, both of these go with
-// it — they are not part of what a user of this CLI is meant to know.
-
-// Fact is the row shape a subscription pushes: an id, an attribute said about
-// it, the value, and the transaction that recorded it — plus, optionally, the
-// formula or job that produced it.
-//
-// By is a pointer so that null survives `--json` as null. A fact that came from
-// outside names no formula, and "produced by nothing" and "produced by a
-// formula called nothing" are not the same claim to a script reading this.
-type Fact struct {
-	ID        any     `json:"id"`
-	Attribute string  `json:"attribute"`
-	Value     any     `json:"value"`
-	Tx        int64   `json:"tx"`
-	By        *string `json:"by"`
-}
-
-// Producer is the formula or job behind this fact, or "" when it came from
-// outside.
-func (f Fact) Producer() string {
-	if f.By == nil {
-		return ""
-	}
-	return *f.By
-}
-
-// Pattern is what a subscription watches: fields named are fields matched,
-// fields omitted are fields that may be anything.
-type Pattern struct {
-	ID        any    `json:"id,omitempty"`
-	Attribute string `json:"attribute,omitempty"`
-	Value     any    `json:"value,omitempty"`
-	By        string `json:"by,omitempty"`
-}
-
 // watch — the same question asked again as the snapshot advances.
 //
 // A Phoenix channel, which is a small protocol on top of the websocket in
@@ -93,7 +53,7 @@ const (
 // at — so a caller can cache on that name exactly as it would an ask.
 type WatchAnswer struct {
 	Name  SnapshotName `json:"name"`
-	Facts []Fact       `json:"facts"`
+	Value any          `json:"value"`
 }
 
 // socketURL turns the base URL into the websocket endpoint the endpoint mounts.
@@ -190,7 +150,7 @@ type phxReply struct {
 
 // Watch joins the channel and prints every answer until the context is done or
 // the socket drops. It does not reconnect — see the note in the README.
-func (c *Client) Watch(ctx context.Context, out, status io.Writer, ledgers []string, pattern Pattern, asJSON bool) error {
+func (c *Client) Watch(ctx context.Context, out, status io.Writer, ledgers []string, source string, asJSON bool) error {
 	endpoint, err := socketURL(c.BaseURL, c.Token, nil)
 	if err != nil {
 		return err
@@ -239,7 +199,7 @@ func (c *Client) Watch(ctx context.Context, out, status io.Writer, ledgers []str
 		return strconv.Itoa(refs)
 	}
 
-	joinPayload, err := json.Marshal(map[string]any{"ledgers": ledgers, "pattern": pattern})
+	joinPayload, err := json.Marshal(map[string]any{"ledgers": ledgers, "source": source})
 	if err != nil {
 		return err
 	}
@@ -286,7 +246,7 @@ func (c *Client) Watch(ctx context.Context, out, status io.Writer, ledgers []str
 					Problem: "socket_lost",
 					Repair: fmt.Sprintf("The socket to %s ended (%v). Nothing was missed that "+
 						"an ask cannot recover — run `blazie watch` again, or ask for the "+
-						"facts you want at the snapshot you last saw.", c.BaseURL, next.err),
+						"the same chunk at the snapshot you last saw.", c.BaseURL, next.err),
 				}
 			}
 
@@ -338,7 +298,7 @@ func handleWatchMessage(message phxMessage, out, status io.Writer, joined *bool,
 
 			if !asJSON {
 				fmt.Fprintf(status, "%s %s\n", s.bold("watching"), strings.Join(response.Watching, ", "))
-				fmt.Fprintf(status, "%s\n\n", s.dim("answers print as facts land — silence means nothing has changed"))
+				fmt.Fprintf(status, "%s\n\n", s.dim("answers print as things land — silence means nothing has changed"))
 			}
 		}
 		return false, nil
@@ -360,8 +320,7 @@ func handleWatchMessage(message phxMessage, out, status io.Writer, joined *bool,
 			return false, nil
 		}
 
-		fmt.Fprintf(out, "%s\n", s.dim(nameString(answer.Name)))
-		RenderFacts(out, answer.Facts)
+		RenderRun(out, &RunResult{Value: answer.Value, Name: answer.Name})
 		fmt.Fprintln(out)
 		return false, nil
 

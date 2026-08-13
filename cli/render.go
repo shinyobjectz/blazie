@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 )
 
@@ -104,95 +103,6 @@ func writeJSON(w io.Writer, v any) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)
-}
-
-// ── facts as a table ────────────────────────────────────────────────────────
-
-// RenderFacts prints facts in the order the node answered with them.
-//
-// Nothing is truncated. A value cut off at the terminal width is a value you
-// cannot act on, and hunting for the flag that turns truncation off is worse
-// than a wrapped line. `--json` is there for anything that wants shaping.
-func RenderFacts(w io.Writer, facts []Fact) {
-	s := styleFor(w)
-
-	if len(facts) == 0 {
-		fmt.Fprintln(w, s.dim("no facts answer that question"))
-		return
-	}
-
-	rows := make([][]string, 0, len(facts))
-	for _, f := range facts {
-		by := f.Producer()
-		if by == "" {
-			// Empty means no formula and no job produced it — it came from
-			// outside. Shown rather than blank, because provenance is the
-			// reason this column exists at all.
-			by = "—"
-		}
-		rows = append(rows, []string{
-			scalar(f.ID),
-			f.Attribute,
-			scalar(f.Value),
-			strconv.FormatInt(f.Tx, 10),
-			by,
-		})
-	}
-
-	renderTable(w, []string{"id", "attribute", "value", "tx", "by"}, rows)
-	fmt.Fprintf(w, "\n%s\n", s.dim(plural(len(facts), "fact", "facts")))
-}
-
-func renderTable(w io.Writer, header []string, rows [][]string) {
-	s := styleFor(w)
-
-	widths := make([]int, len(header))
-	for i, h := range header {
-		widths[i] = len(h)
-	}
-	for _, row := range rows {
-		for i, cell := range row {
-			if n := runeLen(cell); n > widths[i] {
-				widths[i] = n
-			}
-		}
-	}
-
-	line := make([]string, len(header))
-	for i, h := range header {
-		line[i] = pad(h, widths[i])
-	}
-	fmt.Fprintln(w, s.dim(strings.TrimRight(strings.Join(line, "  "), " ")))
-
-	for _, row := range rows {
-		cells := make([]string, len(row))
-		for i, cell := range row {
-			cells[i] = pad(cell, widths[i])
-		}
-		fmt.Fprintln(w, strings.TrimRight(strings.Join(cells, "  "), " "))
-	}
-}
-
-// scalar renders a JSON value for a table cell. Strings go in bare — quoting
-// every one would make a table of names unreadable — and everything else keeps
-// its JSON form, so a number and the string "42" stay distinguishable.
-func scalar(v any) string {
-	switch value := v.(type) {
-	case nil:
-		return "null"
-	case string:
-		return value
-	case float64:
-		return strconv.FormatFloat(value, 'f', -1, 64)
-	case bool:
-		return strconv.FormatBool(value)
-	default:
-		raw, err := json.Marshal(value)
-		if err != nil {
-			return fmt.Sprint(value)
-		}
-		return string(raw)
-	}
 }
 
 // ── small text helpers ──────────────────────────────────────────────────────

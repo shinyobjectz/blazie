@@ -90,6 +90,23 @@ defmodule Blazie.Lua.World do
   @spec run(binary(), Snapshot.t(), keyword()) ::
           {:ok, term(), [assertion()]} | {:error, map()}
   def run(source, %Snapshot{} = snapshot, opts \\ []) do
+    case watching(source, snapshot, opts) do
+      {:ok, value, staged, _read} -> {:ok, value, staged}
+      error -> error
+    end
+  end
+
+  @doc """
+  The same run, plus what it read.
+
+  A subscription needs the read set and nothing else does: what a chunk read is
+  what makes its answer stale, and it is the only thing that can decide when to
+  run it again. Kept separate so the common path is not carrying a value only
+  one caller wants.
+  """
+  @spec watching(binary(), Snapshot.t(), keyword()) ::
+          {:ok, term(), [assertion()], [keyword()]} | {:error, map()}
+  def watching(source, %Snapshot{} = snapshot, opts \\ []) do
     Blazie.Lua.collect(source, Keyword.put(opts, :snapshot, snapshot))
   end
 

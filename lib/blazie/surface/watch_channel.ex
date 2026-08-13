@@ -1,21 +1,25 @@
 defmodule Blazie.Surface.WatchChannel do
   @moduledoc """
-  `watch` — the fourth operation, and the only one that answers more than once.
+  `watch` — a run, kept.
 
-  Joining names ledgers and a question. Every time a fact lands inside what
-  that question read, the answer is pushed with the snapshot name it was
-  answered at — so a client can cache on that name, and asking the same
-  question again later gives the same answer. A subscription is not a different
-  mechanism; it is the same question asked again as the name advances.
+  Joining names a ledger and the Lua to keep answering. Every time something
+  lands inside what that chunk read, it runs again and the value is pushed with
+  the snapshot name it was answered at — so a client caches on that name, and
+  running the same source at it later gives the same answer.
 
       channel.join("watch:heights", {
-        ledgers: ["tenant-7"],
-        pattern: {attribute: "height"}
+        ledger: "tenant-7",
+        source: "local n = 0 for p in each { height = true } do n = n + 1 end return n"
       })
 
-  Authorization happens here rather than only at connect, because naming is
-  what is authorized and a join is where naming happens. A caller may hold a
-  socket and still be refused a ledger.
+  This was the last fact-shaped surface blazie had. It took a `pattern` and
+  pushed `facts`, which meant a client of the websocket still had to know what a
+  fact is and what a pattern is even though nothing else did. It is the same
+  chunk you would send to `run`, and what comes back is what the chunk returned.
+
+  Authorization happens here rather than only at connect, because naming is what
+  is authorized and a join is where naming happens. A caller may hold a socket
+  and still be refused a ledger.
 
   The subscription is owned by the channel process, so it dies when the client
   goes — there is nothing to clean up and nothing left pushing into the void.
@@ -23,15 +27,15 @@ defmodule Blazie.Surface.WatchChannel do
 
   use Phoenix.Channel
 
-  alias Blazie.{Authority, Ledger, Subscription, Wire}
+  alias Blazie.{Authority, Ledger, Subscription}
 
   @impl true
   def join("watch:" <> _name, params, socket) do
     with {:ok, ledgers} <- ledgers(params),
+         {:ok, source} <- source(params),
          :ok <- may_name_all(socket.assigns.caller, ledgers),
-         {:ok, pattern} <- Wire.pattern(Map.get(params, "pattern", %{})),
          {:ok, opened} <- open_all(ledgers) do
-      {:ok, ref} = Subscription.watch(opened, pattern)
+      {:ok, ref} = Subscription.watch(opened, {:lua, source})
 
       {:ok, %{"watching" => ledgers}, assign(socket, :ref, ref)}
     else
@@ -43,11 +47,8 @@ defmodule Blazie.Surface.WatchChannel do
   # An answer from the subscription, on its way to the client.
   def handle_info({:blazie, ref, answer}, %{assigns: %{ref: ref}} = socket) do
     # "answer", not "value": what is pushed is the answer to the question this
-    # socket asked. A value is the third slot of one fact.
-    push(socket, "answer", %{
-      "name" => answer.name,
-      "facts" => Enum.map(answer.facts, &encode/1)
-    })
+    # socket asked, and the name it was answered at is half of it.
+    push(socket, "answer", %{"name" => answer.name, "value" => answer.facts})
 
     {:noreply, socket}
   end
@@ -62,6 +63,11 @@ defmodule Blazie.Surface.WatchChannel do
 
   # ── plumbing ───────────────────────────────────────────────────────────────
 
+  # `ledger` for one, `ledgers` for several — the same two spellings `run` takes,
+  # because a client that learned one should not discover the socket wants the
+  # other.
+  defp ledgers(%{"ledger" => name}) when is_binary(name), do: {:ok, [name]}
+
   defp ledgers(%{"ledgers" => names}) when is_list(names) and names != [], do: {:ok, names}
 
   defp ledgers(_params),
@@ -69,7 +75,19 @@ defmodule Blazie.Surface.WatchChannel do
       {:error,
        %{
          problem: :no_ledgers,
-         repair: "Name the ledgers to watch. Watching none is not watching everything."
+         repair: "Name the ledger to watch. Watching none is not watching everything."
+       }}
+
+  defp source(%{"source" => source}) when is_binary(source) and source != "", do: {:ok, source}
+
+  defp source(_params),
+    do:
+      {:error,
+       %{
+         problem: :no_source,
+         repair:
+           "Watching needs `source`: the lua to keep answering. It is the same chunk you " <>
+             "would send to run."
        }}
 
   defp may_name_all(caller, ledgers) do
@@ -98,10 +116,6 @@ defmodule Blazie.Surface.WatchChannel do
       error -> error
     end
   end
-
-  # A pattern question answers with facts; a formula answers with assertions.
-  defp encode(%Blazie.Fact{} = fact), do: Wire.fact(fact)
-  defp encode(other), do: inspect(other)
 
   defp refusal_payload(refusal) do
     %{"problem" => to_string(refusal.problem), "repair" => Map.get(refusal, :repair, "")}

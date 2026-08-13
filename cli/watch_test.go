@@ -162,11 +162,10 @@ func TestAJoinSaysWhatItIsWatchingAndThatSilenceIsNormal(t *testing.T) {
 	}
 }
 
-func TestAnAnswerPrintsItsFactsAndTheNameTheyWereAnsweredAt(t *testing.T) {
+func TestAnAnswerPrintsWhatTheChunkReturnedAndTheNameItAnsweredAt(t *testing.T) {
 	message := phxMessage{
 		Topic: watchTopic, Event: "answer",
-		Payload: json.RawMessage(`{"name":{"tenant-7":13},"facts":[` +
-			`{"id":1,"attribute":"height","value":180,"tx":13,"by":null}]}`),
+		Payload: json.RawMessage(`{"name":{"tenant-7":13},"value":[180,175]}`),
 	}
 
 	var out bytes.Buffer
@@ -179,7 +178,7 @@ func TestAnAnswerPrintsItsFactsAndTheNameTheyWereAnsweredAt(t *testing.T) {
 	if !strings.Contains(text, "tenant-7@13") {
 		t.Fatalf("the snapshot name is what makes an answer cacheable:\n%s", text)
 	}
-	if !strings.Contains(text, "height") || !strings.Contains(text, "180") {
+	if !strings.Contains(text, "180") || !strings.Contains(text, "175") {
 		t.Fatalf("got:\n%s", text)
 	}
 }
@@ -189,7 +188,7 @@ func TestAnAnswerPrintsItsFactsAndTheNameTheyWereAnsweredAt(t *testing.T) {
 func TestWatchInJSONIsOneObjectPerLine(t *testing.T) {
 	message := phxMessage{
 		Topic: watchTopic, Event: "answer",
-		Payload: json.RawMessage(`{"name":{"tenant-7":13},"facts":[]}`),
+		Payload: json.RawMessage(`{"name":{"tenant-7":13},"value":[]}`),
 	}
 
 	var out bytes.Buffer

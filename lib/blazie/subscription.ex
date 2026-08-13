@@ -145,10 +145,29 @@ defmodule Blazie.Subscription do
 
   # ── questions ──────────────────────────────────────────────────────────────
 
+  # Lua, which is what the wire watches. `watch` is a run, kept: the same chunk
+  # answered again as the name advances, rather than a second mechanism with its
+  # own idea of what a question is.
+  #
+  # A chunk that writes is answered for its value and its writes are dropped —
+  # a subscription re-runs whenever anything it read changes, so a writing
+  # subscription would feed itself forever.
+  defp answer({:lua, source}, snapshot) do
+    case Blazie.Lua.World.watching(source, snapshot) do
+      {:ok, value, _staged, read} -> {value, read}
+      {:error, refusal} -> {%{error: refusal}, []}
+    end
+  end
+
   defp answer(%Formula{} = formula, snapshot), do: Formula.run(formula, snapshot)
 
   defp answer(pattern, snapshot) when is_list(pattern),
     do: {Snapshot.find(snapshot, pattern), [Enum.sort(pattern)]}
+
+  defp reads_of({:lua, _source} = question, snapshot) do
+    {_answered, read} = answer(question, snapshot)
+    read
+  end
 
   defp reads_of(%Formula{} = formula, snapshot) do
     {_answered, reads} = Formula.run(formula, snapshot)

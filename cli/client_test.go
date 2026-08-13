@@ -125,31 +125,6 @@ func mustJSON(value any) string {
 	return string(raw)
 }
 
-// `--json` promises what the node said, so a fact that names no formula has to
-// come back out as null and not as "". A script telling "produced by nothing"
-// from "produced by a formula called nothing" depends on the difference. This is
-// about the watch channel now — the last fact-shaped surface blazie has.
-func TestANullProducerSurvivesJSON(t *testing.T) {
-	outside := Fact{ID: 1, Attribute: "height", Value: 180, Tx: 12, By: nil}
-	made := "$backup"
-	derived := Fact{ID: 2, Attribute: "height", Value: 181, Tx: 12, By: &made}
-
-	if outside.Producer() != "" {
-		t.Fatalf("got %q", outside.Producer())
-	}
-	if derived.Producer() != "$backup" {
-		t.Fatalf("got %q", derived.Producer())
-	}
-
-	raw, err := json.Marshal(outside)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), `"by":null`) {
-		t.Fatalf("null was flattened on the way out: %s", raw)
-	}
-}
-
 func TestEveryRequestCarriesTheBearerToken(t *testing.T) {
 	node := &fakeNode{replies: []reply{{status: 200, body: map[string]any{
 		"login": "shinyobjectz", "caller": "abc", "ledgers": []string{"tenant-7"},

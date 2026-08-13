@@ -104,7 +104,7 @@ defmodule Blazie.Lua do
       end)
 
     case await(pid, ref, deadline, heap) do
-      {:ok, value, _wrote} -> {:ok, value}
+      {:ok, value, _wrote, _read} -> {:ok, value}
       other -> other
     end
   end
@@ -114,7 +114,7 @@ defmodule Blazie.Lua do
   # to reach this; it is here because only this module knows how to spawn a
   # guest with a deadline around it.
   @spec collect(binary(), [option()]) ::
-          {:ok, term(), [Blazie.Lua.World.assertion()]} | {:error, refusal()}
+          {:ok, term(), [Blazie.Lua.World.assertion()], [keyword()]} | {:error, refusal()}
   def collect(source, opts \\ []) do
     kind = Keyword.get(opts, :as, :formula)
     deadline = Keyword.get(opts, :deadline, @deadline)
@@ -249,12 +249,21 @@ defmodule Blazie.Lua do
     # `run/2` did not have to change shape to gain a database.
     state = if snapshot, do: Blazie.Lua.World.bind(state, snapshot), else: state
 
-    case :luerl.do(source, state) do
-      {:ok, returned, after_state} ->
-        {:ok, decode(returned, after_state), wrote(snapshot)}
+    # Tracked inside the guest, because `track_reads` records into the process
+    # dictionary of whoever is reading and the guest is a process of its own.
+    # A subscription needs this: what a chunk read is what makes its answer
+    # stale, and it is the only thing that can decide when to run it again.
+    {result, read} =
+      Blazie.Snapshot.track_reads(fn ->
+        case :luerl.do(source, state) do
+          {:ok, returned, after_state} -> {:ok, decode(returned, after_state)}
+          {:error, why, _} -> {:error, not_lua(why)}
+        end
+      end)
 
-      {:error, why, _} ->
-        {:error, not_lua(why)}
+    case result do
+      {:ok, value} -> {:ok, value, wrote(snapshot), read}
+      {:error, refusal} -> {:error, refusal}
     end
   rescue
     # Lua's own errors arrive here too: `rescue` covers the :error class, which

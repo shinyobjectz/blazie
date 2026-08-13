@@ -119,35 +119,7 @@ func TestRenderRefusalJSONWrapsAPlainError(t *testing.T) {
 
 // ── facts ───────────────────────────────────────────────────────────────────
 
-func TestRenderFactsKeepsTypesDistinguishable(t *testing.T) {
-	var out bytes.Buffer
-	RenderFacts(&out, []Fact{
-		{ID: float64(1), Attribute: "height", Value: float64(180), Tx: 7},
-		{ID: "person-2", Attribute: "name", Value: "Ada", Tx: 8, By: strPtr("$backup")},
-		{ID: float64(3), Attribute: "known", Value: true, Tx: 9},
-	})
 
-	text := out.String()
-	for _, want := range []string{"height", "180", "person-2", "Ada", "true", "$backup", "3 facts"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("%q is missing:\n%s", want, text)
-		}
-	}
-	// A fact with no `by` came from outside, and the column says so rather than
-	// going blank — provenance is why the column is there.
-	if !strings.Contains(text, "—") {
-		t.Fatalf("a fact from outside should be marked, not left blank:\n%s", text)
-	}
-}
-
-func TestRenderFactsSaysWhenNothingAnswers(t *testing.T) {
-	var out bytes.Buffer
-	RenderFacts(&out, nil)
-
-	if !strings.Contains(out.String(), "no facts") {
-		t.Fatalf("got:\n%s", out.String())
-	}
-}
 
 func TestNameStringIsStableAndReadable(t *testing.T) {
 	got := nameString(SnapshotName{"tenant-7": 12, "$identities": 3})
