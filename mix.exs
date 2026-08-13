@@ -6,6 +6,26 @@ defmodule Blazie.MixProject do
       app: :blazie,
       version: "0.1.0",
       elixir: "~> 1.18",
+      name: "blazie",
+      description:
+        "The backend agents run on: durable memory that records where every fact came " <>
+          "from, a graph nobody had to model, sandboxes to run agent code in, and one " <>
+          "line that touches the outside world.",
+      source_url: "https://github.com/shinyobjectz/blazie",
+      homepage_url: "https://blazie.dev",
+      package: [
+        licenses: ["Apache-2.0"],
+        links: %{
+          "Home" => "https://blazie.dev",
+          "GitHub" => "https://github.com/shinyobjectz/blazie"
+        },
+        files: ~w(lib priv/static/brand .monty/ontology.db mix.exs README.md DESIGN.md LICENSE)
+      ],
+      docs: [
+        main: "readme",
+        logo: "priv/static/brand/blazie-mark.png",
+        extras: ["README.md", "DESIGN.md", "LICENSE"]
+      ],
       elixirc_paths: elixirc_paths(Mix.env()),
       releases: [
         blazie: [

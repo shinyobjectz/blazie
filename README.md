@@ -39,6 +39,17 @@ A fact's **value**, a snapshot's **name**, and the **question** an ask puts to
 one. The authoring language is Lua, so the grammar is Lua's twenty-two keywords
 and none of it is ours to teach.
 
+## Design
+
+[DESIGN.md](DESIGN.md) is why it is shaped like this — the decisions the code is
+made of, what each one costs, what was deliberately not built, and the four
+things we got wrong badly enough to leave a test behind.
+
+The vocabulary and the reasoning live in `.monty/ontology.db`: fourteen words
+and twenty-four numbered doctrines, linted against the code by `just check`.
+There are no other design documents in the tree, because a document describing
+the system is a second source that drifts.
+
 ## Signing in
 
 GitHub OAuth, both ways round. A browser gets a redirect and a code; a terminal
@@ -227,3 +238,7 @@ CI runs the gate a machine that has never seen the repo can run: formatting,
 warnings-as-errors, the suite, the SIGKILL crash tests, and the vocabulary
 lint. The deploy workflow builds a release, boots it, and refuses to ship one
 that answers anything but `401` to an unauthenticated request.
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE).
