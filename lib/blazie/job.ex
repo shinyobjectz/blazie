@@ -39,7 +39,7 @@ defmodule Blazie.Job do
   module is the shape that boundary will sit on, not the boundary.
   """
 
-  alias Blazie.{Attribute, Formula, Snapshot, World}
+  alias Blazie.{Attribute, Snapshot, World}
 
   @enforce_keys [:id, :work]
   defstruct [:id, :work]
@@ -158,14 +158,19 @@ defmodule Blazie.Job do
       reads ->
         since = ran_at_tx(snapshot, id)
 
-        snapshot
-        |> Snapshot.find([])
-        |> Enum.filter(&(&1.tx > since))
-        # Facts the job itself wrote do not make it stale. Without this a job
-        # that reads what it writes re-fires forever, which is a loop that
-        # looks like a working reactive system for about a minute.
-        |> Enum.reject(&(&1.by == id))
-        |> then(&Formula.stale?(reads, &1))
+        # Asked pattern by pattern, so the world answers from its index. The
+        # first version of this read EVERY fact and filtered here, which made a
+        # staleness check cost the size of the world — per job, per tick. A
+        # reactive system whose trigger is O(everything) is a reactive system
+        # that gets turned off.
+        Enum.any?(reads, fn pattern ->
+          snapshot
+          |> Snapshot.find(pattern)
+          # Facts the job itself wrote do not make it stale. Without this a job
+          # that reads what it writes re-fires forever, which is a loop that
+          # looks like a working reactive system for about a minute.
+          |> Enum.any?(&(&1.tx > since and &1.by != id))
+        end)
     end
   end
 
