@@ -20,7 +20,7 @@ defmodule Blazie.Wire do
   Every refusal carries its repair, the same as everywhere else.
   """
 
-  alias Blazie.{Fact, Symbol}
+  alias Blazie.{Blob, Fact, Symbol}
 
   @type refusal :: %{problem: atom(), repair: String.t()}
 
@@ -172,6 +172,16 @@ defmodule Blazie.Wire do
   defp encode_value(%Symbol{} = symbol),
     do: %{"$symbol" => %{"space" => symbol.space, "values" => symbol.values}}
 
+  defp encode_value(%Blob{} = blob),
+    do: %{
+      "$blob" => %{
+        "key" => blob.key,
+        "hash" => blob.hash,
+        "bytes" => blob.bytes,
+        "media_type" => blob.media_type
+      }
+    }
+
   defp encode_value(value), do: value
 
   defp decode_value(%{"$symbol" => _}),
@@ -183,6 +193,28 @@ defmodule Blazie.Wire do
            "A symbol is always produced by a formula, never taken from outside. " <>
              "Write the content it stands for and let a formula derive the symbol."
        }}
+
+  # Unlike a symbol, a caller MAY write one: the bytes came from outside and
+  # nothing derived them, so claiming a blob is not claiming provenance. What
+  # it may not do is send a reference that is not one.
+  defp decode_value(%{"$blob" => sent}) when is_map(sent) do
+    blob = %Blob{
+      key: Map.get(sent, "key"),
+      hash: Map.get(sent, "hash"),
+      bytes: Map.get(sent, "bytes"),
+      media_type: Map.get(sent, "media_type")
+    }
+
+    with :ok <- Blob.check(blob), do: {:ok, blob}
+  rescue
+    # A `$blob` missing a required key never becomes a struct at all.
+    ArgumentError ->
+      {:error,
+       %{
+         problem: :not_a_blob,
+         repair: "A blob is a key, a `sha256:` hash and a byte count."
+       }}
+  end
 
   defp decode_value(value), do: {:ok, value}
 end

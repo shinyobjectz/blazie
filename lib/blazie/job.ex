@@ -39,7 +39,7 @@ defmodule Blazie.Job do
   module is the shape that boundary will sit on, not the boundary.
   """
 
-  alias Blazie.{Attribute, World, Snapshot}
+  alias Blazie.{Attribute, Formula, Snapshot, World}
 
   @enforce_keys [:id, :work]
   defstruct [:id, :work]
@@ -52,7 +52,8 @@ defmodule Blazie.Job do
   def seed do
     Attribute.define("every", answers: "integer") ++
       Attribute.define("ran_at", answers: "integer", cardinality: "many") ++
-      Attribute.define("failed", answers: "any", cardinality: "many")
+      Attribute.define("failed", answers: "any", cardinality: "many") ++
+      Attribute.define("reads", answers: "any", cardinality: "many")
   end
 
   @doc "Declare a job. Nothing runs."
@@ -86,8 +87,19 @@ defmodule Blazie.Job do
           {:ok, pos_integer()} | {:failed, pos_integer(), String.t()}
   def run(%__MODULE__{} = job, world, %Snapshot{} = snapshot, now) do
     try do
-      assertions = job.work.(snapshot) |> Enum.map(&stamp(&1, job.id))
-      {:ok, tx} = World.append(world, assertions ++ [{job.id, "ran_at", now, job.id}])
+      {produced, read} = Snapshot.track_reads(fn -> job.work.(snapshot) end)
+      assertions = Enum.map(produced, &stamp(&1, job.id))
+
+      # The read set is written, not held. A runner that kept it in memory
+      # would forget on restart why a job was ever going to fire, and the
+      # property this runner has — that a restart needs no reconciliation —
+      # would quietly stop being true.
+      {:ok, tx} =
+        World.append(
+          world,
+          assertions ++ reads(job.id, read) ++ [{job.id, "ran_at", now, job.id}]
+        )
+
       {:ok, tx}
     rescue
       error ->
@@ -120,11 +132,73 @@ defmodule Blazie.Job do
   """
   @spec due?(Snapshot.t(), term(), integer()) :: boolean()
   def due?(%Snapshot{} = snapshot, id, now) do
+    cadence_due?(snapshot, id, now) or touched?(snapshot, id)
+  end
+
+  defp cadence_due?(snapshot, id, now) do
     case Snapshot.value(snapshot, id, "every") do
       nil -> false
       every -> due_by?(last_run(snapshot, id), every, now)
     end
   end
+
+  # The other way to be due: something this job read has changed since it ran.
+  #
+  # This is the dependency graph, and it is observed rather than declared —
+  # exactly as a formula's is. A job that reads what another job writes fires
+  # after it, and nobody wrote the edge down, so nobody can write it down wrong.
+  #
+  # A job with no recorded reads is never stale, which is what makes this
+  # additive: every job that only ever had a cadence still only has a cadence.
+  defp touched?(%Snapshot{} = snapshot, id) do
+    case read_set(snapshot, id) do
+      [] ->
+        false
+
+      reads ->
+        since = ran_at_tx(snapshot, id)
+
+        snapshot
+        |> Snapshot.find([])
+        |> Enum.filter(&(&1.tx > since))
+        # Facts the job itself wrote do not make it stale. Without this a job
+        # that reads what it writes re-fires forever, which is a loop that
+        # looks like a working reactive system for about a minute.
+        |> Enum.reject(&(&1.by == id))
+        |> then(&Formula.stale?(reads, &1))
+    end
+  end
+
+  defp read_set(%Snapshot{} = snapshot, id) do
+    snapshot
+    |> Snapshot.find(id: id, attribute: "reads")
+    |> Enum.map(& &1.value)
+    |> Enum.map(&decode_read/1)
+  end
+
+  defp ran_at_tx(%Snapshot{} = snapshot, id) do
+    snapshot
+    |> Snapshot.find(id: id, attribute: "ran_at")
+    |> Enum.map(& &1.tx)
+    |> Enum.max(fn -> 0 end)
+  end
+
+  # A read is a keyword pattern. It goes into a fact as a map, because a fact
+  # value crosses a wire and a keyword list does not survive JSON.
+  defp reads(id, read_set) do
+    read_set
+    |> Enum.uniq()
+    |> Enum.map(fn pattern ->
+      {id, "reads", Map.new(pattern, fn {key, value} -> {to_string(key), value} end), id}
+    end)
+  end
+
+  defp decode_read(pattern) when is_map(pattern) do
+    Enum.map(pattern, fn {key, value} -> {String.to_existing_atom(key), value} end)
+  end
+
+  defp decode_read(pattern) when is_list(pattern), do: pattern
+  defp decode_read(_other), do: []
 
   @doc """
   Every job due at `now`, read out of the world.

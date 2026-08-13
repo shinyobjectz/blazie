@@ -46,7 +46,7 @@ defmodule Blazie.Lua.Binding do
   on every line is a tax paid by every reader forever to catch a typo once.
   """
 
-  alias Blazie.{Attribute, Fact, Snapshot}
+  alias Blazie.{Attribute, Blob, Fact, Snapshot, Symbol}
 
   @typedoc "An assertion a guest staged: id, field, value."
   @type assertion :: {term(), String.t(), term()}
@@ -134,8 +134,34 @@ defmodule Blazie.Lua.Binding do
     snapshot = at_snapshot(List.first(rest))
 
     case Snapshot.value(snapshot, entity_id(id), to_string(field)) do
-      nil -> {[nil, false], state}
-      value -> {[value, reference?(snapshot, to_string(field))], state}
+      nil ->
+        {[nil, false], state}
+
+      # A blob and a symbol are structs, and a guest has no way to hold one.
+      # Both become plain tables, which is the only shape Lua has — so
+      # `ada.avatar.bytes` works without the guest knowing what a struct is.
+      %Blob{} = blob ->
+        {encoded, state} =
+          :luerl.encode(
+            [
+              {"key", blob.key},
+              {"hash", blob.hash},
+              {"bytes", blob.bytes},
+              {"media_type", blob.media_type}
+            ],
+            state
+          )
+
+        {[encoded, false], state}
+
+      %Symbol{} = symbol ->
+        {encoded, state} =
+          :luerl.encode([{"space", symbol.space}, {"dimensions", length(symbol.values)}], state)
+
+        {[encoded, false], state}
+
+      value ->
+        {[value, reference?(snapshot, to_string(field))], state}
     end
   end
 
