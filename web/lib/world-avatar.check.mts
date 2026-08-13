@@ -18,7 +18,7 @@ import assert from "node:assert/strict"
 import { type Avatar, avatarOf, paletteOf } from "./world-avatar.ts"
 
 const shown = (a: Avatar) =>
-  `${a.shape.padEnd(7)} swirl ${a.swirl.toFixed(3)}  rot ${String(a.rotation).padStart(3)}  turn ${a.turn}  light ${a.lightX},${a.lightY}`
+  `${a.shape.padEnd(7)} swirl ${a.swirl.toFixed(3)}  rot ${String(a.rotation).padStart(3)}  palette ${a.palette}.${a.turn}  ${paletteOf(a).join(" ")}`
 
 for (const world of ["main", "orders", "$vitals"]) {
   console.log(`  ${world.padEnd(7)} ${shown(avatarOf(world))}`)
@@ -46,6 +46,10 @@ assert.notEqual(main.swirl, mail.swirl)
 
 // The palette is named, never resolved. A hex here would be a colour that no
 // longer moves when the token does.
-for (const token of paletteOf(main)) assert.match(token, /^--[a-z]+$/)
+for (let i = 0; i < 200; i += 1) {
+  for (const token of paletteOf(avatarOf(`world-${i}`))) {
+    assert.match(token, /^--[a-z-]+$/)
+  }
+}
 
 console.log("\n  ok — stable per name, distinct across names, tokens only")

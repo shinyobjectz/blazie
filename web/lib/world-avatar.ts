@@ -7,12 +7,12 @@
  * the same circle, in different browsers, after a reload, without anything
  * having been written down.
  *
- * That only holds if the arithmetic is exact, so every step below is integer
- * work (`Math.imul`, `>>> 0`) and the only floats are a division by 2^32 and a
- * round to three places. Anything shaped like accumulated floating point —
- * hashing through `Math.sin`, say, which is the usual one-liner — is free to
- * differ in the last bit between engines, and a face that differs in the last
- * bit is a different face.
+ * That only holds if the arithmetic is exact, so the hash and the stream below
+ * are integer work end to end (`Math.imul`, `>>> 0`); a float appears only once
+ * a number has been drawn, and is rounded to three places before anyone can
+ * compare two of them. The usual one-liner — hashing through `Math.sin` — is
+ * free to differ in the last bit between engines, and a face that differs in
+ * the last bit is a different face.
  *
  * What it cost: nobody can choose a world's face, and renaming a world gives it
  * a new one. Both are fine. A name here is already global and permanent, and an
@@ -34,7 +34,9 @@ export type Avatar = {
   softness: number
   shapeScale: number
   rotation: number
-  /** How far the three palette colours are turned, so not every world leads in flame. */
+  /** Which combination, indexed into `PALETTES`. */
+  palette: number
+  /** How far that combination's three colours are turned, so not every world leads the same. */
   turn: number
   /** Where the still rendering puts its light, in percent. */
   lightX: number
@@ -74,6 +76,34 @@ function stream(seed: number): () => number {
 const round = (n: number) => Math.round(n * 1000) / 1000
 
 /**
+ * The combinations a world's face can be drawn from.
+ *
+ * Chosen rather than generated. Letting the seed pick three tokens out of the
+ * set produced muddy pairings — bone against spark is one cream circle, slate
+ * against umber is a grey one — and a face is a picture, so which colours go
+ * together is the part a person should have decided. Eight of them, turned
+ * three ways, is twenty-four looks, which is more than any console has worlds.
+ *
+ * Every one carries a dark, and it sits between two bright values rather than
+ * leading: leading with it handed the shader's own distribution a dark band to
+ * widen, and the worlds that landed there came out as black discs with a rim.
+ *
+ * Tokens, never values. A colour is allowed to be written down in exactly one
+ * place in this tree, and it is `globals.css`.
+ */
+const PALETTES: { dark: string; marks: [string, string, string] }[] = [
+  // The mark itself, unchanged. A world may still simply look like blazie.
+  { dark: "--muted", marks: ["--flame", "--ember", "--spark"] },
+  { dark: "--face-oxblood", marks: ["--ember", "--flame", "--face-gold"] },
+  { dark: "--face-umber", marks: ["--face-rust", "--ember", "--face-bone"] },
+  { dark: "--face-oxblood", marks: ["--face-gold", "--spark", "--face-rust"] },
+  { dark: "--face-umber", marks: ["--face-slate", "--flame", "--face-gold"] },
+  { dark: "--muted", marks: ["--face-bone", "--face-rust", "--ember"] },
+  { dark: "--face-umber", marks: ["--flame", "--face-oxblood", "--face-bone"] },
+  { dark: "--face-oxblood", marks: ["--face-gold", "--face-slate", "--spark"] },
+]
+
+/**
  * The ranges are narrower than the shader allows, deliberately.
  *
  * Measured by rendering a sheet of them: the ends of each range are where the
@@ -91,11 +121,12 @@ export function avatarOf(world: string): Avatar {
     shape: SHAPES[Math.floor(next() * SHAPES.length)],
     swirl: round(0.35 + next() * 0.55),
     swirlIterations: 4 + Math.floor(next() * 8),
-    distortion: round(0.12 + next() * 0.33),
+    distortion: round(0.15 + next() * 0.3),
     proportion: round(0.35 + next() * 0.3),
-    softness: round(0.2 + next() * 0.45),
-    shapeScale: round(0.3 + next() * 0.45),
+    softness: round(0.15 + next() * 0.3),
+    shapeScale: round(0.5 + next() * 0.45),
     rotation: Math.floor(next() * 360),
+    palette: Math.floor(next() * PALETTES.length),
     turn: Math.floor(next() * 3),
     lightX: Math.floor(25 + next() * 50),
     lightY: Math.floor(25 + next() * 50),
@@ -103,31 +134,20 @@ export function avatarOf(world: string): Avatar {
   }
 }
 
-/**
- * The three mark colours, turned, with the dark one among them.
- *
- * Named rather than resolved, because a token is the only place a colour is
- * allowed to be written down in this tree.
- *
- * `--muted` is nearly black and is what gives a 56px circle any depth at all —
- * three bright colours at that size read as one orange dot. It sits second
- * rather than first: leading with it handed the shader's own distribution a
- * dark band to widen, and the worlds that landed there came out as black discs
- * with a rim. Between two mark colours it reads as shadow, which is the job.
- */
+/** The chosen combination, turned: lead, its dark, and the other two. */
 export function paletteOf(avatar: Avatar): string[] {
-  const mark = ["--flame", "--ember", "--spark"]
-  const turned = mark.map((_, i) => mark[(i + avatar.turn) % mark.length])
-  return [turned[0], "--muted", turned[1], turned[2]]
+  const { dark, marks } = PALETTES[avatar.palette % PALETTES.length]
+  const turned = marks.map((_, i) => marks[(i + avatar.turn) % marks.length])
+  return [turned[0], dark, turned[1], turned[2]]
 }
 
 /* ── the proof ──────────────────────────────────────────────────────────────
  *
  * `node lib/world-avatar.check.mts`, on 2026-08-13:
  *
- *   main    checks  swirl 0.829  rot  27  turn 0  light 39,30
- *   orders  edge    swirl 0.785  rot 114  turn 1  light 65,45
- *   $vitals stripes swirl 0.395  rot 303  turn 2  light 64,31
+ *   main    checks  swirl 0.829  rot  27  palette 1.0  ember  oxblood flame gold
+ *   orders  edge    swirl 0.785  rot 114  palette 3.2  rust   oxblood gold  spark
+ *   $vitals stripes swirl 0.395  rot 303  palette 6.2  bone   umber   flame oxblood
  *
  * A thousand runs of `avatarOf("main")` produce one distinct result, and the
  * three above differ in shape, swirl, rotation and palette turn — which is the

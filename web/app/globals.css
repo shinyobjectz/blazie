@@ -29,6 +29,28 @@
   --ember: #f58b34;
   --spark: #fbeb92;
 
+  /* The faces, and nothing else.
+
+     A world's avatar is derived from its name, and three colours give three
+     avatars that all read as one orange dot at menu size. So the range widens
+     here — but it widens into a written-down set rather than into a colour
+     invented per world at render time, which is the same rule the greys above
+     are under and for the same reason.
+
+     These are for pictures only. Nothing in the interface may reach for one:
+     a control coloured `--face-slate` is a fourth grey by another name, and
+     the console is flame, ember and spark. A face is allowed the wider arc
+     precisely because it is a picture and not a control.
+
+     The arc is warm and stays warm — burnt through to a cool ash at one end,
+     because a set with no cool value in it produces eight oranges. */
+  --face-oxblood: #5c1410;
+  --face-umber: #2b1410;
+  --face-rust: #b8431f;
+  --face-gold: #e6b422;
+  --face-bone: #f0dcc0;
+  --face-slate: #566270;
+
   /* The rest of the shadcn token set, defined here rather than left at the
      defaults it ships with. Those are a light palette in `:root` with the dark
      one behind a `.dark` class this tree never sets — which renders white
