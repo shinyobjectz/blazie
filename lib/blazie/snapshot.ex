@@ -132,6 +132,27 @@ defmodule Blazie.Snapshot do
     end
   end
 
+  @doc """
+  Record patterns read somewhere else as read here.
+
+  A Lua guest runs in a process of its own, so what it read lands in ITS
+  dictionary and `track_reads/1` — which watches the caller's — sees nothing. A
+  formula whose read set came back empty would never be stale, which is worse
+  than being slow: it would answer once and never notice the world had moved.
+
+  So the guest hands its reads back and they are merged here. Only ever called
+  with a read set that was genuinely observed; inventing one would make a
+  formula re-run for writes it never looked at.
+  """
+  @spec record_reads([keyword()]) :: :ok
+  def record_reads(patterns) when is_list(patterns) do
+    if held = Process.get(@reads) do
+      Process.put(@reads, Enum.reverse(patterns) ++ held)
+    end
+
+    :ok
+  end
+
   defp record_read(pattern) do
     case Process.get(@reads) do
       nil -> :ok

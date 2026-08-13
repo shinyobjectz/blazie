@@ -203,6 +203,58 @@ defmodule Blazie.Job do
   end
 
   @doc """
+  A job whose body is Lua held in the world.
+
+      {"fetch", "is", "job"}
+      {"fetch", "every", 300}
+      {"fetch", "source", "rates.gbp = tonumber(http.get('https://…'))"}
+
+  The same shape a formula uses, in the other world: a job gets the real clock
+  and `http`, because a job is the only thing handed the outside. That is the
+  whole difference between the two, and it is one argument.
+
+  Whatever the chunk writes becomes the job's assertions, and `Job.run/4` stamps
+  them — so a guest cannot claim provenance here any more than a wasm one can.
+  """
+  @spec of_source(term(), String.t()) :: t()
+  def of_source(id, source) when is_binary(source) do
+    %__MODULE__{
+      id: id,
+      work: fn snapshot ->
+        case Blazie.Lua.Binding.watching(source, snapshot, as: :job, at: System.system_time(:second)) do
+          {:ok, _value, staged, read} ->
+            Snapshot.record_reads(read)
+            Enum.map(staged, fn {entity, field, value} -> {entity, field, value} end)
+
+          {:error, refusal} ->
+            raise "job #{inspect(id)} did not run: #{Map.get(refusal, :repair, inspect(refusal))}"
+        end
+      end
+    }
+  end
+
+  @doc """
+  Every job declared in a snapshot whose body is stored Lua.
+
+  The registry is the world, as it is for formulas and agents. A job arrives by
+  being written.
+  """
+  @spec declared(Snapshot.t()) :: [t()]
+  def declared(%Snapshot{} = snapshot) do
+    snapshot
+    |> Snapshot.find(attribute: "is", value: "job")
+    |> Enum.map(& &1.id)
+    |> Enum.uniq()
+    |> Enum.flat_map(fn id ->
+      case Snapshot.value(snapshot, id, "source") do
+        source when is_binary(source) -> [of_source(id, source)]
+        _ -> []
+      end
+    end)
+    |> Enum.sort_by(&inspect(&1.id))
+  end
+
+  @doc """
   The work of a job whose body is an image rather than a function.
 
   Returns a `work` function, so a sandboxed job IS a job — the runner, the

@@ -39,6 +39,69 @@ defmodule Blazie.Formula do
   def new(id, compute) when is_function(compute, 1), do: %__MODULE__{id: id, compute: compute}
 
   @doc """
+  A formula whose body is Lua held in the world.
+
+      {"adults", "is", "formula"}
+      {"adults", "source", "for p in each { age = true } do p.adult = p.age >= 18 end"}
+
+  The same shape a requirement already uses, generalised — which is the point.
+  A formula authored this way needs no deploy, is corrected by a later fact, and
+  answers at a snapshot name like any other, so an old name keeps answering what
+  it always answered even after the source changes.
+
+  It runs in the formula world: no clock, no network, a deadline. That is not a
+  rule applied to Lua from outside, it is the absence of anything to reach — so
+  a formula loaded from a fact is exactly as unable to reach out as one written
+  here, and the test for it asserts `http` is nil inside one.
+
+  Whatever the chunk writes becomes the formula's assertions, so `p.adult = …`
+  in Lua is what `{p, "adult", …}` is in Elixir. Nothing is appended by running
+  one; a formula's answer is a value, and storing it is a separate decision.
+  """
+  @spec of_source(term(), String.t()) :: t()
+  def of_source(id, source) when is_binary(source) do
+    %__MODULE__{
+      id: id,
+      compute: fn snapshot ->
+        # `watching/3` rather than `run/3`: a guest runs in a process of its own,
+        # so what it read lands in that process's dictionary and the
+        # `track_reads/1` around this one would see nothing. A formula with an
+        # empty read set is never stale — it would answer once and never notice
+        # the world had moved, which is a worse failure than being slow.
+        case Blazie.Lua.Binding.watching(source, snapshot, as: :formula) do
+          {:ok, _value, staged, read} ->
+            Snapshot.record_reads(read)
+            staged
+
+          {:error, refusal} ->
+            raise "formula #{inspect(id)} did not run: #{Map.get(refusal, :repair, inspect(refusal))}"
+        end
+      end
+    }
+  end
+
+  @doc """
+  Every formula declared in a snapshot, built from its stored source.
+
+  The registry is the world. A formula arrives by being written, and there is no
+  list anywhere that could disagree with what is actually declared.
+  """
+  @spec declared(Snapshot.t()) :: [t()]
+  def declared(%Snapshot{} = snapshot) do
+    snapshot
+    |> Snapshot.find(attribute: "is", value: "formula")
+    |> Enum.map(& &1.id)
+    |> Enum.uniq()
+    |> Enum.flat_map(fn id ->
+      case Snapshot.value(snapshot, id, "source") do
+        source when is_binary(source) -> [of_source(id, source)]
+        _ -> []
+      end
+    end)
+    |> Enum.sort_by(&inspect(&1.id))
+  end
+
+  @doc """
   Answer the formula against a snapshot.
 
   Returns the assertions it would make, each naming this formula, and the read
