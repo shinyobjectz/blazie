@@ -81,6 +81,22 @@ if config_env() == :prod do
     )
   end
 
+  # Who may sign in, and how. The secret is read from the environment and never
+  # written down here — a checked-in secret is a secret nobody has.
+  config :blazie,
+    github_client_id: System.get_env("GITHUB_CLIENT_ID"),
+    github_client_secret: System.get_env("GITHUB_CLIENT_SECRET"),
+    github_logins:
+      (System.get_env("GITHUB_LOGINS") || "")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+
+  if System.get_env("GITHUB_CLIENT_ID") == nil do
+    IO.warn(
+      "GITHUB_CLIENT_ID is not set, so nobody can sign in. The four operations still work for a token issued another way."
+    )
+  end
+
   if System.get_env("KEY_DIR") == nil do
     IO.warn(
       "KEY_DIR is not set; keys will be written to /data/keys. That path must be persistent storage — if it is not, a redeploy erases every subject."

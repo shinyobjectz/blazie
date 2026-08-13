@@ -41,7 +41,10 @@ defmodule Blazie.MixProject do
       {:bandit, "~> 1.0"},
       {:jason, "~> 1.4"},
       {:wasmex, "~> 0.15"},
-      {:luerl, "~> 1.5"}
+      {:luerl, "~> 1.5"},
+      # CORS is security-relevant and stable; doctrine 18 says a maintained
+      # library beats one of ours for exactly this shape of requirement.
+      {:cors_plug, "~> 3.0"}
     ]
   end
 end
