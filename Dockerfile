@@ -52,8 +52,15 @@ ENV LANG=C.UTF-8 \
 EXPOSE 4000
 
 # Refuses without a token, which is the cheapest proof it is actually serving.
+#
+# `/run`, not `/open`. `/open` was retired when `/run` replaced it and this kept
+# probing it, so it asked for a 401 and got a 404 — which meant the container had
+# been reporting UNHEALTHY on the live node continuously and nothing said so,
+# because `--restart always` does not act on health. The CI release gate had the
+# identical bug for the identical reason. A check pointing at an endpoint that no
+# longer exists does not fail loudly; it just stops being a check.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -sf -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:4000/open \
-      -H 'content-type: application/json' -d '{"ledgers":["health"]}' | grep -q 401
+  CMD curl -sf -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:4000/run \
+      -H 'content-type: application/json' -d '{}' | grep -q 401
 
 CMD ["/app/bin/blazie", "start"]

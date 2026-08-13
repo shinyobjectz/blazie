@@ -1,0 +1,79 @@
+name: image
+
+# The image a cluster is made of.
+#
+# Opening a cluster from the console provisions a machine that pulls this and
+# runs it. Before this workflow existed there was nothing to pull: `just ship`
+# rsyncs the source to a host and builds there, which works for the one node
+# somebody has a shell on and cannot work for a machine created by a request.
+#
+# Published on every push to main rather than on a tag, because a cluster opened
+# today should be the blazie of today. `latest` is what cloud-init asks for; the
+# sha tag is so a machine can be pinned to what it was opened with when something
+# has to be explained afterwards.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          # A cluster is a Linux server and nothing else builds from this, so one
+          # architecture. arm64 doubles the build for a platform nothing runs.
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Refuse an image that will not answer
+        run: |
+          set -euo pipefail
+
+          docker run -d --name probe -p 4000:4000 \
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+          # The same question the healthcheck asks, for the same reason: a
+          # container that starts and does not serve is the failure this catches,
+          # and it is the one that shipped unnoticed when the healthcheck was
+          # left pointing at a retired endpoint.
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+              http://127.0.0.1:4000/run -H 'content-type: application/json' \
+              -d '{}' --max-time 5 || true)
+            [ "$code" = "401" ] && break
+            sleep 2
+          done
+
+          docker logs probe | tail -30
+
+          if [ "$code" != "401" ]; then
+            echo "the image answered ${code} where 401 was expected"
+            exit 1
+          fi
+
+          echo "the image serves"

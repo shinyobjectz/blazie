@@ -1,0 +1,23 @@
+{
+  // The console and its control plane, deployed as one thing.
+  //
+  // The pages are a static export and the control plane is a handful of Pages
+  // Functions beside them. One deploy, one origin, no CORS — and the reason it
+  // is here rather than on a cluster is that opening your FIRST cluster cannot
+  // require having one. Auth, the list of clusters you hold, and the credential
+  // that provisions a machine all live where the console already lives.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "blazie",
+  "compatibility_date": "2026-08-01",
+  "pages_build_output_dir": "out",
+
+  // What the control plane remembers: sessions, and whose clusters are whose.
+  // A cluster's token is in here and never leaves — the browser is handed an
+  // address and a name, never a credential.
+  "kv_namespaces": [
+    {
+      "binding": "CONTROL",
+      "id": "51c5f9d7f25344158a5b7490afb3c93f"
+    }
+  ]
+}
