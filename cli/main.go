@@ -778,7 +778,7 @@ func roughly(seconds int) string {
 
 func writeUsage(out io.Writer) {
 	s := styleFor(out)
-	fmt.Fprintf(out, `%s — an immutable fact-log database, from the terminal.
+	fmt.Fprintf(out, `%s — the backend agents run on, from the terminal.
 
 %s
   blazie login              sign in on this machine, and keep the token
