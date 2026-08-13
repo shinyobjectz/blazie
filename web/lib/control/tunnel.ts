@@ -26,6 +26,19 @@ export type Reaching = {
   accountId: string
   zoneId: string
   token: string
+  /**
+   * A second token, for the zone, when one token cannot hold both permissions.
+   *
+   * Cloudflare separates account-level permissions (Cloudflare Tunnel) from
+   * zone-level ones (DNS), and a token minted for one commonly carries none of
+   * the other. Opening a cluster needs both — a tunnel, and the record that
+   * makes it reachable — so rather than insist on a single token that happens to
+   * span the boundary, this accepts the split the API already has.
+   *
+   * Absent means one token does both, which is the tidier arrangement and still
+   * the first thing to try.
+   */
+  dnsToken?: string
 }
 
 export type Made = {
@@ -124,11 +137,16 @@ async function call(
 ): Promise<Answered> {
   let response: Response
 
+  // Which token by which half of the API is being asked. The path says it
+  // exactly — `/zones/…` is the zone, everything else is the account — so this
+  // needs no flag at the call sites and cannot be got wrong by forgetting one.
+  const token = path.startsWith("/zones/") ? (reaching.dnsToken ?? reaching.token) : reaching.token
+
   try {
     response = await fetch(`${API}${path}`, {
       method,
       headers: {
-        authorization: `Bearer ${reaching.token}`,
+        authorization: `Bearer ${token}`,
         "content-type": "application/json",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -157,6 +175,10 @@ async function call(
     problem: "cloudflare_refused",
     repair: why
       ? `Cloudflare refused: ${why}`
-      : `Cloudflare answered ${response.status} without saying why. Check CLOUDFLARE_API_TOKEN carries Cloudflare Tunnel:Edit and DNS:Edit on this zone.`,
+      : `Cloudflare answered ${response.status} without saying why. ${
+          path.startsWith("/zones/")
+            ? "Check the token used for DNS carries Zone:DNS:Edit on this zone — CLOUDFLARE_DNS_TOKEN if set, otherwise CLOUDFLARE_API_TOKEN."
+            : "Check CLOUDFLARE_API_TOKEN carries Account:Cloudflare Tunnel:Edit."
+        }`,
   }
 }

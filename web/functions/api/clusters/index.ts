@@ -75,6 +75,7 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
     accountId: env.CLOUDFLARE_ACCOUNT_ID!,
     zoneId: env.CLOUDFLARE_ZONE_ID!,
     token: env.CLOUDFLARE_API_TOKEN!,
+    dnsToken: env.CLOUDFLARE_DNS_TOKEN,
   }
 
   // The way in before the machine, so a machine is never made that cannot be

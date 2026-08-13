@@ -43,6 +43,7 @@ export const onRequestDelete: PagesFunction<Control> = async ({ env, request, pa
           accountId: env.CLOUDFLARE_ACCOUNT_ID,
           zoneId: env.CLOUDFLARE_ZONE_ID,
           token: env.CLOUDFLARE_API_TOKEN,
+          dnsToken: env.CLOUDFLARE_DNS_TOKEN,
         },
         cluster.id,
         hostname,

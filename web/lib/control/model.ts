@@ -88,8 +88,10 @@ export type Control = {
   UPCLOUD_USERNAME?: string
   UPCLOUD_PASSWORD?: string
 
-  /** Needs Cloudflare Tunnel:Edit on the account and DNS:Edit on the zone. */
+  /** Needs Account:Cloudflare Tunnel:Edit — and Zone:DNS:Edit unless the next one is set. */
   CLOUDFLARE_API_TOKEN?: string
+  /** Only when one token cannot hold both. Used for the zone's DNS record. */
+  CLOUDFLARE_DNS_TOKEN?: string
   CLOUDFLARE_ACCOUNT_ID?: string
   CLOUDFLARE_ZONE_ID?: string
   /** The zone clusters are named under. `blazie.dev` unless told otherwise. */
