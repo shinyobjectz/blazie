@@ -32,7 +32,13 @@ defmodule LazyRiver.Surface.WatchChannel do
          {:ok, pattern} <- Wire.pattern(Map.get(params, "pattern", %{})),
          {:ok, opened} <- open_all(ledgers) do
       {:ok, ref} = Subscription.watch(opened, pattern)
-      {:ok, %{"watching" => ledgers}, assign(socket, :ref, ref)}
+
+      # A snapshot name is keyed by ledger *reference* inside. Over the wire it
+      # must be keyed by the name the caller used — a via-tuple is not
+      # something JSON can carry, and pushing one crashed the channel.
+      by_ref = Map.new(Enum.zip(opened, ledgers))
+
+      {:ok, %{"watching" => ledgers}, socket |> assign(:ref, ref) |> assign(:names, by_ref)}
     else
       {:error, refusal} -> {:error, refusal_payload(refusal)}
     end
@@ -42,7 +48,7 @@ defmodule LazyRiver.Surface.WatchChannel do
   # An answer from the subscription, on its way to the client.
   def handle_info({:lazy_river, ref, answer}, %{assigns: %{ref: ref}} = socket) do
     push(socket, "answer", %{
-      "name" => answer.name,
+      "name" => named(answer.name, socket.assigns.names),
       "facts" => Enum.map(answer.facts, &encode/1)
     })
 
@@ -94,6 +100,12 @@ defmodule LazyRiver.Surface.WatchChannel do
       {:ok, refs} -> {:ok, Enum.reverse(refs)}
       error -> error
     end
+  end
+
+  # Back to the names the caller used, so what goes out is something JSON can
+  # carry and something the caller can send straight back to `ask`.
+  defp named(name, by_ref) do
+    Map.new(name, fn {ref, tx} -> {Map.get(by_ref, ref, inspect(ref)), tx} end)
   end
 
   # A pattern question answers with facts; a formula answers with assertions.

@@ -79,6 +79,19 @@ defmodule LazyRiver.Surface.WatchChannelTest do
       assert [%{"attribute" => "height", "answer" => 180}] = facts
     end
 
+    test "everything pushed can actually cross a wire", ctx do
+      {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
+
+      assert_push("answer", payload)
+
+      # assert_push compares terms; a socket encodes them. A snapshot name is
+      # keyed by ledger reference inside, and pushing one raw crashed the
+      # channel in production with nothing here to catch it.
+      assert {:ok, json} = Jason.encode(payload)
+      assert %{"name" => %{}} = Jason.decode!(json)
+      assert Map.keys(payload["name"]) == [ctx.name]
+    end
+
     test "the answer carries a name that still answers", ctx do
       {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
 
