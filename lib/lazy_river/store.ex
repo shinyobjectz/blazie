@@ -108,7 +108,9 @@ defmodule LazyRiver.Store.File do
     File.mkdir_p!(dir)
     path = Path.join(dir, filename(name))
 
-    {checkpoint, at, offset} = read_checkpoint(path <> ".checkpoint")
+    {checkpoint, at, offset} =
+      (path <> ".checkpoint") |> read_checkpoint() |> describing(file_size(path))
+
     {tail, scanned} = read_from(path, offset)
     {:ok, io} = :file.open(path, [:append, :binary, :raw])
 
@@ -262,6 +264,22 @@ defmodule LazyRiver.Store.File do
       {:error, :enoent} -> 0
     end
   end
+
+  # Is this checkpoint describing THIS log?
+  #
+  # It reaches past the end when the log is shorter than the checkpoint says —
+  # a restore that brought back the facts but not the sidecar, a log replaced
+  # while its checkpoint survived, a copy truncated somewhere. Believing it
+  # then asked for a negative number of bytes and raised from inside `init/1`,
+  # after `read_checkpoint/1`'s careful fallback had already returned, so the
+  # fallback never fired and the ledger would not open at all.
+  #
+  # A checkpoint is only ever an optimisation, and the log is whole either way.
+  # So a checkpoint that cannot be about this log is not repaired or trusted
+  # in part — it is dropped, and the log is read from the start. Slower, and
+  # always right.
+  defp describing({_facts, _at, offset}, size) when offset > size, do: {[], 0, 0}
+  defp describing(checkpoint, _size), do: checkpoint
 
   defp read_from(path, offset) do
     case File.read(path) do

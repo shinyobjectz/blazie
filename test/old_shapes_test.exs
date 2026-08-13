@@ -181,4 +181,75 @@ defmodule LazyRiver.OldShapesTest do
       assert Fact.from_stored(%{id: "x"}) == %{id: "x"}
     end
   end
+
+  describe "a checkpoint that cannot be about this log" do
+    # It reaches past the end when the log is shorter than the checkpoint says:
+    # a restore that brought back the facts but not the sidecar, a log replaced
+    # while its checkpoint survived, a copy truncated somewhere. Believing it
+    # asked for a negative number of bytes and raised from inside `init/1` —
+    # after the careful fallback in `read_checkpoint/1` had already returned, so
+    # the ledger simply would not open.
+    test "is dropped, and the log is read from the start", ctx do
+      write_older_log(ctx, [
+        [older_fact("is", "is", "attribute", 1)],
+        [older_fact("ada", "height", 180, 2)]
+      ])
+
+      path = Path.join(ctx.dir, Store.File.filename(ctx.name))
+      size = File.stat!(path).size
+
+      # A checkpoint claiming the log reaches far past where it actually does.
+      payload = :erlang.term_to_binary({99, size * 10, []})
+
+      File.write!(
+        path <> ".checkpoint",
+        <<byte_size(payload)::32, :erlang.crc32(payload)::32, payload::binary>>
+      )
+
+      {:ok, store} = Store.File.open(ctx.name, dir: ctx.dir)
+      facts = Store.File.replay(store)
+      Store.File.close(store)
+
+      assert length(facts) == 2
+      assert Enum.map(facts, & &1.id) == ["is", "ada"]
+    end
+
+    test "and the ledger opens rather than refusing to start", ctx do
+      write_older_log(ctx, [[older_fact("ada", "height", 180, 1)]])
+      path = Path.join(ctx.dir, Store.File.filename(ctx.name))
+      payload = :erlang.term_to_binary({50, 1_000_000, []})
+
+      File.write!(
+        path <> ".checkpoint",
+        <<byte_size(payload)::32, :erlang.crc32(payload)::32, payload::binary>>
+      )
+
+      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> Ledger.close(ctx.name) end)
+
+      assert Snapshot.value(Snapshot.open([ledger]), "ada", "height") == 180
+    end
+
+    test "a checkpoint that does describe the log is still believed", ctx do
+      write_older_log(ctx, [[older_fact("ada", "height", 180, 1)]])
+      path = Path.join(ctx.dir, Store.File.filename(ctx.name))
+      size = File.stat!(path).size
+      olds = [older_fact("ada", "height", 180, 1)]
+      payload = :erlang.term_to_binary({1, size, olds})
+
+      File.write!(
+        path <> ".checkpoint",
+        <<byte_size(payload)::32, :erlang.crc32(payload)::32, payload::binary>>
+      )
+
+      {:ok, store} = Store.File.open(ctx.name, dir: ctx.dir)
+      stats = Store.File.stats(store)
+      assert Store.File.replay(store) |> length() == 1
+      Store.File.close(store)
+
+      # Believed: it covered the whole log, so nothing was rescanned.
+      assert stats.checkpoint_at == 1
+      assert stats.records_scanned == 0
+    end
+  end
 end

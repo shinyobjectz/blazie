@@ -334,16 +334,18 @@ defmodule LazyRiver.BackupTest do
     end
 
     test "no segment ever starts anywhere but where the last one stopped", ctx do
-      writer =
-        Task.async(fn ->
-          Enum.each(1..100, fn n ->
-            {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", n}])
-          end)
-        end)
+      # Interleaved deliberately rather than raced. The property under test is
+      # that every boundary a copy stops at is a record boundary, and a race
+      # only makes that *likely* to be exercised — an earlier version asserted
+      # more than one segment came out and failed under suite load, when the
+      # writer happened to finish before any copy started.
+      for batch <- 1..12 do
+        for n <- 1..8 do
+          {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", batch * 100 + n}])
+        end
 
-      Enum.each(1..30, fn _ -> {:ok, _} = Backup.run(ctx.opts) end)
-      Task.await(writer, 30_000)
-      {:ok, _} = Backup.run(ctx.opts)
+        {:ok, _} = Backup.run(ctx.opts)
+      end
 
       {:ok, keys} = Backup.Target.Directory.list([root: ctx.remote], "ledgers/")
 
@@ -360,8 +362,6 @@ defmodule LazyRiver.BackupTest do
         end)
         |> Enum.sort()
 
-      # More than one, or the writer finished before a single copy started and
-      # this proved nothing about interleaving.
       assert length(ranges) > 1
 
       Enum.reduce(ranges, 0, fn {from, to}, at ->
@@ -370,6 +370,13 @@ defmodule LazyRiver.BackupTest do
 
         to
       end)
+
+      # And what they concatenate to is what is on disk.
+      :ok = Ledger.close(ctx.name)
+      original = File.read!(ledger_path(ctx))
+      File.rm_rf!(ctx.ledgers)
+      {:ok, _} = Backup.restore(ctx.opts)
+      assert File.read!(ledger_path(ctx)) == original
     end
   end
 
