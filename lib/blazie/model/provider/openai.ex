@@ -62,6 +62,66 @@ defmodule Blazie.Model.Provider.OpenAI do
   end
 
   @impl true
+  def converse(%Reference{} = model, messages, tools, opts) do
+    body = %{
+      "model" => model.name,
+      "messages" => messages,
+      "temperature" => Keyword.get(opts, :temperature, 0.0),
+      "tools" => Enum.map(tools, &as_tool/1)
+    }
+
+    with {:ok, answered} <- Provider.post(url(opts, "/chat/completions"), headers(opts), body) do
+      turn(answered)
+    end
+  end
+
+  defp as_tool(tool) do
+    %{
+      "type" => "function",
+      "function" => %{
+        "name" => tool.name,
+        "description" => tool.describe,
+        "parameters" => Blazie.Model.Schema.json(tool.takes)
+      }
+    }
+  end
+
+  # A model that wants a tool says so INSTEAD of answering, so the two are
+  # checked in that order — a message with both is a model hedging, and running
+  # the tool is the more useful reading.
+  defp turn(%{"choices" => [%{"message" => message} | _]}) do
+    case Map.get(message, "tool_calls") do
+      calls when is_list(calls) and calls != [] ->
+        {:ok,
+         {:calls,
+          Enum.map(calls, fn call ->
+            %{
+              id: Map.get(call, "id"),
+              name: get_in(call, ["function", "name"]),
+              arguments: decode_arguments(get_in(call, ["function", "arguments"]))
+            }
+          end)}}
+
+      _ ->
+        {:ok, {:said, Map.get(message, "content") || ""}}
+    end
+  end
+
+  defp turn(answered),
+    do: {:error, %{problem: :no_answer, repair: inspect(answered) |> String.slice(0, 200)}}
+
+  # Arguments arrive as a json STRING rather than an object, which is a shape
+  # nobody would choose and everybody has to handle.
+  defp decode_arguments(raw) when is_binary(raw) do
+    case Jason.decode(raw) do
+      {:ok, decoded} -> decoded
+      _ -> %{}
+    end
+  end
+
+  defp decode_arguments(_raw), do: %{}
+
+  @impl true
   def embed(%Reference{} = model, texts, opts) do
     with {:ok, answered} <-
            Provider.post(url(opts, "/embeddings"), headers(opts), %{

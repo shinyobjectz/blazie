@@ -28,6 +28,10 @@ defmodule Blazie.Model.Provider.OpenRouter do
   @impl true
   def embed(model, texts, opts), do: OpenAI.embed(model, texts, ours(opts))
 
+  @impl true
+  def converse(model, messages, tools, opts),
+    do: OpenAI.converse(model, messages, tools, ours(opts))
+
   defp ours(opts) do
     opts
     |> Keyword.put_new(:base_url, @base)

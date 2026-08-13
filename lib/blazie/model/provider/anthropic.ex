@@ -62,6 +62,81 @@ defmodule Blazie.Model.Provider.Anthropic do
   end
 
   @impl true
+  def converse(%Reference{} = model, messages, tools, opts) do
+    {system, rest} = split_system(messages)
+
+    body =
+      %{
+        "model" => model.name,
+        "messages" => Enum.map(rest, &anthropic_message/1),
+        "max_tokens" => Keyword.get(opts, :max_tokens, 4096),
+        "tools" =>
+          Enum.map(tools, fn tool ->
+            %{
+              "name" => tool.name,
+              "description" => tool.describe,
+              "input_schema" => Blazie.Model.Schema.json(tool.takes)
+            }
+          end)
+      }
+      |> put_system(system)
+
+    with {:ok, answered} <- Provider.post(url(opts, "/messages"), headers(opts), body) do
+      turn(answered)
+    end
+  end
+
+  # A tool result goes back as a user turn holding a `tool_result` block, not as
+  # a role of its own. That difference is the reason this provider has its own
+  # module rather than a flag in a shared one.
+  defp anthropic_message(%{"role" => "tool"} = message) do
+    %{
+      "role" => "user",
+      "content" => [
+        %{
+          "type" => "tool_result",
+          "tool_use_id" => Map.get(message, "tool_call_id"),
+          "content" => Map.get(message, "content", "")
+        }
+      ]
+    }
+  end
+
+  defp anthropic_message(%{"role" => "assistant", "tool_calls" => calls}) do
+    %{
+      "role" => "assistant",
+      "content" =>
+        Enum.map(calls, fn call ->
+          %{
+            "type" => "tool_use",
+            "id" => call["id"],
+            "name" => get_in(call, ["function", "name"]),
+            "input" => Jason.decode!(get_in(call, ["function", "arguments"]) || "{}")
+          }
+        end)
+    }
+  end
+
+  defp anthropic_message(message), do: message
+
+  defp turn(%{"content" => blocks}) when is_list(blocks) do
+    case Enum.filter(blocks, &(Map.get(&1, "type") == "tool_use")) do
+      [] ->
+        {:ok, {:said, Enum.map_join(blocks, "", &Map.get(&1, "text", ""))}}
+
+      uses ->
+        {:ok,
+         {:calls,
+          Enum.map(uses, fn use ->
+            %{id: Map.get(use, "id"), name: Map.get(use, "name"), arguments: Map.get(use, "input", %{})}
+          end)}}
+    end
+  end
+
+  defp turn(answered),
+    do: {:error, %{problem: :no_answer, repair: inspect(answered) |> String.slice(0, 200)}}
+
+  @impl true
   def embed(_model, _texts, _opts), do: Provider.cannot("embeddings", "Anthropic")
 
   defp text(%{"content" => blocks}) when is_list(blocks) do

@@ -20,6 +20,20 @@ defmodule Blazie.Model.Provider do
   @callback object(Reference.t(), [map()], keyword(), keyword()) :: {:ok, map()} | {:error, refusal()}
   @callback embed(Reference.t(), [String.t()], keyword()) :: {:ok, [[float()]]} | {:error, refusal()}
 
+  @doc """
+  Ask, offering tools the model may call.
+
+  Answers `{:said, text}` when it is done, or `{:calls, [%{id, name, arguments}]}`
+  when it wants something run. Two shapes rather than one because they mean
+  different things to the caller: one ends the loop and the other continues it,
+  and a caller that had to inspect a map to find out which would eventually get
+  it wrong.
+  """
+  @callback converse(Reference.t(), [map()], [map()], keyword()) ::
+              {:ok, {:said, String.t()} | {:calls, [map()]}} | {:error, refusal()}
+
+  @optional_callbacks converse: 4
+
   @doc "The module for a model."
   @spec for(Reference.t()) :: module()
   def for(%Reference{} = model), do: Reference.module(model)

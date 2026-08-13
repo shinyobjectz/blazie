@@ -83,6 +83,80 @@ defmodule Blazie.Model do
     end
   end
 
+  @doc """
+  Ask, offering tools, and keep going until it answers or runs out of calls.
+
+  `run_tool` is handed each call and returns what to tell the model. The loop
+  lives here rather than in the caller because getting it wrong is expensive in
+  a specific way — a model that calls, reads, and calls again has no natural end,
+  and `calls` is the thing standing between that and a bill.
+
+  Returns the answer and every call made, so a trace is something the caller can
+  write down rather than reconstruct.
+  """
+  @spec converse(String.t(), String.t(), [map()], (map() -> {:ok, map()} | {:error, map()}), keyword()) ::
+          {:ok, String.t(), [map()]} | {:error, refusal()}
+  def converse(model, prompt, tools, run_tool, opts \\ []) do
+    with {:ok, %Reference{} = reference} <- Reference.from(model) do
+      turn(reference, messages(prompt), tools, run_tool, opts, Keyword.get(opts, :calls, 4), [])
+    end
+  end
+
+  defp turn(_reference, _messages, _tools, _run, _opts, 0, made) do
+    {:error,
+     %{
+       problem: :too_many_calls,
+       repair:
+         "This used all #{length(made)} of its allowed tool calls without answering. Raise " <>
+           "`calls_allowed` if the work is honest; a loop that never answers never will."
+     }}
+  end
+
+  defp turn(reference, messages, tools, run, opts, left, made) do
+    case Provider.for(reference).converse(reference, messages, tools, opts) do
+      {:error, refusal} ->
+        {:error, refusal}
+
+      {:ok, {:said, said}} ->
+        {:ok, said, Enum.reverse(made)}
+
+      {:ok, {:calls, calls}} ->
+        {results, made} =
+          Enum.reduce(calls, {[], made}, fn call, {results, made} ->
+            answered =
+              case run.(call) do
+                {:ok, result} -> result
+                {:error, refusal} -> %{"error" => Map.get(refusal, :repair, "the tool failed")}
+              end
+
+            {[{call, answered} | results], [%{call: call, answered: answered} | made]}
+          end)
+
+        turn(reference, messages ++ replies(calls, Enum.reverse(results)), tools, run, opts, left - 1, made)
+    end
+  end
+
+  # The model's own turn has to go back too, or it asks for the same tool again
+  # having no record of having asked.
+  defp replies(calls, results) do
+    [
+      %{
+        "role" => "assistant",
+        "tool_calls" =>
+          Enum.map(calls, fn call ->
+            %{
+              "id" => call.id,
+              "type" => "function",
+              "function" => %{"name" => call.name, "arguments" => Jason.encode!(call.arguments)}
+            }
+          end)
+      }
+      | Enum.map(results, fn {call, answered} ->
+          %{"role" => "tool", "tool_call_id" => call.id, "content" => Jason.encode!(answered)}
+        end)
+    ]
+  end
+
   defp messages(prompt) when is_binary(prompt), do: [%{"role" => "user", "content" => prompt}]
   defp messages(messages) when is_list(messages), do: messages
 end
