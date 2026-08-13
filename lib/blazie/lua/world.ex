@@ -151,7 +151,7 @@ defmodule Blazie.Lua.World do
 
     ids =
       snapshot
-      |> Snapshot.find([])
+      |> Snapshot.find(narrowest(wanted))
       |> Enum.filter(&matches_all?(&1, wanted, snapshot))
       |> Enum.map(& &1.id)
       |> Enum.uniq()
@@ -166,6 +166,29 @@ defmodule Blazie.Lua.World do
   defp each(_args, state), do: {[nil], state}
 
   # ── deciding what a value is ───────────────────────────────────────────────
+
+  # Which constraint to hand the ledger, so it can use an index instead of
+  # returning everything for this to filter.
+  #
+  # A ledger indexes by id, by attribute, and by value, so an exact value is the
+  # narrowest thing there is to ask for and a bare field is the next. Asking for
+  # everything and filtering here read the whole ledger for a query that matched
+  # one row — correct, and it made `each` cost the size of the database rather
+  # than the size of the answer.
+  #
+  # The filter below still runs: it is what applies the *remaining* constraints,
+  # and one pattern can only carry one.
+  defp narrowest(wanted) do
+    exact = Enum.find(wanted, fn {_field, want} -> want != true end)
+    any = Enum.find(wanted, fn {_field, want} -> want == true end)
+
+    cond do
+      exact -> [attribute: to_string(elem(exact, 0)), value: elem(exact, 1)]
+      any -> [attribute: to_string(elem(any, 0))]
+      # An empty spec is everyone, and everyone is the whole ledger.
+      true -> []
+    end
+  end
 
   # `true` in a spec means "has this field at all", which is the difference
   # between asking who is 18 and asking who has an age.
