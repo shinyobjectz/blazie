@@ -2,13 +2,11 @@
 
 import {
   Activity,
-  BookMarked,
-  Clock,
+  Database,
   Fingerprint,
-  KeyRound,
-  Layers,
-  Rows3,
-  Sparkles,
+  Settings,
+  SquareTerminal,
+  Table2,
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -20,7 +18,6 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -28,40 +25,20 @@ import {
 } from "@/components/ui/sidebar"
 
 /**
- * The nav, grouped by what a thing *is* rather than by which screen it lives on.
+ * The nav, in the order somebody uses it.
  *
- * "read" is the four operations pointed at facts. "declared" is the things
- * somebody wrote down that the cluster then acts on — an attribute, a job. They
- * are separated because the second group is the only one where what you see is
- * something a person decided, and that is worth being able to see at a glance.
+ * Data first, because that is what anybody opening a backend console came to
+ * see. An earlier version grouped these by what a thing IS in blazie's own
+ * terms — read / declared / the node — which is a fine way to organise a
+ * reference and a confusing way to organise a screen.
  */
 
-const groups: {
-  label: string
-  items: { href: string; label: string; icon: typeof Rows3 }[]
-}[] = [
-  {
-    label: "read",
-    items: [
-      { href: "/dashboard", label: "overview", icon: Layers },
-      { href: "/dashboard/facts", label: "facts", icon: Rows3 },
-      { href: "/dashboard/produced", label: "produced", icon: Sparkles },
-    ],
-  },
-  {
-    label: "declared",
-    items: [
-      { href: "/dashboard/attributes", label: "attributes", icon: BookMarked },
-      { href: "/dashboard/jobs", label: "jobs", icon: Clock },
-    ],
-  },
-  {
-    label: "the node",
-    items: [
-      { href: "/dashboard/vitals", label: "vitals", icon: Activity },
-      { href: "/dashboard/access", label: "access", icon: KeyRound },
-    ],
-  },
+const items: { href: string; label: string; icon: typeof Table2 }[] = [
+  { href: "/dashboard", label: "data", icon: Table2 },
+  { href: "/dashboard/editor", label: "editor", icon: SquareTerminal },
+  { href: "/dashboard/ledgers", label: "ledgers", icon: Database },
+  { href: "/dashboard/activity", label: "activity", icon: Activity },
+  { href: "/dashboard/settings", label: "settings", icon: Settings },
 ]
 
 export function AppSidebar({ login }: { login: string | null }) {
@@ -80,42 +57,39 @@ export function AppSidebar({ login }: { login: string | null }) {
       </SidebarHeader>
 
       <SidebarContent>
-        {groups.map((group) => (
-          <SidebarGroup key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {group.items.map((item) => (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton
-                      asChild
-                      // `/dashboard` prefixes every other route, so it is the
-                      // one that has to match exactly or it is always active.
-                      isActive={
-                        item.href === "/dashboard"
-                          ? pathname === "/dashboard"
-                          : pathname.startsWith(item.href)
-                      }
-                      tooltip={item.label}
-                    >
-                      <Link href={item.href}>
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {items.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton
+                    asChild
+                    // `/dashboard` prefixes every other route, so it is the one
+                    // that has to match exactly or it is always active.
+                    isActive={
+                      item.href === "/dashboard"
+                        ? pathname === "/dashboard"
+                        : pathname.startsWith(item.href)
+                    }
+                    tooltip={item.label}
+                  >
+                    <Link href={item.href}>
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild tooltip={login ?? "this caller"}>
-              <Link href="/dashboard/access">
+              <Link href="/dashboard/settings">
                 <Fingerprint />
                 <span className="font-mono truncate">
                   {login ?? "this caller"}

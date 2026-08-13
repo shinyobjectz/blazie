@@ -10,12 +10,12 @@ import { cn } from "@/lib/utils"
  *
  * The verbs were true and meant nothing to anybody who had not used this
  * already — "which ledgers → a snapshot name" explains a thing in its own
- * vocabulary. So the same four operations are here as an actual exchange you
- * could paste into a terminal, and the ideas come out of the code rather than
- * being asserted beside it.
+ * vocabulary. Then the four became one: send Lua, get back what it returned.
+ * So this is an exchange you could paste into a terminal, and the ideas come
+ * out of the code rather than being asserted beside it.
  *
  * Every request and response below is the real shape, taken from
- * `Blazie.Surface.Controller` and `Blazie.Wire`. If those change, this is
+ * `Blazie.Surface.Controller` and `Blazie.Lua.World`. If those change, this is
  * wrong, and that is the right amount of coupling for a page that claims to
  * show what using it looks like.
  */
@@ -23,49 +23,56 @@ import { cn } from "@/lib/utils"
 const features = [
   {
     icon: PlusCircle,
-    title: "write, and get a name back",
-    body: "the name is the snapshot your facts landed in, so you read your own write without polling for it.",
+    title: "it is just lua",
+    body: "no query language and no schema. an entity is a table, a field is a field, and an edge is a field holding another entity.",
   },
   {
     icon: History,
-    title: "ask at that name, forever",
-    body: "the same question at the same name gives the same facts next month. cache on the pair and never invalidate.",
+    title: "every answer has a name",
+    body: "a run tells you which snapshot it read. ask again at that name next month and the answer is identical.",
   },
   {
     icon: Fingerprint,
-    title: "`by` says what made it",
-    body: "null means it came from outside and cannot be reproduced. anything else names the code that produced it.",
+    title: "nothing is overwritten",
+    body: "a correction is a later fact. `at(42)` still answers what was true then, so “what did it believe on tuesday” is a question.",
   },
   {
     icon: KeyRound,
-    title: "a token names ledgers",
-    body: "authorization is a list of ledgers you may name — not row rules, not predicates, and readable in one glance.",
+    title: "one door",
+    body: "send lua, get back what it returned. there is no second endpoint to learn and no client library to keep in step.",
   },
 ]
 
-const TRANSCRIPT = `# write one fact. it came from outside, so nothing produced it.
-curl -X POST https://api.blazie.dev/write \\
+const TRANSCRIPT = `# the whole api. send lua, get back what it returned.
+curl -X POST https://api.blazie.dev/run \\
   -H "Authorization: Bearer $BLAZIE_TOKEN" \\
-  -d '{"ledger":"tenant-7","facts":[
-        {"id":"ada","attribute":"height","value":180}]}'
+  -d '{"ledger":"main","source":"
+        ada.height = 180
+        ada.friend = grace
+        return ada.height
+      "}'
 
-{"name":{"tenant-7":42}}
+{"value":180,"name":{"main":42},"wrote":5}
 
-# ask at that name. this answer does not change again.
-curl -X POST https://api.blazie.dev/ask \\
+# that name is the answer's receipt. it does not change again.
+curl -X POST https://api.blazie.dev/run \\
   -H "Authorization: Bearer $BLAZIE_TOKEN" \\
-  -d '{"name":{"tenant-7":42},"pattern":{"attribute":"height"}}'
+  -d '{"ledger":"main","name":{"main":42},"source":"
+        return ada.friend.height
+      "}'
 
-{"facts":[
-  {"id":"ada","attribute":"height","value":180,"tx":42,"by":null}]}
+{"value":175,"name":{"main":42},"wrote":0}
 
-# a later fact corrects it. the old name still answers 180.
-curl -X POST https://api.blazie.dev/write \\
+# find things. lua is the query language, so counting needs nothing new.
+curl -X POST https://api.blazie.dev/run \\
   -H "Authorization: Bearer $BLAZIE_TOKEN" \\
-  -d '{"ledger":"tenant-7","facts":[
-        {"id":"ada","attribute":"height","value":181}]}'
+  -d '{"ledger":"main","source":"
+        local n = 0
+        for p in each { height = 180 } do n = n + 1 end
+        return n
+      "}'
 
-{"name":{"tenant-7":43}}`
+{"value":1,"name":{"main":43},"wrote":0}`
 
 type Line = { text: string; kind: "comment" | "cmd" | "json" | "blank" }
 
@@ -102,9 +109,9 @@ export function CitableSection({ className, ...props }: React.ComponentProps<"se
           an answer you can cite
         </h2>
         <p className="mb-12 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          four operations, and this is all of them. a caller holds the
-          snapshot&apos;s name, never its bytes — so what it read is something it
-          can hand to somebody else, and they get the same answer.
+          one operation, and this is all of it. every run hands back the name of
+          the snapshot it read, so what you got is something you can hand to
+          somebody else and they get the same answer.
         </p>
 
         <div className="grid grid-cols-1 items-start gap-10 lg:grid-cols-[300px_1fr] lg:gap-12">
@@ -148,13 +155,11 @@ export function CitableSection({ className, ...props }: React.ComponentProps<"se
         </div>
 
         <p className="mt-10 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          the same four from a terminal:{" "}
-          <code className="font-mono text-white/80">blazie write tenant-7 ada height 180</code>
-          , then{" "}
-          <code className="font-mono text-white/80">blazie ask tenant-7 --attribute height</code>
-          , and{" "}
-          <code className="font-mono text-white/80">blazie watch tenant-7</code> to be
-          answered again as facts land.
+          the same from a terminal:{" "}
+          <code className="font-mono text-white/80">blazie run main &apos;ada.height = 180&apos;</code>
+          , or{" "}
+          <code className="font-mono text-white/80">blazie run main -f setup.lua</code>{" "}
+          to send a file.
         </p>
       </div>
     </section>

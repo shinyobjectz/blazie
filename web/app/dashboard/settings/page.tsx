@@ -16,13 +16,13 @@ import { useCluster } from "../cluster"
  * feature: authorization is a list of ledgers a caller may name, written on the
  * cluster. No page that a token can reach may widen the reach of that token.
  */
-export default function Access() {
+export default function Settings() {
   const router = useRouter()
   const { who } = useCluster()
 
   return (
     <>
-      <PageHead title="access">
+      <PageHead title="settings">
         a caller is a fingerprint and a list of ledgers. that list is the whole of
         its reach — not row rules, not predicates, and readable in one glance,
         which is the point of it being a list.

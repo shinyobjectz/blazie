@@ -1,32 +1,12 @@
-import type { Fact, SnapshotName, Value } from "@/lib/blazie"
-
 /**
- * How a fact's value is shown. Scalars go out as themselves; a symbol is
- * summarised rather than printed, because nobody reads 768 floats.
+ * Rendering numbers a person has to read.
+ *
+ * This file used to be mostly fact helpers — pick the latest fact for an
+ * attribute, flatten a fact into a search haystack, summarise a fact's value.
+ * None of that exists on the surface any more: a chunk of Lua returns a table,
+ * and "latest" is what reading a field already means. What is left is the part
+ * that was never about facts, which is making bytes and timestamps legible.
  */
-export function showValue(value: Value): string {
-  if (value === null) return "null"
-  if (value === undefined) return "—"
-
-  if (typeof value === "object" && value !== null && "$symbol" in value) {
-    const symbol = (
-      value as { $symbol?: { space?: string; values?: unknown[] } }
-    ).$symbol
-    const space = symbol?.space ?? "?"
-    const width = Array.isArray(symbol?.values) ? symbol.values.length : 0
-    return `$symbol ${space} · ${width}d`
-  }
-
-  if (typeof value === "string") return value
-  if (typeof value === "number" || typeof value === "boolean")
-    return String(value)
-  return JSON.stringify(value)
-}
-
-/** A snapshot name as something a caller could paste into a request. */
-export function showName(name: SnapshotName): string {
-  return JSON.stringify(name)
-}
 
 export function showBytes(bytes: number): string {
   if (!Number.isFinite(bytes)) return "—"
@@ -59,33 +39,4 @@ export function showWhen(seconds: number, now = Date.now()): string {
           : `${Math.round(ago / 86400)}d ago`
 
   return `${scale} · ${new Date(seconds * 1000).toISOString().replace("T", " ").slice(0, 19)}z`
-}
-
-/**
- * The latest fact for an attribute on an id. A ledger keeps every reading, so
- * "current" is just the highest transaction — no separate current-value store.
- */
-export function latest(facts: Fact[], attribute: string): Fact | undefined {
-  let best: Fact | undefined
-  for (const fact of facts) {
-    if (fact.attribute !== attribute) continue
-    if (!best || fact.tx > best.tx) best = fact
-  }
-  return best
-}
-
-/** The latest numeric reading, or undefined if it was never written. */
-export function latestNumber(
-  facts: Fact[],
-  attribute: string,
-): number | undefined {
-  const fact = latest(facts, attribute)
-  return typeof fact?.value === "number" ? fact.value : undefined
-}
-
-/** Everything on a row, flattened, for the client-side narrow box. */
-export function factHaystack(fact: Fact): string {
-  return `${fact.id} ${fact.attribute} ${showValue(fact.value)} ${fact.tx} ${
-    fact.by ?? "outside"
-  }`.toLowerCase()
 }

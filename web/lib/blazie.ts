@@ -1,6 +1,11 @@
 /**
  * The blazie client. Everything the console knows how to say to a cluster.
  *
+ * There are two operations. You claim a ledger, and you run Lua against one.
+ * There used to be `open`, `ask` and `write`, and between them they made the
+ * console speak in facts and patterns — which is why the console read like an
+ * internals tour rather than a database.
+ *
  * There is no server here — `output: "export"` means this runs in the browser
  * and talks to the cluster's own HTTP API directly. The token lives in
  * localStorage because that is the only place a static page has.
@@ -19,48 +24,24 @@ const TOKEN_KEY = "blazie.token"
 
 export const clusterUrl = BASE
 
-/** A snapshot's name: which transaction of which ledger you are reading. */
+/** A snapshot's name: which ledger you read, at which transaction. */
 export type SnapshotName = Record<string, number>
 
-/** An id travels as a number or a string. */
-export type Id = string | number
-
-/** A symbol is always produced by a formula, never taken from outside. */
-export type SymbolValue = { $symbol: { space: string; values: number[] } }
-
-/** Any JSON value, plus the one reserved envelope. */
+/** Whatever the chunk returned, shaped as JSON by the cluster. */
 export type Value = unknown
 
-export type Fact = {
-  id: Id
-  attribute: string
+export type RunResult = {
   value: Value
-  tx: number
-  /** null came from outside. A string names the code that produced it. */
-  by: string | null
-}
-
-/**
- * An absent key is a wildcard; a present one matches exactly. There are no
- * operators — this is a pattern, not a query language.
- */
-export type Pattern = {
-  id?: Id
-  attribute?: string
-  value?: Value
-  by?: string
+  /** Where the read happened, and where anything written landed. */
+  name: SnapshotName
+  /** How many assertions the chunk staged. Zero for a read. */
+  wrote: number
 }
 
 export type Me = {
   login: string | null
   caller: string
   ledgers: string[]
-}
-
-export type Assertion = {
-  id: Id
-  attribute: string
-  value: Value
 }
 
 /**
@@ -158,8 +139,6 @@ async function refusalFrom(response: Response): Promise<Refusal> {
     // Not JSON. Fall through to the invented repair below.
   }
 
-  // Some boundaries (the generic error handler) carry no repair. Rather than
-  // show a bare problem, say the most useful true thing we know.
   if (!repair) {
     repair =
       response.status === 401
@@ -172,7 +151,7 @@ async function refusalFrom(response: Response): Promise<Refusal> {
   return new Refusal(problem, repair, response.status)
 }
 
-/* --------------------------------------------------------- the four verbs +2 */
+/* --------------------------------------------------------------- the two verbs */
 
 /** Trade a github oauth code for a token. No bearer — this is how you get one. */
 export function authGithub(code: string) {
@@ -187,32 +166,24 @@ export function me() {
   return send<Me>("/me")
 }
 
-/** open — which ledgers → a snapshot name. */
-export async function open(ledgers: string[]): Promise<SnapshotName> {
-  const { name } = await send<{ name: SnapshotName }>("/open", {
-    body: { ledgers },
+/** Take a ledger name. It is granted to whoever claimed it. */
+export function claim(ledger: string) {
+  return send<{ ledger: string; name: SnapshotName }>("/ledgers", {
+    body: { ledger },
   })
-  return name
 }
 
-/** ask — name, question → facts. */
-export async function ask(
-  name: SnapshotName,
-  pattern: Pattern = {},
-): Promise<Fact[]> {
-  const { facts } = await send<{ facts: Fact[] }>("/ask", {
-    body: { name, pattern },
-  })
-  return facts
-}
-
-/** write — name, facts → a new name. */
-export async function write(
+/**
+ * Run Lua against a ledger.
+ *
+ * `name` pins which snapshot to read, so the same source at the same name is
+ * the same answer forever. `also` widens the world to read; writes still land
+ * in `ledger` and nowhere else.
+ */
+export function run(
   ledger: string,
-  facts: Assertion[],
-): Promise<SnapshotName> {
-  const { name } = await send<{ name: SnapshotName }>("/write", {
-    body: { ledger, facts },
-  })
-  return name
+  source: string,
+  options: { name?: SnapshotName; also?: string[]; as?: "formula" | "job" } = {},
+) {
+  return send<RunResult>("/run", { body: { ledger, source, ...options } })
 }
