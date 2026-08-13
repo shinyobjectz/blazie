@@ -132,50 +132,6 @@ defmodule Blazie.Lua do
     await(pid, ref, deadline, heap)
   end
 
-  @doc """
-  The assertions a chunk returned, as `{id, attribute, value}`.
-
-  Sorted, because `pairs` has no defined order and a formula that returned its
-  facts in whatever order a map happened to hold them would answer differently
-  on a different release of the VM. Sorting here means iteration order cannot
-  reach an answer at all.
-  """
-  @spec facts(term()) :: [{term(), term(), term()}]
-  def facts(nil), do: []
-
-  def facts(rows) when is_list(rows) do
-    rows
-    |> Enum.map(fn
-      {_index, row} -> triple(row)
-      row -> triple(row)
-    end)
-    |> Enum.sort()
-  end
-
-  def facts(other) do
-    raise ArgumentError,
-          "A formula returns a list of {id, attribute, value} triples. This returned " <>
-            "#{inspect(other)}."
-  end
-
-  defp triple(row) when is_list(row) do
-    case Enum.map(row, fn {_k, v} -> v end) do
-      [id, attribute, value] ->
-        {id, attribute, value}
-
-      other ->
-        raise ArgumentError,
-              "Every fact a formula returns is three things — an id, an attribute, and a " <>
-                "value. This one had #{length(other)}: #{inspect(other)}."
-    end
-  end
-
-  defp triple(other) do
-    raise ArgumentError,
-          "Every fact a formula returns is three things — an id, an attribute, and a " <>
-            "value. This was #{inspect(other)}."
-  end
-
   # ── the world ──────────────────────────────────────────────────────────────
 
   @doc """
@@ -311,8 +267,39 @@ defmodule Blazie.Lua do
   defp decode([], _state), do: nil
   defp decode([value | _], state), do: decode_one(value, state)
 
-  defp decode_one({:tref, _} = table, state), do: :luerl.decode(table, state)
+  defp decode_one({:tref, _} = table, state),
+    do: table |> :luerl.decode(state) |> jsonish()
+
   defp decode_one(value, _state), do: value
+
+  # Luerl hands a table back as a list of {key, value} pairs, which is neither a
+  # JSON object nor an array and encodes as neither — every non-empty table a
+  # chunk returned failed to serialise. Lua has one data structure for both, so
+  # the shape has to be decided here: keys exactly 1..n is a list, anything else
+  # is an object. That is the rule every Lua-to-JSON bridge uses, and it carries
+  # the same ambiguity they all do — an empty table could be either, and comes
+  # back as a list.
+  defp jsonish(pairs) when is_list(pairs) do
+    if sequence?(pairs) do
+      Enum.map(pairs, fn {_index, value} -> jsonish(value) end)
+    else
+      Map.new(pairs, fn {key, value} -> {to_string(key), jsonish(value)} end)
+    end
+  end
+
+  defp jsonish(value), do: value
+
+  defp sequence?([]), do: true
+
+  defp sequence?(pairs) do
+    pairs
+    |> Enum.map(fn {key, _value} ->
+      # Luerl numbers arrive as floats often enough that 1.0 and 1 both have to
+      # count as the first index.
+      if is_float(key) and key == trunc(key), do: trunc(key), else: key
+    end)
+    |> Kernel.==(Enum.to_list(1..length(pairs)))
+  end
 
   defp await(pid, ref, deadline, heap) do
     receive do

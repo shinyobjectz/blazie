@@ -180,23 +180,4 @@ defmodule Blazie.LuaTest do
     end
   end
 
-  describe "facts come back as facts" do
-    test "an array of arrays becomes assertions" do
-      source = "return {{'ada','height',180},{'grace','height',175}}"
-
-      assert {:ok, value} = Lua.run(source, as: :formula)
-      assert Lua.facts(value) == [{"ada", "height", 180}, {"grace", "height", 175}]
-    end
-
-    test "returning nothing is returning no facts" do
-      assert {:ok, value} = Lua.run("return {}", as: :formula)
-      assert Lua.facts(value) == []
-    end
-
-    test "a table that is not a list of triples is refused, not guessed at" do
-      assert {:ok, value} = Lua.run("return {{'ada','height'}}", as: :formula)
-
-      assert_raise ArgumentError, ~r/three/, fn -> Lua.facts(value) end
-    end
-  end
 end

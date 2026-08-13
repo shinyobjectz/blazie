@@ -155,6 +155,54 @@ defmodule Blazie.SurfaceTest do
     end
   end
 
+  describe "a table comes back as json" do
+    # Lua has one data structure for both a list and an object, and Luerl hands
+    # it back as neither — a list of {key, value} pairs that JSON cannot encode.
+    # Every non-empty table a chunk returned used to fail to serialise, which is
+    # everything a console would ever ask for.
+    test "keys 1..n become a list", %{conn: conn, ledger: ledger} do
+      assert %{"value" => [1, 2, 3]} =
+               json_response(run(conn, ledger, "return {1, 2, 3}"), 200)
+    end
+
+    test "named keys become an object", %{conn: conn, ledger: ledger} do
+      assert %{"value" => %{"id" => "ada", "height" => 180}} =
+               json_response(run(conn, ledger, "return {id = 'ada', height = 180}"), 200)
+    end
+
+    test "nesting survives", %{conn: conn, ledger: ledger} do
+      source = "return { rows = { {id = 'ada'}, {id = 'grace'} } }"
+
+      assert %{"value" => %{"rows" => [%{"id" => "ada"}, %{"id" => "grace"}]}} =
+               json_response(run(conn, ledger, source), 200)
+    end
+
+    test "a whole table of entities, which is what a data browser asks for", %{
+      conn: conn,
+      ledger: ledger,
+      token: token
+    } do
+      json_response(run(conn, ledger, "ada.height = 180\nada.name = 'Ada'"), 200)
+
+      source = """
+      local rows = {}
+      for e in each {} do
+        local row = { id = e.id }
+        for field, value in pairs(e) do row[field] = value end
+        rows[#rows + 1] = row
+      end
+      return rows
+      """
+
+      body = json_response(run(again(token), ledger, source), 200)
+
+      assert Enum.any?(body["value"], fn row ->
+               row["id"] == "ada" and row["height"] == 180 and row["name"] == "Ada"
+             end),
+             "expected ada as a row, got: #{inspect(body["value"])}"
+    end
+  end
+
   describe "provenance" do
     test "what a caller writes names nothing", %{conn: conn, ledger: ledger} do
       json_response(run(conn, ledger, "ada.height = 180"), 200)
