@@ -36,11 +36,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # Built and LOADED, not pushed. The probe below decides whether it is fit
+      # to be `latest`, and a push before that has already happened is not a
+      # gate — the first two runs of this workflow published a `latest` that
+      # could not boot, and only the run that finally passed replaced it. Same
+      # ordering rule the control plane follows when it makes a tunnel before a
+      # machine: do the irreversible thing last.
+      - name: Build
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          push: false
+          load: true
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
@@ -59,7 +66,7 @@ jobs:
           # than the one a cluster runs.
           docker run -d --name probe -p 4000:4000 \
             -e SECRET_KEY_BASE="$(head -c 48 /dev/urandom | base64)" \
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:latest
 
           # The same question the healthcheck asks, for the same reason: a
           # container that starts and does not serve is the failure this catches,
@@ -81,3 +88,9 @@ jobs:
           fi
 
           echo "the image serves"
+
+      # Only now, and only because it answered.
+      - name: Publish
+        run: |
+          docker push ghcr.io/${{ github.repository }}:latest
+          docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
