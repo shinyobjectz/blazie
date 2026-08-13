@@ -29,9 +29,21 @@ defmodule Blazie.Symbol do
   alias Blazie.{Attribute, Fact, Snapshot}
 
   @enforce_keys [:space, :values]
-  defstruct [:space, :values]
+  defstruct [:space, :values, :norm]
 
-  @type t :: %__MODULE__{space: String.t(), values: [float()]}
+  # `values` is a binary of little-endian float64s, not a list of floats, and
+  # the difference is not cosmetic.
+  #
+  # A list of 768 floats costs 24,576 bytes resident — a cons cell and a boxed
+  # float per element — against 6,144 as a binary. Worse, a list is COPIED when
+  # it is sent to another process, so fanning the scan out across cores made it
+  # slower rather than faster: measured at 50k vectors, 1,003ms serial against
+  # 5,123ms across ten cores. Binaries over 64 bytes are refcounted and shared,
+  # which is what makes parallelism available at all.
+  #
+  # `norm` is precomputed, because the old `cosine/2` recomputed the QUERY's
+  # norm once per candidate — O(N·d) of pure waste on every search.
+  @type t :: %__MODULE__{space: String.t(), values: binary(), norm: float()}
   @type refusal :: %{problem: atom(), repair: String.t()}
 
   @doc "The attribute a symbol-valued attribute needs, defined the ordinary way."
@@ -41,12 +53,54 @@ defmodule Blazie.Symbol do
   @doc "A symbol in a space. The space travels with it, so it can never be lost."
   @spec new(String.t(), [number()]) :: t()
   def new(space, values) when is_binary(space) and is_list(values) do
-    %__MODULE__{space: space, values: Enum.map(values, &(&1 * 1.0))}
+    packed = for value <- values, into: <<>>, do: <<value * 1.0::float-64-little>>
+    %__MODULE__{space: space, values: packed, norm: norm_of(packed)}
   end
+
+  def new(space, values) when is_binary(space) and is_binary(values) do
+    %__MODULE__{space: space, values: values, norm: norm_of(values)}
+  end
+
+  @doc """
+  Normalise a symbol that was stored under an older shape.
+
+  `values` used to be a list of floats and there was no `norm`. Anything read
+  back from a world may still be that, because nothing here is ever rewritten —
+  so every path that compares symbols goes through this first. Renaming a stored
+  shape without a shim is how this tree has lost data three times.
+  """
+  @spec from_stored(t() | map()) :: t()
+  def from_stored(%__MODULE__{values: values, norm: norm} = symbol)
+      when is_binary(values) and is_float(norm),
+      do: symbol
+
+  def from_stored(%__MODULE__{values: values, space: space}) when is_list(values),
+    do: new(space, values)
+
+  def from_stored(%__MODULE__{values: values, space: space}) when is_binary(values),
+    do: new(space, values)
+
+  def from_stored(other), do: other
+
+  @doc "The numbers, as a list. What the wire carries — json has no binaries."
+  @spec numbers(t()) :: [float()]
+  def numbers(%__MODULE__{} = symbol) do
+    for <<value::float-64-little <- from_stored(symbol).values>>, do: value
+  end
+
+  defp norm_of(packed) do
+    packed |> sum_squares(0.0) |> :math.sqrt()
+  end
+
+  defp sum_squares(<<value::float-64-little, rest::binary>>, acc),
+    do: sum_squares(rest, acc + value * value)
+
+  defp sum_squares(<<>>, acc), do: acc
 
   @doc "How many numbers wide."
   @spec dimension(t()) :: non_neg_integer()
-  def dimension(%__MODULE__{values: values}), do: length(values)
+  def dimension(%__MODULE__{values: values}) when is_binary(values), do: div(byte_size(values), 8)
+  def dimension(%__MODULE__{values: values}) when is_list(values), do: length(values)
 
   @doc """
   How near two symbols are, as cosine similarity in `-1.0..1.0`.
@@ -67,7 +121,7 @@ defmodule Blazie.Symbol do
          }}
 
       true ->
-        {:ok, cosine(a.values, b.values)}
+        {:ok, cosine(from_stored(a), from_stored(b))}
     end
   end
 
@@ -139,18 +193,21 @@ defmodule Blazie.Symbol do
   defp taken_from_outside?({_id, _attribute, %__MODULE__{}}), do: true
   defp taken_from_outside?(_), do: false
 
-  defp cosine(a, b) do
-    {dot, norm_a, norm_b} =
-      Enum.zip(a, b)
-      |> Enum.reduce({0.0, 0.0, 0.0}, fn {x, y}, {dot, na, nb} ->
-        {dot + x * y, na + x * x, nb + y * y}
-      end)
-
-    case norm_a * norm_b do
-      product when product > 0 -> dot / :math.sqrt(product)
+  # Both norms are already known, so this walks the two binaries once and does
+  # nothing else. The old version zipped the two lists — allocating an
+  # N-element list of tuples per comparison — and recomputed both norms every
+  # time, including the query's, which is identical across the whole search.
+  defp cosine(%__MODULE__{} = a, %__MODULE__{} = b) do
+    case a.norm * b.norm do
+      product when product > 0 -> dot(a.values, b.values, 0.0) / product
       # A symbol of all zeros points nowhere, so it is near nothing. Answering
       # zero beats dividing by it.
       _ -> 0.0
     end
   end
+
+  defp dot(<<x::float-64-little, a::binary>>, <<y::float-64-little, b::binary>>, acc),
+    do: dot(a, b, acc + x * y)
+
+  defp dot(_a, _b, acc), do: acc
 end

@@ -156,7 +156,7 @@ defmodule Blazie.Lua.Binding do
 
       %Symbol{} = symbol ->
         {encoded, state} =
-          :luerl.encode([{"space", symbol.space}, {"dimensions", length(symbol.values)}], state)
+          :luerl.encode([{"space", symbol.space}, {"dimensions", Symbol.dimension(symbol)}], state)
 
         {[encoded, false], state}
 

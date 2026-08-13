@@ -169,8 +169,11 @@ defmodule Blazie.Wire do
 
   # ── values ─────────────────────────────────────────────────────────────────
 
+  # `Symbol.numbers/1` rather than the field: values are a binary now, and json
+  # has no binaries. This is also the shim's doorway — a symbol stored under the
+  # older list shape goes out identically.
   defp encode_value(%Symbol{} = symbol),
-    do: %{"$symbol" => %{"space" => symbol.space, "values" => symbol.values}}
+    do: %{"$symbol" => %{"space" => symbol.space, "values" => Symbol.numbers(symbol)}}
 
   defp encode_value(%Blob{} = blob),
     do: %{
