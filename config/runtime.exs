@@ -14,13 +14,37 @@ if config_env() == :prod do
       is not in the repo on purpose.
       """
 
-  config :blazie, Blazie.Surface.Endpoint,
-    server: true,
-    secret_key_base: secret,
-    http: [
-      ip: {0, 0, 0, 0, 0, 0, 0, 0},
-      port: String.to_integer(System.get_env("PORT") || "4000")
-    ]
+  # TLS is optional and, when present, additional rather than instead. The node
+  # sits behind a proxy that terminates the public certificate; this encrypts
+  # the hop from that proxy to here, which otherwise crosses the internet in
+  # the clear carrying bearer tokens. A self-signed certificate is enough for
+  # that hop — the proxy is configured to trust this origin, not the world.
+  https =
+    case {System.get_env("TLS_CERT"), System.get_env("TLS_KEY")} do
+      {cert, key} when is_binary(cert) and is_binary(key) ->
+        [
+          https: [
+            ip: {0, 0, 0, 0, 0, 0, 0, 0},
+            port: String.to_integer(System.get_env("TLS_PORT") || "4443"),
+            certfile: cert,
+            keyfile: key
+          ]
+        ]
+
+      _ ->
+        []
+    end
+
+  config :blazie,
+         Blazie.Surface.Endpoint,
+         [
+           server: true,
+           secret_key_base: secret,
+           http: [
+             ip: {0, 0, 0, 0, 0, 0, 0, 0},
+             port: String.to_integer(System.get_env("PORT") || "4000")
+           ]
+         ] ++ https
 
   # Where ledgers keep their facts. The store is the seam, so moving this to
   # object storage later is a different module rather than a different path.
