@@ -90,7 +90,32 @@ defmodule Blazie.Attribute do
   @spec requires_seed() :: [{String.t(), String.t(), term()}]
   def requires_seed do
     define("requires", answers: "name", cardinality: "many") ++
-      define("source", answers: "any")
+      define("source", answers: "any") ++
+      define("describe", answers: "any") ++
+      define("judge", answers: "name") ++
+      define("shown", answers: "boolean")
+  end
+
+  @doc """
+  The requirements a model should be TOLD about, as descriptions.
+
+  A requirement can be a gate the answer is measured against afterwards, or an
+  instruction shaping the answer beforehand, and the difference is one fact:
+  `shown`. Both are the same requirement — the same words, checked the same way —
+  so an instruction cannot drift from the check, which is the failure this
+  arrangement exists to prevent.
+
+  Hidden is the default, and deliberately. A requirement in the prompt is a
+  requirement the model is optimising against rather than being tested on, so a
+  hidden one measures something a shown one cannot.
+  """
+  @spec instructions(Snapshot.t(), String.t()) :: [String.t()]
+  def instructions(%Snapshot{} = snapshot, attribute) do
+    for requirement <- requirements(snapshot, attribute),
+        Snapshot.value(snapshot, requirement, "shown") == true,
+        described = Snapshot.value(snapshot, requirement, "describe"),
+        is_binary(described),
+        do: described
   end
 
   @doc "The attributes that define attributes. Everything else is built from these."
@@ -243,7 +268,11 @@ defmodule Blazie.Attribute do
   defp judge(requirement, value, snapshot) do
     case Snapshot.value(snapshot, requirement, "source") do
       nil ->
-        {:missing, requirement}
+        # No predicate. If it names a judge, a model decides — which is how a
+        # requirement like "is this faithful to the source" gets checked at all,
+        # since no amount of Lua will answer it. A `source` present means the
+        # predicate runs INSTEAD, because code that can decide should.
+        by_judge(requirement, value, snapshot)
 
       source when is_binary(source) ->
         case Blazie.Lua.Binding.run(bind(value) <> source, snapshot, as: :formula) do
@@ -257,6 +286,34 @@ defmodule Blazie.Attribute do
 
       _other ->
         {:missing, requirement}
+    end
+  end
+
+  # A judged requirement asks a model whether it holds, and takes the reason with
+  # it. That reason is what a rejected sample carries into its next attempt, so a
+  # judge that only said "no" would cost the repair loop the thing that makes it
+  # work.
+  defp by_judge(requirement, value, snapshot) do
+    with model when is_binary(model) <- Snapshot.value(snapshot, requirement, "judge"),
+         described when is_binary(described) <- Snapshot.value(snapshot, requirement, "describe") do
+      asked = """
+      Does this value satisfy the requirement?
+
+      Requirement: #{described}
+      Value: #{inspect(value)}
+      """
+
+      case Blazie.Model.object(model, asked,
+             holds: [answers: "boolean", describe: "true if it satisfies the requirement"],
+             because: [answers: "name", describe: "one sentence saying why"]
+           ) do
+        {:ok, %{"holds" => true}} -> :ok
+        {:ok, %{"because" => why}} -> {:because, why}
+        {:ok, _other} -> :refused
+        {:error, refusal} -> {:broken, refusal}
+      end
+    else
+      _ -> {:missing, requirement}
     end
   end
 

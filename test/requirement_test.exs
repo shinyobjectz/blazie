@@ -139,4 +139,64 @@ defmodule Blazie.RequirementTest do
       assert Attribute.unmet([{"ada", "name", "O'Hara"}], snapshot(world)) == []
     end
   end
+
+  describe "shown or hidden" do
+    test "a hidden requirement is not in the ask", %{world: world} do
+      require_that(world, "height", "positive", "return value > 0")
+      {:ok, _} = World.append(world, [{"positive", "describe", "must be a positive number"}])
+
+      # Hidden is the default and deliberately so: a requirement in the prompt
+      # is one the model optimises against rather than is tested on.
+      assert Attribute.instructions(snapshot(world), "height") == []
+    end
+
+    test "a shown one is", %{world: world} do
+      require_that(world, "height", "positive", "return value > 0")
+
+      {:ok, _} =
+        World.append(world, [
+          {"positive", "describe", "must be a positive number"},
+          {"positive", "shown", true}
+        ])
+
+      assert Attribute.instructions(snapshot(world), "height") == ["must be a positive number"]
+    end
+
+    test "showing it does not stop it being checked", %{world: world} do
+      require_that(world, "height", "positive", "return value > 0")
+
+      {:ok, _} =
+        World.append(world, [
+          {"positive", "describe", "must be a positive number"},
+          {"positive", "shown", true}
+        ])
+
+      # The same fact is the instruction AND the gate, so they cannot disagree.
+      assert [_] = Attribute.unmet([{"ada", "height", -5}], snapshot(world))
+      assert Attribute.unmet([{"ada", "height", 5}], snapshot(world)) == []
+    end
+  end
+
+  describe "a requirement with no predicate" do
+    test "and no judge says so rather than passing", %{world: world} do
+      {:ok, _} = World.append(world, [{"height", "requires", "vague"}, {"vague", "is", "formula"}])
+
+      assert [refusal] = Attribute.unmet([{"ada", "height", 1}], snapshot(world))
+      assert refusal.repair =~ "no `source`"
+    end
+
+    test "a predicate wins over a judge when both are there", %{world: world} do
+      # Code that can decide should — a judge is for what Lua cannot answer.
+      require_that(world, "height", "positive", "return value > 0")
+
+      {:ok, _} =
+        World.append(world, [
+          {"positive", "judge", "no_such_provider:whatever"},
+          {"positive", "describe", "must be positive"}
+        ])
+
+      # If the judge were consulted this would raise on an unknown provider.
+      assert Attribute.unmet([{"ada", "height", 5}], snapshot(world)) == []
+    end
+  end
 end

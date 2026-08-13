@@ -2,10 +2,11 @@ defmodule Blazie.SpendTest do
   @moduledoc """
   What a run cost, and whether it was allowed to.
 
-  The test that matters is that a budget is checked BEFORE a call. Checked
-  after, it is a bill. And a refused run must write why — an agent that went
-  quiet and one that stopped itself look identical from outside and mean
-  opposite things.
+  This records and does not refuse, deliberately. A run is stopped by a
+  REQUIREMENT it cannot satisfy, never by a ceiling on what it cost — an answer
+  that is right is worth having whatever it took, and a wrong one is not made
+  acceptable by being cheap. So there is no budget to test, and that absence is
+  the design rather than a gap.
   """
   use ExUnit.Case, async: true
 
@@ -35,44 +36,6 @@ defmodule Blazie.SpendTest do
 
     test "an id that never ran has spent nothing", %{world: world} do
       assert Spend.so_far(snapshot(world), "never") == %{in: 0, out: 0}
-    end
-  end
-
-  describe "a budget" do
-    test "lets a run through while there is room", %{world: world} do
-      {:ok, _} = World.append(world, [{"severity", "budget", 1000}])
-      {:ok, _} = World.append(world, Spend.of("severity", %{in: 100, out: 20}, "severity"))
-
-      assert Spend.allowed?(snapshot(world), "severity") == :ok
-    end
-
-    test "refuses one that would go over, and says what against what", %{world: world} do
-      {:ok, _} = World.append(world, [{"severity", "budget", 100}])
-      {:ok, _} = World.append(world, Spend.of("severity", %{in: 90, out: 20}, "severity"))
-
-      assert {:error, refusal} = Spend.allowed?(snapshot(world), "severity")
-      assert refusal.problem == :over_budget
-      assert refusal.repair =~ "110"
-      assert refusal.repair =~ "100"
-    end
-
-    test "no budget means no limit, not a limit of zero", %{world: world} do
-      {:ok, _} = World.append(world, Spend.of("severity", %{in: 999_999, out: 0}, "severity"))
-
-      assert Spend.allowed?(snapshot(world), "severity") == :ok
-    end
-
-    test "a refusal is written, so stopping itself is distinguishable from going quiet", %{
-      world: world
-    } do
-      {:ok, _} = World.append(world, [{"severity", "budget", 10}])
-      {:ok, _} = World.append(world, Spend.of("severity", %{in: 20, out: 0}, "severity"))
-
-      {:error, refusal} = Spend.allowed?(snapshot(world), "severity")
-      {:ok, _} = World.append(world, Spend.refused("severity", refusal, "severity"))
-
-      assert [%{value: why}] = Snapshot.find(snapshot(world), id: "severity", attribute: "refused")
-      assert why =~ "budget"
     end
   end
 

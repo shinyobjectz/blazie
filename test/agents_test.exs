@@ -125,31 +125,4 @@ defmodule Blazie.AgentsTest do
     end
   end
 
-  describe "a budget stops it" do
-    test "an agent over budget refuses itself and writes why", %{world: world} do
-      # A provider that does not exist: if the model were reached this would
-      # raise, so a clean refusal is proof the budget was checked FIRST.
-      {:ok, _} = declare(world, "no_such_provider:whatever")
-      {:ok, _} = World.append(world, Blazie.Spend.seed())
-      {:ok, _} = World.append(world, [{"severity", "budget", 10}])
-      {:ok, _} = World.append(world, Blazie.Spend.of("severity", %{in: 50, out: 0}, "severity"))
-      {:ok, _} = World.append(world, [{"t1", "body", "the server is on fire"}])
-
-      work = Agent.work(snapshot(world), "severity")
-      written = work.(snapshot(world), 1)
-
-      assert [{"severity", "refused", why, "severity"}] = written
-      assert why =~ "budget"
-    end
-
-    test "and under budget it gets as far as the model", %{world: world} do
-      {:ok, _} = declare(world, "no_such_provider:whatever")
-      {:ok, _} = World.append(world, Blazie.Spend.seed())
-      {:ok, _} = World.append(world, [{"severity", "budget", 1_000_000}])
-      {:ok, _} = World.append(world, [{"t1", "body", "the server is on fire"}])
-
-      work = Agent.work(snapshot(world), "severity")
-      assert_raise RuntimeError, ~r/not a provider here/, fn -> work.(snapshot(world), 1) end
-    end
-  end
 end

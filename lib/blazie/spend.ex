@@ -7,14 +7,16 @@ defmodule Blazie.Spend do
   a metrics system that had to be kept in step, and the answer at an old
   snapshot name is still the answer.
 
-  ## A budget is an attribute
+  ## There is no budget here, deliberately
 
-      {"severity", "budget", 100000}
+  This records and does not refuse. A run is stopped by a REQUIREMENT it cannot
+  satisfy, never by a ceiling on what it cost — an answer that is right is worth
+  having whatever it took, and one that is wrong is not made acceptable by being
+  cheap. A token budget decides on the one axis that says nothing about whether
+  the work was any good.
 
-  Checked before a run rather than after, because after is a bill. A refused run
-  writes why it was refused, so an agent that went quiet is distinguishable from
-  one that stopped itself — those look identical from outside and mean opposite
-  things.
+  So this is telemetry. "What did this agent cost last month" is a query over
+  facts; what it may do is decided by `Attribute.unmet/2`.
 
   ## Not reported is not zero
 
@@ -31,8 +33,7 @@ defmodule Blazie.Spend do
   def seed do
     Attribute.define("tokens_in", answers: "integer", cardinality: "many") ++
       Attribute.define("tokens_out", answers: "integer", cardinality: "many") ++
-      Attribute.define("budget", answers: "integer") ++
-      Attribute.define("refused", answers: "any", cardinality: "many")
+      Attribute.define("model", answers: "name", cardinality: "many")
   end
 
   @doc "The facts recording one run's spend."
@@ -53,39 +54,6 @@ defmodule Blazie.Spend do
     %{in: total(snapshot, id, "tokens_in"), out: total(snapshot, id, "tokens_out")}
   end
 
-  @doc """
-  May this run happen?
-
-  `:ok`, or a refusal saying what was spent against what was allowed. Asked
-  before the call — after is a bill.
-  """
-  @spec allowed?(Snapshot.t(), term()) :: :ok | {:error, map()}
-  def allowed?(%Snapshot{} = snapshot, id) do
-    case Snapshot.value(snapshot, id, "budget") do
-      budget when is_integer(budget) ->
-        spent = so_far(snapshot, id)
-        used = spent.in + spent.out
-
-        if used >= budget do
-          {:error,
-           %{
-             problem: :over_budget,
-             repair:
-               "#{inspect(id)} has spent #{used} tokens against a budget of #{budget}. " <>
-                 "Raise `budget` or let it stand — this is the limit working."
-           }}
-        else
-          :ok
-        end
-
-      _ ->
-        :ok
-    end
-  end
-
-  @doc "The fact recording that a run was refused, and why."
-  @spec refused(term(), map(), term()) :: [tuple()]
-  def refused(id, refusal, by), do: [{id, "refused", refusal.repair, by}]
 
   # Every reading, not the latest — `cardinality: "many"` means each run's spend
   # is its own fact, and summing them is what makes the history the account.

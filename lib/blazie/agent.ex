@@ -129,9 +129,18 @@ defmodule Blazie.Agent do
       |> Enum.reject(fn {_watched, value} -> is_nil(value) end)
       |> Enum.map_join("\n", fn {watched, value} -> "#{watched}: #{show(value)}" end)
 
+    # A requirement marked `shown` goes into the ask. The same words are what it
+    # is checked against afterwards, so the instruction cannot drift from the
+    # gate — which is the whole reason they are one fact rather than two.
+    must =
+      case Attribute.instructions(snapshot, field) do
+        [] -> ""
+        rules -> "\nIt must satisfy:\n" <> Enum.map_join(rules, "\n", &("  - " <> &1))
+      end
+
     """
     Give the #{field} for this #{Snapshot.value(snapshot, field, "produces") || "entity"}.
-    #{if described, do: "#{field} is #{described}.", else: ""}
+    #{if described, do: "#{field} is #{described}.", else: ""}#{must}
 
     #{context}
     """
@@ -148,16 +157,7 @@ defmodule Blazie.Agent do
   @spec work(Snapshot.t(), String.t(), keyword()) :: (Snapshot.t(), pos_integer() -> [tuple()])
   def work(%Snapshot{} = declared, field, opts \\ []) do
     fn snapshot, _attempt ->
-      # Asked before anything is called, because after is a bill. A refused run
-      # writes WHY — an agent that went quiet and one that stopped itself look
-      # identical from outside and mean opposite things.
-      case Blazie.Spend.allowed?(snapshot, field) do
-        {:error, refusal} ->
-          Blazie.Spend.refused(field, refusal, field)
-
-        :ok ->
-          ask_for_each(declared, snapshot, field, opts)
-      end
+      ask_for_each(declared, snapshot, field, opts)
     end
   end
 
