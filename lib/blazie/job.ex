@@ -57,8 +57,15 @@ defmodule Blazie.Job do
   end
 
   @doc "Declare a job. Nothing runs."
-  @spec new(term(), (Snapshot.t() -> [assertion()])) :: t()
+  @spec new(term(), (Snapshot.t() -> [assertion()]) | (Snapshot.t(), pos_integer() -> [assertion()])) ::
+          t()
   def new(id, work) when is_function(work, 1), do: %__MODULE__{id: id, work: work}
+
+  # Arity two is the same job, told which attempt this is. A sampled job wants
+  # that — to vary a temperature, or to ask differently after a refusal — and
+  # nothing else about it changes, so it is the same constructor rather than a
+  # second kind of job.
+  def new(id, work) when is_function(work, 2), do: %__MODULE__{id: id, work: work}
 
   @doc """
   The facts that declare a job and its cadence.
@@ -87,7 +94,7 @@ defmodule Blazie.Job do
           {:ok, pos_integer()} | {:failed, pos_integer(), String.t()}
   def run(%__MODULE__{} = job, world, %Snapshot{} = snapshot, now) do
     try do
-      {produced, read} = Snapshot.track_reads(fn -> job.work.(snapshot) end)
+      {produced, read} = Snapshot.track_reads(fn -> work(job, snapshot) end)
       assertions = Enum.map(produced, &stamp(&1, job.id))
 
       # The read set is written, not held. A runner that kept it in memory
@@ -190,6 +197,11 @@ defmodule Blazie.Job do
 
   # A read is a keyword pattern. It goes into a fact as a map, because a fact
   # value crosses a wire and a keyword list does not survive JSON.
+  # An unsampled run is the first attempt, which is what `1` means here.
+  defp work(%__MODULE__{work: work}, snapshot) do
+    if is_function(work, 2), do: work.(snapshot, 1), else: work.(snapshot)
+  end
+
   defp reads(id, read_set) do
     read_set
     |> Enum.uniq()

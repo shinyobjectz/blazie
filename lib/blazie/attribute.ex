@@ -80,6 +80,19 @@ defmodule Blazie.Attribute do
     end)
   end
 
+  @doc """
+  The attributes a requirement is written with.
+
+  `requires` points an attribute at a formula; `source` is the lua that formula
+  runs. Neither is a word — both are data, sitting beside `answers` and
+  `cardinality` on the same shelf.
+  """
+  @spec requires_seed() :: [{String.t(), String.t(), term()}]
+  def requires_seed do
+    define("requires", answers: "name", cardinality: "many") ++
+      define("source", answers: "any")
+  end
+
   @doc "The attributes that define attributes. Everything else is built from these."
   @spec root() :: [String.t()]
   def root, do: @root
@@ -170,6 +183,113 @@ defmodule Blazie.Attribute do
       undefined -> {:error, Enum.map(undefined, &refusal/1)}
     end
   end
+
+  @doc """
+  What an attribute requires of its values, beyond its shape.
+
+  A requirement is a **formula** — Lua, pure, no clock and no network — attached
+  to an attribute by an ordinary fact:
+
+      {"height", "requires", "positive"}
+      {"positive", "is", "formula"}
+      {"positive", "source", "return value > 0"}
+
+  No new vocabulary. `answers:` says what shape a value has and this says what
+  must be true of it, which is the same question asked one level deeper.
+
+  The chunk is handed `value`, and answers `true`, `false`, or a string — where
+  a string is the reason, because a requirement that can say WHY it refused is
+  worth more than one that can only say no. That is the same rule as every other
+  boundary here: reject with the repair attached.
+  """
+  @spec requirements(Snapshot.t(), String.t()) :: [String.t()]
+  def requirements(%Snapshot{} = snapshot, attribute) do
+    snapshot
+    |> Snapshot.find(id: attribute, attribute: "requires")
+    |> Enum.map(& &1.value)
+    |> Enum.uniq()
+  end
+
+  @doc """
+  Which requirements these assertions fail, and why.
+
+  Returns `[]` when everything holds. Checked BEFORE anything is written, which
+  is what lets a generative job sample again rather than write something wrong
+  and correct it afterwards — a correction is cheap here, but a wrong answer
+  that was never checked is not a correction, it is a lie with a timestamp.
+  """
+  @spec unmet([tuple()], Snapshot.t()) :: [map()]
+  def unmet(assertions, %Snapshot{} = snapshot) do
+    for assertion <- assertions,
+        {id, attribute, value} <- [three(assertion)],
+        requirement <- requirements(snapshot, attribute),
+        result = judge(requirement, value, snapshot),
+        result != :ok,
+        do: %{
+          id: id,
+          attribute: attribute,
+          requirement: requirement,
+          problem: :unmet,
+          repair: reason(result, requirement, attribute)
+        }
+  end
+
+  defp three({id, attribute, value}), do: {id, attribute, value}
+  defp three({id, attribute, value, _by}), do: {id, attribute, value}
+
+  # The chunk is a formula, so it runs in the formula world: a frozen clock, no
+  # network, and a deadline. A requirement that could reach outside would make
+  # "does this hold" depend on when you asked.
+  defp judge(requirement, value, snapshot) do
+    case Snapshot.value(snapshot, requirement, "source") do
+      nil ->
+        {:missing, requirement}
+
+      source when is_binary(source) ->
+        case Blazie.Lua.Binding.run(bind(value) <> source, snapshot, as: :formula) do
+          {:ok, true, _wrote} -> :ok
+          {:ok, false, _wrote} -> :refused
+          {:ok, nil, _wrote} -> :refused
+          {:ok, why, _wrote} when is_binary(why) -> {:because, why}
+          {:ok, _other, _wrote} -> :ok
+          {:error, refusal} -> {:broken, refusal}
+        end
+
+      _other ->
+        {:missing, requirement}
+    end
+  end
+
+  # Set as a real global, so `_G`'s metatable never sees the name and it stays a
+  # value rather than becoming an empty entity.
+  defp bind(value), do: "value = " <> literal(value) <> "\n"
+
+  defp literal(value) when is_number(value), do: to_string(value)
+  defp literal(value) when is_boolean(value), do: to_string(value)
+  defp literal(nil), do: "nil"
+
+  defp literal(value) when is_binary(value) do
+    escaped = value |> String.replace("\\", "\\\\") |> String.replace("'", "\\'")
+    "'" <> escaped <> "'"
+  end
+
+  # Anything else — a symbol, a blob, a table — is handed over as nil rather
+  # than as a broken literal. A requirement that wants one of those wants a
+  # formula over the world, not a predicate over a scalar.
+  defp literal(_value), do: "nil"
+
+  defp reason(:refused, requirement, attribute),
+    do: "#{inspect(attribute)} requires #{inspect(requirement)}, and this value does not satisfy it."
+
+  defp reason({:because, why}, requirement, _attribute), do: "#{inspect(requirement)}: #{why}"
+
+  defp reason({:missing, requirement}, _r, attribute),
+    do:
+      "#{inspect(attribute)} requires #{inspect(requirement)}, which has no `source`. " <>
+        "Write the lua it should run, or drop the requirement."
+
+  defp reason({:broken, refusal}, requirement, _attribute),
+    do: "#{inspect(requirement)} did not run: #{Map.get(refusal, :repair, inspect(refusal))}"
 
   defp declared_in(assertions) do
     for {id, @is, "attribute"} <- assertions, into: MapSet.new(), do: id
