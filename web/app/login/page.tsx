@@ -46,8 +46,8 @@ export default function Login() {
 
           <p className="mx-auto mt-5 max-w-sm text-balance text-sm leading-relaxed text-white/70">
             github says who you are. what you may read is which ledgers this
-            caller was granted — a list, not a rule, and you can see it once
-            you are in.
+            caller was granted — a list, not a rule, and you can see it once you
+            are in.
           </p>
 
           <a
@@ -59,8 +59,8 @@ export default function Login() {
           </a>
 
           <p className="mt-6 text-xs leading-relaxed text-white/45">
-            read:user only. blazie records the login your token was minted
-            under and nothing else about the account.
+            read:user only. blazie records the login your token was minted under
+            and nothing else about the account.
           </p>
 
           <p className="font-mono mt-10 text-xs text-white/35">

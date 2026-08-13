@@ -49,7 +49,9 @@ export function Copyable({
       <span
         className={cn(
           "shrink-0 text-xs transition-colors",
-          copied ? "text-spark" : "text-muted-foreground group-hover:text-white/70",
+          copied
+            ? "text-spark"
+            : "text-muted-foreground group-hover:text-white/70",
         )}
       >
         {copied ? "copied" : "copy"}

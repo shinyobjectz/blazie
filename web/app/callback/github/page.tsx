@@ -10,19 +10,14 @@ import { Wordmark } from "@/components/ui/wordmark"
 import { Refusal, authGithub, storeToken } from "@/lib/blazie"
 
 /**
- * Where github lands. This is a static page — the code is read off the URL in
- * the browser and traded for a token there too, because there is no server in
- * this deployment to trade it on the page's behalf.
- *
- * The search string is read from `window.location` rather than
- * `useSearchParams` so the route stays a plain static export with no CSR
- * bailout, and so it works whether github's redirect landed on
- * `/callback/github` or the trailing-slash form the host redirects it to.
- */
-/**
  * Read the code off the URL and trade it. Every way this can fail is a refusal
- * with a repair, including the two github itself causes, so the page has one
- * failure path rather than three.
+ * carrying a repair, including the two github itself causes, so the page has
+ * one failure path rather than three.
+ *
+ * The search string comes from `window.location` rather than
+ * `useSearchParams` so the route stays a plain static export with no CSR
+ * bailout, and so it reads the code whether github's redirect landed on
+ * `/callback/github` or on the trailing-slash form the host redirects it to.
  */
 async function exchange(): Promise<string> {
   const params = new URLSearchParams(window.location.search)
@@ -51,6 +46,11 @@ async function exchange(): Promise<string> {
   return login
 }
 
+/**
+ * Where github lands. This is a static page — the code is read off the URL in
+ * the browser and traded for a token there too, because there is no server in
+ * this deployment to trade it on the page's behalf.
+ */
 export default function GithubCallback() {
   const router = useRouter()
   const [error, setError] = useState<unknown>(null)
@@ -90,7 +90,10 @@ export default function GithubCallback() {
               <h1 className="mb-5 text-2xl font-medium tracking-tight text-white">
                 that sign-in did not complete
               </h1>
-              <RefusalNote error={error} className="bg-black/40 backdrop-blur" />
+              <RefusalNote
+                error={error}
+                className="bg-black/40 backdrop-blur"
+              />
               <Link
                 href="/login"
                 className="mt-6 inline-block text-sm text-white underline decoration-white/30 underline-offset-4 transition-colors hover:decoration-white"
@@ -101,7 +104,9 @@ export default function GithubCallback() {
           ) : (
             <div className="text-center">
               <h1 className="text-2xl font-medium tracking-tight text-white">
-                {login ? `signed in as ${login}` : "trading the code for a token"}
+                {login
+                  ? `signed in as ${login}`
+                  : "trading the code for a token"}
               </h1>
               <p className="font-mono mt-4 text-sm text-muted-foreground">
                 {login ? "opening the console…" : "POST /auth/github"}

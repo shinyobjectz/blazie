@@ -32,6 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# Public build values only. NEXT_PUBLIC_* ends up in the bundle by
+# definition, so nothing secret can live here — and the Cloudflare build
+# needs them, so they are committed deliberately.
+!.env
 
 # vercel
 .vercel

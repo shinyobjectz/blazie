@@ -37,7 +37,10 @@ const panels: Panel[] = [
     blurb: "one reading per cadence. history is just the older facts.",
     read: (facts) => [
       { label: "memory", value: bytes(latestNumber(facts, "memory_bytes")) },
-      { label: "open ledgers", value: count(latestNumber(facts, "open_ledgers")) },
+      {
+        label: "open ledgers",
+        value: count(latestNumber(facts, "open_ledgers")),
+      },
       { label: "processes", value: count(latestNumber(facts, "processes")) },
     ],
   },
@@ -48,7 +51,10 @@ const panels: Panel[] = [
     blurb: "the last run's report, written as facts by the job that ran it.",
     read: (facts) => [
       { label: "copied", value: bytes(latestNumber(facts, "copied_bytes")) },
-      { label: "held ledgers", value: count(latestNumber(facts, "held_ledgers")) },
+      {
+        label: "held ledgers",
+        value: count(latestNumber(facts, "held_ledgers")),
+      },
     ],
   },
   {
@@ -100,24 +106,43 @@ function HealthPanel({ panel, granted }: { panel: Panel; granted: boolean }) {
   const [name, setName] = useState<SnapshotName | null>(null)
   const [error, setError] = useState<unknown>(null)
 
-  const load = useCallback(() => {
-    setError(null)
-    setReadings(null)
-
-    // Each panel opens its own ledger. Opening all three together would mean
-    // one ungranted ledger blanking the other two.
-    open([panel.ledger])
-      .then(async (opened) => {
-        const facts = await ask(opened, { id: panel.id })
-        setName(opened)
-        setReadings(panel.read(facts))
-      })
-      .catch(setError)
+  // Each panel opens its own ledger. Opening all three together would mean one
+  // ungranted ledger blanking the other two.
+  const read = useCallback(async () => {
+    const opened = await open([panel.ledger])
+    const facts = await ask(opened, { id: panel.id })
+    return { opened, readings: panel.read(facts) }
   }, [panel])
 
   useEffect(() => {
-    if (granted) load()
-  }, [granted, load])
+    if (!granted) return
+
+    let live = true
+    read()
+      .then((found) => {
+        if (!live) return
+        setName(found.opened)
+        setReadings(found.readings)
+      })
+      .catch((thrown) => {
+        if (live) setError(thrown)
+      })
+
+    return () => {
+      live = false
+    }
+  }, [granted, read])
+
+  const retry = useCallback(() => {
+    setError(null)
+    setReadings(null)
+    read()
+      .then((found) => {
+        setName(found.opened)
+        setReadings(found.readings)
+      })
+      .catch(setError)
+  }, [read])
 
   return (
     <div className="border-l-2 border-flame/50 pl-5">
@@ -136,7 +161,11 @@ function HealthPanel({ panel, granted }: { panel: Panel; granted: boolean }) {
           you can raise from here.
         </p>
       ) : error ? (
-        <RefusalNote error={error} className="mt-4 -ml-5 border-l-0 pl-5" retry={load} />
+        <RefusalNote
+          error={error}
+          className="mt-4 -ml-5 border-l-0 pl-5"
+          retry={retry}
+        />
       ) : !readings ? (
         <p className="font-mono mt-4 text-sm text-muted-foreground">reading…</p>
       ) : (
@@ -147,7 +176,9 @@ function HealthPanel({ panel, granted }: { panel: Panel; granted: boolean }) {
                 <dt className="w-28 shrink-0 text-sm text-muted-foreground">
                   {reading.label}
                 </dt>
-                <dd className="font-mono text-sm text-white">{reading.value}</dd>
+                <dd className="font-mono text-sm text-white">
+                  {reading.value}
+                </dd>
               </div>
             ))}
           </dl>

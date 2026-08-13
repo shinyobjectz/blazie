@@ -9,15 +9,17 @@ export function showValue(value: Value): string {
   if (value === undefined) return "—"
 
   if (typeof value === "object" && value !== null && "$symbol" in value) {
-    const symbol = (value as { $symbol?: { space?: string; values?: unknown[] } })
-      .$symbol
+    const symbol = (
+      value as { $symbol?: { space?: string; values?: unknown[] } }
+    ).$symbol
     const space = symbol?.space ?? "?"
     const width = Array.isArray(symbol?.values) ? symbol.values.length : 0
     return `$symbol ${space} · ${width}d`
   }
 
   if (typeof value === "string") return value
-  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value)
   return JSON.stringify(value)
 }
 
