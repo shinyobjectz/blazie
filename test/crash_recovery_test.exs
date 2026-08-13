@@ -39,7 +39,7 @@ defmodule LazyRiver.CrashRecoveryTest do
     """
   end
 
-  defp run_until_killed(dir, receipts, millis) do
+  defp run_until_killed(dir, receipts, _millis) do
     script = Path.join(dir, "writer.exs")
     File.write!(script, writer_script(dir, receipts))
 
@@ -52,7 +52,12 @@ defmodule LazyRiver.CrashRecoveryTest do
         env: [{~c"MIX_ENV", ~c"dev"}]
       ])
 
-    Process.sleep(millis)
+    # Wait for the writer to actually be writing rather than for a fixed
+    # moment. CI found this: a machine that compiles the project first had not
+    # started in the two and a half seconds a laptop needed, so the kill landed
+    # on a process that had committed nothing and the test read that as loss.
+    started_with = length(committed(receipts))
+    await_progress(receipts, started_with + 20, 240)
 
     # SIGKILL: no chance to flush, close, or checkpoint. The worst case.
     {:os_pid, os_pid} = Port.info(port, :os_pid)
@@ -66,6 +71,17 @@ defmodule LazyRiver.CrashRecoveryTest do
     end
 
     Process.sleep(200)
+  end
+
+  defp await_progress(_receipts, _target, 0), do: flunk("the writer never got going")
+
+  defp await_progress(receipts, target, tries) do
+    if length(committed(receipts)) >= target do
+      :ok
+    else
+      Process.sleep(250)
+      await_progress(receipts, target, tries - 1)
+    end
   end
 
   defp committed(receipts) do
@@ -122,8 +138,8 @@ defmodule LazyRiver.CrashRecoveryTest do
 
       recovered = survivors(ctx.dir) |> Enum.map(& &1.tx) |> Enum.uniq() |> Enum.sort()
 
-      assert recovered == Enum.to_list(1..length(recovered)),
-             "holes in the recovered log"
+      assert recovered != []
+      assert recovered == Enum.to_list(1..length(recovered)//1), "holes in the recovered log"
     end
   end
 

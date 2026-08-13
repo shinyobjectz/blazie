@@ -41,6 +41,10 @@ jobs:
 
       - run: mix test
 
+      # The crash tests spawn a real node in dev. Compile it first so the kill
+      # lands on a process that is writing rather than one still starting.
+      - run: MIX_ENV=dev mix compile
+
       # Slow and real: a process killed with SIGKILL mid-write, three times.
       # Excluded from the ordinary run, never excluded from the gate.
       - run: mix test --include crash --only crash
