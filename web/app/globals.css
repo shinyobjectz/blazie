@@ -4,6 +4,8 @@
    flame both assume black behind them, and a database console is a thing you
    look at for a long time. */
 :root {
+  color-scheme: dark;
+
   --background: #000000;
   --foreground: #ededed;
 

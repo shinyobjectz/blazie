@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Pixelify_Sans } from "next/font/google";
 import "./globals.css";
 
@@ -38,6 +38,18 @@ export const metadata: Metadata = {
     siteName: "blazie",
     images: ["/brand/blazie-mark.png"],
   },
+};
+
+/**
+ * blazie is dark-only, and saying so is what stops a browser painting light
+ * form controls and scrollbars into it. It also tells extensions that invert
+ * pages that there is nothing here to invert — Dark Reader rewrites every fill
+ * and stroke before React hydrates, which surfaces as a hydration mismatch on a
+ * page that is in fact fine.
+ */
+export const viewport: Viewport = {
+  colorScheme: "dark",
+  themeColor: "#000000",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

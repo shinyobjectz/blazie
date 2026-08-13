@@ -1,7 +1,8 @@
+import { Bird } from "lucide-react";
 import Link from "next/link";
 
 import { CitableSection } from "@/components/ui/citable-section";
-import { CopyButton } from "@/components/ui/copy-button";
+import { GithubMark } from "@/components/ui/github-mark";
 import { GradientBackground } from "@/components/ui/paper-design-shader-background";
 import { IllustrationCardGrid } from "@/components/ui/illustration-card-grid";
 import { OrganicButton } from "@/components/ui/organic-button";
@@ -62,15 +63,28 @@ export default function Home() {
           </p>
 
           <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-            <OrganicButton href="/login" label="open a cluster" size="lg" />
+            {/*
+              GitHub sign-in *is* the waitlist. `Blazie.Identity.admit/1` refuses
+              every login not on the allowlist, so signing in puts a name in
+              front of us and grants nothing — there is no second form to build
+              and nothing to keep in step with it.
+            */}
+            <OrganicButton href="/login" label="join waitlist" size="lg" />
 
-            <div className="flex items-center gap-1 rounded-md border border-white/20 bg-black/50 pl-4 pr-1 backdrop-blur">
-              <code className="font-mono py-3 text-sm text-white/80">
-                brew install blazie
-              </code>
-              <CopyButton value="brew install blazie" />
-            </div>
+            <OrganicButton
+              href="https://github.com/shinyobjectz/blazie"
+              label="github"
+              size="lg"
+              variantColor="quiet"
+              icon={<GithubMark className="organic-icon" />}
+            />
           </div>
+
+          <p className="mt-8 inline-flex items-center gap-2 text-sm text-white/45">
+            <Bird className="size-4 shrink-0 text-flame" strokeWidth={1.75} />
+            canary — pre-release, and the shape still moves. read the source
+            before you depend on it.
+          </p>
         </section>
       </main>
 
