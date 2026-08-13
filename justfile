@@ -26,7 +26,14 @@ _default:
     @just --list
 
 # What must pass before a commit.
-check: test onto-scan
+# What must pass before a commit — and the same things CI asks, in the same
+# order. `format` was missing, so a green `just check` never implied a green CI:
+# the build had been failing on formatting for long enough that nobody was
+# reading it, which is how a gate stops being one.
+check: format-check test onto-scan
+
+format-check:
+    mix format --check-formatted
 
 test:
     mix test

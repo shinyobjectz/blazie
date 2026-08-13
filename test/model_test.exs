@@ -26,7 +26,8 @@ defmodule Blazie.AgentDeclarationTest do
 
   describe "a model reference" do
     test "is one string, parsed" do
-      assert {:ok, %Reference{provider: :openai, name: "gpt-4o-mini"}} = Reference.from("openai:gpt-4o-mini")
+      assert {:ok, %Reference{provider: :openai, name: "gpt-4o-mini"}} =
+               Reference.from("openai:gpt-4o-mini")
     end
 
     test "an unknown provider says which are known" do
@@ -37,13 +38,15 @@ defmodule Blazie.AgentDeclarationTest do
     test "a provider name from outside cannot mint an atom" do
       # `to_existing_atom` guards this: an atom is never collected, so a
       # provider taken from a request would be a way to exhaust the table.
-      assert {:error, _} = Reference.from("definitely_not_a_provider_#{System.unique_integer()}:x")
+      assert {:error, _} =
+               Reference.from("definitely_not_a_provider_#{System.unique_integer()}:x")
     end
   end
 
   describe "a declaration becomes the shape asked for" do
     test "a bare answers is wrapped, because a provider wants an object" do
-      assert %{"properties" => %{"value" => %{"type" => "integer"}}} = Schema.json(answers: "integer")
+      assert %{"properties" => %{"value" => %{"type" => "integer"}}} =
+               Schema.json(answers: "integer")
     end
 
     test "the four shapes blazie can decide map across" do

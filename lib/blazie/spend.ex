@@ -54,7 +54,6 @@ defmodule Blazie.Spend do
     %{in: total(snapshot, id, "tokens_in"), out: total(snapshot, id, "tokens_out")}
   end
 
-
   # Every reading, not the latest — `cardinality: "many"` means each run's spend
   # is its own fact, and summing them is what makes the history the account.
   defp total(snapshot, id, attribute) do

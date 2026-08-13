@@ -67,7 +67,12 @@ defmodule Blazie.AgentsTest do
       {:ok, _} =
         World.append(
           world,
-          Agent.declare("mood", produces: "ticket", watches: ["body"], asks: "openai:gpt-4o-mini", answers: "name")
+          Agent.declare("mood",
+            produces: "ticket",
+            watches: ["body"],
+            asks: "openai:gpt-4o-mini",
+            answers: "name"
+          )
         )
 
       assert length(Agents.jobs(snapshot(world))) == 2
@@ -96,7 +101,10 @@ defmodule Blazie.AgentsTest do
       {:ok, pid} = Agents.start_link(world: name, every: 3600)
       on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
 
-      assert_raise ArgumentError, fn -> String.to_existing_atom("Elixir.Blazie.Agents.#{name}") end
+      assert_raise ArgumentError, fn ->
+        String.to_existing_atom("Elixir.Blazie.Agents.#{name}")
+      end
+
       assert match?({:via, Registry, _}, Agents.runner(name))
     end
   end
@@ -124,5 +132,4 @@ defmodule Blazie.AgentsTest do
       end
     end
   end
-
 end

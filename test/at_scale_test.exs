@@ -44,7 +44,8 @@ defmodule Blazie.AtScaleTest do
     test "counted", %{world: world} do
       snapshot = fill(world, @many)
 
-      assert {:ok, counted, _} = run("local n = 0\nfor e in each {} do n = n + 1 end\nreturn n", snapshot)
+      assert {:ok, counted, _} =
+               run("local n = 0\nfor e in each {} do n = n + 1 end\nreturn n", snapshot)
 
       # The seeded attributes are entities too, so this is at least what was
       # written rather than exactly it.
@@ -86,7 +87,10 @@ defmodule Blazie.AtScaleTest do
       snapshot = fill(world, @many)
 
       assert {:ok, ["e7777"], _} =
-               run("local out = {}\nfor e in each { n = 7777 } do out[#out+1] = e.id end\nreturn out", snapshot)
+               run(
+                 "local out = {}\nfor e in each { n = 7777 } do out[#out+1] = e.id end\nreturn out",
+                 snapshot
+               )
     end
   end
 
@@ -134,7 +138,8 @@ defmodule Blazie.AtScaleTest do
       snapshot = fill(world, @many)
 
       {:ok, _value, _wrote, read} =
-        Blazie.Lua.collect("local n = 0\nfor e in each {} do if e.n then n = n + e.n end end\nreturn n",
+        Blazie.Lua.collect(
+          "local n = 0\nfor e in each {} do if e.n then n = n + e.n end end\nreturn n",
           snapshot: snapshot,
           deadline: 60_000
         )
@@ -149,7 +154,8 @@ defmodule Blazie.AtScaleTest do
       snapshot = fill(world, @many)
 
       {:ok, _value, _wrote, read} =
-        Blazie.Lua.collect("local n = 0\nfor e in each {} do if e.n then n = n + e.n end end\nreturn n",
+        Blazie.Lua.collect(
+          "local n = 0\nfor e in each {} do if e.n then n = n + e.n end end\nreturn n",
           snapshot: snapshot,
           deadline: 60_000
         )
@@ -176,7 +182,8 @@ defmodule Blazie.AtScaleTest do
 
       snapshot = Snapshot.open([world])
 
-      assert {:ok, %{"space" => "potion_256", "dimensions" => 3}, _} = run("return doc.vec", snapshot)
+      assert {:ok, %{"space" => "potion_256", "dimensions" => 3}, _} =
+               run("return doc.vec", snapshot)
     end
 
     test "and the same when listed rather than read", %{world: world} do
@@ -200,7 +207,8 @@ defmodule Blazie.AtScaleTest do
       return out
       """
 
-      assert {:ok, %{"vec" => %{"space" => "potion_256", "dimensions" => 3}}, _} = run(source, snapshot)
+      assert {:ok, %{"vec" => %{"space" => "potion_256", "dimensions" => 3}}, _} =
+               run(source, snapshot)
     end
 
     test "everything a walk returns can be encoded", %{world: world} do

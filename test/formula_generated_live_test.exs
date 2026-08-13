@@ -39,7 +39,10 @@ defmodule Blazie.Formula.GeneratedLiveTest do
   end
 
   defp declare(world, examples) do
-    World.append(world, Generated.declare("bands", produces: "band", given: ["age"], examples: examples))
+    World.append(
+      world,
+      Generated.declare("bands", produces: "band", given: ["age"], examples: examples)
+    )
   end
 
   test "three examples, no source — a model writes one and it evaluates", %{world: world} do
@@ -64,7 +67,8 @@ defmodule Blazie.Formula.GeneratedLiveTest do
     assert is_binary(source), "no source was adopted in three attempts"
 
     # It names what wrote it, so `at(42)` can say which version made an answer.
-    assert [%{by: "author"} | _] = Snapshot.find(snapshot(world), id: "bands", attribute: "source")
+    assert [%{by: "author"} | _] =
+             Snapshot.find(snapshot(world), id: "bands", attribute: "source")
 
     # And it works on real facts, not just on its examples.
     {:ok, _} = World.append(world, [{"ada", "age", 41}, {"kid", "age", 9}])
@@ -95,7 +99,9 @@ defmodule Blazie.Formula.GeneratedLiveTest do
     # A band nobody demonstrated. The working program cannot satisfy it, so the
     # formula wants a body again.
     {:ok, _} =
-      World.append(world, [{"bands", "example", %{"given" => %{"age" => 70}, "expect" => "elder"}}])
+      World.append(world, [
+        {"bands", "example", %{"given" => %{"age" => 70}, "expect" => "elder"}}
+      ])
 
     assert Generated.wanted(snapshot(world)) == ["bands"]
 
@@ -106,6 +112,10 @@ defmodule Blazie.Formula.GeneratedLiveTest do
 
     # Whatever happened, the source in the world satisfies every example — a
     # failed attempt writes a rejection and leaves the working program alone.
-    assert Generated.verify(snapshot(world), "bands", Snapshot.value(snapshot(world), "bands", "source")) == :ok
+    assert Generated.verify(
+             snapshot(world),
+             "bands",
+             Snapshot.value(snapshot(world), "bands", "source")
+           ) == :ok
   end
 end

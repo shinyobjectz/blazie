@@ -45,7 +45,8 @@ defmodule Blazie.Surface.WatchChannelTest do
       assert {:ok, %{"watching" => watching}, _socket} =
                subscribe_and_join(ctx.socket, "watch:heights", %{
                  "worlds" => [ctx.name],
-                 "source" => "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
+                 "source" =>
+                   "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
                })
 
       assert watching == [ctx.name]
@@ -77,7 +78,8 @@ defmodule Blazie.Surface.WatchChannelTest do
       {:ok, _, socket} =
         subscribe_and_join(ctx.socket, "watch:heights", %{
           "worlds" => [ctx.name],
-          "source" => "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
+          "source" =>
+            "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
         })
 
       %{joined: socket}
@@ -96,7 +98,9 @@ defmodule Blazie.Surface.WatchChannelTest do
       {:ok, _} = World.append(ctx.world, [{42, "height", 180}])
       assert_push("answer", %{"name" => name, "value" => pushed}, 2_000)
 
-      source = "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
+      source =
+        "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
+
       reopened = Snapshot.reopen(%{ctx.name => name[ctx.name]})
 
       assert {:ok, ^pushed, _} = Blazie.Lua.Binding.run(source, reopened)
@@ -122,7 +126,12 @@ defmodule Blazie.Surface.WatchChannelTest do
 
       # The name is the contract: running it again gives the same answer.
       reopened = Snapshot.reopen(%{ctx.name => name[ctx.name]})
-      assert {:ok, ^value, _} = Blazie.Lua.Binding.run("local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out", reopened)
+
+      assert {:ok, ^value, _} =
+               Blazie.Lua.Binding.run(
+                 "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out",
+                 reopened
+               )
     end
 
     test "a write outside the question is silent", ctx do
@@ -151,7 +160,8 @@ defmodule Blazie.Surface.WatchChannelTest do
       {:ok, _, socket} =
         subscribe_and_join(ctx.socket, "watch:heights", %{
           "worlds" => [ctx.name],
-          "source" => "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
+          "source" =>
+            "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
         })
 
       before = Blazie.Subscription.count()

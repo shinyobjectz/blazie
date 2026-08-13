@@ -52,3 +52,17 @@ enforced_kinds = ["core", "inner"]
 # one thing wearing one name rather than two. `Lua.World` the module is the
 # word spelled as a module, which is what a module for a noun should be called.
 allow = ["job", "open", "write", "watch", "ask", "name", "value", "world"]
+
+[gen]
+# The rendered words skill does not fit the Agent Skills disclosure budget of
+# 24,000 characters, and the decision recorded here is that it should not be
+# made to. Seventeen words, each carrying its definition, its one-line test and
+# the reasoning that settled it — the reasoning is the part that stops a word
+# drifting back to what it displaced, and it is the first thing that would go to
+# save characters.
+#
+# So the budget is raised and the gap is said on every lint rather than being
+# quietly absent. The number is not free: it is ~6k tokens of every agent's
+# context, spent on knowing what the words mean before writing any of them.
+body_cap = 28000
+body_cap_why = "seventeen words, each carrying the reasoning that settled it — and the reasoning is what stops a word drifting back to whatever it displaced, so it is exactly the wrong thing to cut for characters"

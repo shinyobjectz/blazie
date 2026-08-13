@@ -39,7 +39,9 @@ defmodule Blazie.FormulaSourceTest do
       {:ok, _} =
         declare(world, "adults", "for p in each { age = true } do p.adult = p.age >= 18 end")
 
-      formula = Formula.of_source("adults", "for p in each { age = true } do p.adult = p.age >= 18 end")
+      formula =
+        Formula.of_source("adults", "for p in each { age = true } do p.adult = p.age >= 18 end")
+
       {assertions, _read} = Formula.run(formula, snapshot(world))
 
       assert {"ada", "adult", true, "adults"} in assertions
@@ -100,7 +102,9 @@ defmodule Blazie.FormulaSourceTest do
   describe "the engine runs one" do
     test "and caches it by snapshot name", %{world: world} do
       {:ok, _} = World.append(world, [{"ada", "age", 41}])
-      {:ok, _} = declare(world, "adults", "for p in each { age = true } do p.adult = p.age >= 18 end")
+
+      {:ok, _} =
+        declare(world, "adults", "for p in each { age = true } do p.adult = p.age >= 18 end")
 
       {:ok, engine} = Engine.start_link([])
       [formula] = Formula.declared(snapshot(world))

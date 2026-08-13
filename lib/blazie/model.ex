@@ -94,7 +94,13 @@ defmodule Blazie.Model do
   Returns the answer and every call made, so a trace is something the caller can
   write down rather than reconstruct.
   """
-  @spec converse(String.t(), String.t(), [map()], (map() -> {:ok, map()} | {:error, map()}), keyword()) ::
+  @spec converse(
+          String.t(),
+          String.t(),
+          [map()],
+          (map() -> {:ok, map()} | {:error, map()}),
+          keyword()
+        ) ::
           {:ok, String.t(), [map()]} | {:error, refusal()}
   def converse(model, prompt, tools, run_tool, opts \\ []) do
     with {:ok, %Reference{} = reference} <- Reference.from(model) do
@@ -132,7 +138,15 @@ defmodule Blazie.Model do
             {[{call, answered} | results], [%{call: call, answered: answered} | made]}
           end)
 
-        turn(reference, messages ++ replies(calls, Enum.reverse(results)), tools, run, opts, left - 1, made)
+        turn(
+          reference,
+          messages ++ replies(calls, Enum.reverse(results)),
+          tools,
+          run,
+          opts,
+          left - 1,
+          made
+        )
     end
   end
 

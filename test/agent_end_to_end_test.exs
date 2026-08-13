@@ -24,7 +24,9 @@ defmodule Blazie.Model.AgentEndToEndTest do
     {:ok, _} =
       World.append(
         world,
-        Attribute.seed() ++ Attribute.requires_seed() ++ Job.seed() ++
+        Attribute.seed() ++
+          Attribute.requires_seed() ++
+          Job.seed() ++
           Generative.seed() ++ Agent.seed()
       )
 
@@ -123,7 +125,9 @@ defmodule Blazie.Model.AgentEndToEndTest do
     assert Snapshot.value(snapshot(world), "t1", "severity") == "high"
 
     # The question no prompt library can answer: what did it think on Tuesday?
-    at_the_time = Snapshot.reopen(Map.new(Snapshot.name(snapshot(world)), fn {w, _} -> {w, before} end))
+    at_the_time =
+      Snapshot.reopen(Map.new(Snapshot.name(snapshot(world)), fn {w, _} -> {w, before} end))
+
     assert Snapshot.value(at_the_time, "t1", "severity") == "low"
   end
 

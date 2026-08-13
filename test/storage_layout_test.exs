@@ -35,5 +35,4 @@ defmodule Blazie.StorageLayoutTest do
     # not migrate a thing; it would orphan every backup anybody has taken.
     assert Backup.ledgers_prefix() == "ledgers/"
   end
-
 end

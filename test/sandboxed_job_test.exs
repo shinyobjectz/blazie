@@ -41,7 +41,9 @@ defmodule Blazie.SandboxedJobTest do
     {:ok, _} =
       World.append(
         world,
-        Attribute.seed() ++ Job.seed() ++ Blazie.Sandbox.seed() ++
+        Attribute.seed() ++
+          Job.seed() ++
+          Blazie.Sandbox.seed() ++
           Attribute.define("seen", answers: "integer", cardinality: "many")
       )
 
@@ -60,7 +62,8 @@ defmodule Blazie.SandboxedJobTest do
     assert {:ok, _tx} = Job.run(job, ctx.world, snapshot(ctx.world), 1000)
 
     # The guest's assertion landed, naming the job rather than the guest.
-    assert [%{value: 1, by: "agent"}] = Snapshot.find(snapshot(ctx.world), id: "ada", attribute: "seen")
+    assert [%{value: 1, by: "agent"}] =
+             Snapshot.find(snapshot(ctx.world), id: "ada", attribute: "seen")
   end
 
   test "records what the run spent", ctx do

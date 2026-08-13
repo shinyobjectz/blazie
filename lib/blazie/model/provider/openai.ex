@@ -132,15 +132,17 @@ defmodule Blazie.Model.Provider.OpenAI do
     end
   end
 
-  defp text(%{"choices" => [%{"message" => %{"content" => content}} | _]}) when is_binary(content),
-    do: {:ok, content}
+  defp text(%{"choices" => [%{"message" => %{"content" => content}} | _]})
+       when is_binary(content),
+       do: {:ok, content}
 
   defp text(answered),
     do:
       {:error,
        %{
          problem: :no_answer,
-         repair: "The provider answered without a message: #{inspect(answered) |> String.slice(0, 200)}"
+         repair:
+           "The provider answered without a message: #{inspect(answered) |> String.slice(0, 200)}"
        }}
 
   # Sorted by index, because the order embeddings come back in is not promised
@@ -158,7 +160,8 @@ defmodule Blazie.Model.Provider.OpenAI do
       {:error,
        %{
          problem: :no_vectors,
-         repair: "The provider answered without embeddings: #{inspect(answered) |> String.slice(0, 200)}"
+         repair:
+           "The provider answered without embeddings: #{inspect(answered) |> String.slice(0, 200)}"
        }}
 
   defp url(opts, path), do: Keyword.get(opts, :base_url, @base) <> path

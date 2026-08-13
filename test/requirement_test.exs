@@ -179,7 +179,8 @@ defmodule Blazie.RequirementTest do
 
   describe "a requirement with no predicate" do
     test "and no judge says so rather than passing", %{world: world} do
-      {:ok, _} = World.append(world, [{"height", "requires", "vague"}, {"vague", "is", "formula"}])
+      {:ok, _} =
+        World.append(world, [{"height", "requires", "vague"}, {"vague", "is", "formula"}])
 
       assert [refusal] = Attribute.unmet([{"ada", "height", 1}], snapshot(world))
       assert refusal.repair =~ "no `source`"

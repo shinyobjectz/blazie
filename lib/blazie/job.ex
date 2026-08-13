@@ -57,7 +57,10 @@ defmodule Blazie.Job do
   end
 
   @doc "Declare a job. Nothing runs."
-  @spec new(term(), (Snapshot.t() -> [assertion()]) | (Snapshot.t(), pos_integer() -> [assertion()])) ::
+  @spec new(
+          term(),
+          (Snapshot.t() -> [assertion()]) | (Snapshot.t(), pos_integer() -> [assertion()])
+        ) ::
           t()
   def new(id, work) when is_function(work, 1), do: %__MODULE__{id: id, work: work}
 
@@ -221,7 +224,10 @@ defmodule Blazie.Job do
     %__MODULE__{
       id: id,
       work: fn snapshot ->
-        case Blazie.Lua.Binding.watching(source, snapshot, as: :job, at: System.system_time(:second)) do
+        case Blazie.Lua.Binding.watching(source, snapshot,
+               as: :job,
+               at: System.system_time(:second)
+             ) do
           {:ok, _value, staged, read} ->
             Snapshot.record_reads(read)
             Enum.map(staged, fn {entity, field, value} -> {entity, field, value} end)

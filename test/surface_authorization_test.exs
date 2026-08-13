@@ -57,7 +57,12 @@ defmodule Blazie.SurfaceAuthorizationTest do
       assert error["repair"] =~ ungranted
     end
 
-    test "a forged `name` is checked", %{conn: conn, token: token, granted: granted, ungranted: ungranted} do
+    test "a forged `name` is checked", %{
+      conn: conn,
+      token: token,
+      granted: granted,
+      ungranted: ungranted
+    } do
       # Never returned by anything — written by hand, which is the point.
       forged = %{granted => 0, ungranted => 0}
 

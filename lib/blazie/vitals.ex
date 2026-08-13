@@ -31,10 +31,10 @@ defmodule Blazie.Vitals do
   @doc "The attributes a reading is written with."
   @spec seed() :: [{String.t(), String.t(), term()}]
   def seed do
-  # `open_ledgers`, not `open_worlds`. The word moved; this string did not,
-  # because it is data — a thousand readings are already written under it, and
-  # renaming it would orphan every one while the suite stayed green, since tests
-  # write with the same code they read. Storage layout is not vocabulary.
+    # `open_ledgers`, not `open_worlds`. The word moved; this string did not,
+    # because it is data — a thousand readings are already written under it, and
+    # renaming it would orphan every one while the suite stayed green, since tests
+    # write with the same code they read. Storage layout is not vocabulary.
     Attribute.define("open_ledgers", answers: "integer", cardinality: "many") ++
       Attribute.define("subscriptions", answers: "integer", cardinality: "many") ++
       Attribute.define("memory_bytes", answers: "integer", cardinality: "many") ++

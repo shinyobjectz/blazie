@@ -18,7 +18,9 @@ defmodule Blazie.Formula.GeneratedTest do
     {:ok, world} = World.open(name)
     on_exit(fn -> World.close(name) end)
 
-    {:ok, _} = World.append(world, Attribute.seed() ++ Attribute.requires_seed() ++ Generated.seed())
+    {:ok, _} =
+      World.append(world, Attribute.seed() ++ Attribute.requires_seed() ++ Generated.seed())
+
     {:ok, _} = World.append(world, Attribute.define("age", answers: "integer"))
     {:ok, _} = World.append(world, Attribute.define("adult", answers: "boolean"))
 
@@ -70,7 +72,12 @@ defmodule Blazie.Formula.GeneratedTest do
 
     test "and a newer source settles it again", %{world: world} do
       {:ok, _} = World.append(world, [{"adults", "source", @correct}])
-      {:ok, _} = World.append(world, [{"adults", "example", %{"given" => %{"age" => 17}, "expect" => false}}])
+
+      {:ok, _} =
+        World.append(world, [
+          {"adults", "example", %{"given" => %{"age" => 17}, "expect" => false}}
+        ])
+
       {:ok, _} = World.append(world, [{"adults", "source", @correct}])
 
       assert Generated.wanted(snapshot(world)) == []
@@ -97,7 +104,11 @@ defmodule Blazie.Formula.GeneratedTest do
       # `> 18` instead of `>= 18`. Two of three examples still pass, which is
       # exactly the kind of wrong a model produces and a thin check misses.
       assert {:error, failures} =
-               Generated.verify(snapshot(world), "adults", "for p in each { age = true } do p.adult = p.age > 18 end")
+               Generated.verify(
+                 snapshot(world),
+                 "adults",
+                 "for p in each { age = true } do p.adult = p.age > 18 end"
+               )
 
       assert [%{problem: :wrong_answer}] = failures
       assert hd(failures).repair =~ "18"

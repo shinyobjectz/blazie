@@ -72,14 +72,23 @@ defmodule Blazie.SurfaceTest do
       assert is_integer(tx)
     end
 
-    test "a write comes back as the name its facts landed in", %{conn: conn, world: world, token: token} do
+    test "a write comes back as the name its facts landed in", %{
+      conn: conn,
+      world: world,
+      token: token
+    } do
       body = json_response(run(conn, world, "ada.height = 180"), 200)
 
       assert body["wrote"] > 0
       assert %{^world => tx} = body["name"]
 
       # Reading its own write at that name, without polling for it.
-      read = json_response(run(again(token), world, "return ada.height", %{"name" => %{world => tx}}), 200)
+      read =
+        json_response(
+          run(again(token), world, "return ada.height", %{"name" => %{world => tx}}),
+          200
+        )
+
       assert read["value"] == 180
     end
 
@@ -119,7 +128,11 @@ defmodule Blazie.SurfaceTest do
   end
 
   describe "a world is only the ledgers named" do
-    test "a world not in the world cannot leak into an answer", %{conn: conn, world: a, token: token} do
+    test "a world not in the world cannot leak into an answer", %{
+      conn: conn,
+      world: a,
+      token: token
+    } do
       b = open_ledger()
       json_response(run(conn, b, "hidden.height = 1"), 200)
 
@@ -127,7 +140,11 @@ defmodule Blazie.SurfaceTest do
       assert %{"value" => nil} = json_response(run(again(token), a, "return hidden.height"), 200)
     end
 
-    test "`also` widens the world to read, but not to write", %{conn: conn, world: a, token: token} do
+    test "`also` widens the world to read, but not to write", %{
+      conn: conn,
+      world: a,
+      token: token
+    } do
       b = open_ledger()
       json_response(run(conn, b, "grace.height = 175"), 200)
 
@@ -158,7 +175,11 @@ defmodule Blazie.SurfaceTest do
       assert %{"value" => 180} = json_response(run(again(token), world, "return ada.height"), 200)
     end
 
-    test "a redeclaration the facts contradict is still refused", %{conn: conn, world: world, token: token} do
+    test "a redeclaration the facts contradict is still refused", %{
+      conn: conn,
+      world: world,
+      token: token
+    } do
       json_response(run(conn, world, "ada.height = 180"), 200)
 
       # Reaching under the surface deliberately: `height` answers integers and

@@ -46,8 +46,18 @@ defmodule Blazie.ToolTest do
     end
 
     test "only the tools a field may use are offered", %{world: world} do
-      {:ok, _} = World.append(world, Tool.declare("plan", describe: "d", takes: [], source: "answer.x = 1"))
-      {:ok, _} = World.append(world, Tool.declare("secret", describe: "d", takes: [], source: "answer.x = 2"))
+      {:ok, _} =
+        World.append(
+          world,
+          Tool.declare("plan", describe: "d", takes: [], source: "answer.x = 1")
+        )
+
+      {:ok, _} =
+        World.append(
+          world,
+          Tool.declare("secret", describe: "d", takes: [], source: "answer.x = 2")
+        )
+
       {:ok, _} = World.append(world, [{"severity", "may_use", "plan"}])
 
       assert [%{name: "plan"}] = Tool.available(snapshot(world), "severity")
@@ -71,7 +81,11 @@ defmodule Blazie.ToolTest do
     end
 
     test "it gets the job world, so it may reach outside", %{world: world} do
-      {:ok, _} = World.append(world, Tool.declare("reach", describe: "d", takes: [], source: "answer.can = (http ~= nil)"))
+      {:ok, _} =
+        World.append(
+          world,
+          Tool.declare("reach", describe: "d", takes: [], source: "answer.can = (http ~= nil)")
+        )
 
       assert {:ok, %{"can" => true}} =
                Tool.run(snapshot(world), %{name: "reach", arguments: %{}, id: "1"})
@@ -83,7 +97,11 @@ defmodule Blazie.ToolTest do
     end
 
     test "one that never finishes is stopped", %{world: world} do
-      {:ok, _} = World.append(world, Tool.declare("spin", describe: "d", takes: [], source: "while true do end"))
+      {:ok, _} =
+        World.append(
+          world,
+          Tool.declare("spin", describe: "d", takes: [], source: "while true do end")
+        )
 
       assert {:error, refusal} =
                Tool.run(snapshot(world), %{name: "spin", arguments: %{}, id: "1"}, deadline: 300)
@@ -97,7 +115,11 @@ defmodule Blazie.ToolTest do
       {:ok, _} =
         World.append(
           world,
-          Tool.declare("echo", describe: "d", takes: [word: [answers: "name"]], source: "answer.said = args.word")
+          Tool.declare("echo",
+            describe: "d",
+            takes: [word: [answers: "name"]],
+            source: "answer.said = args.word"
+          )
         )
 
       # If arguments were interpolated, this would end the string and run
@@ -112,10 +134,15 @@ defmodule Blazie.ToolTest do
       {:ok, _} =
         World.append(
           world,
-          Tool.declare("echo", describe: "d", takes: [word: [answers: "name"]], source: "answer.said = args.word")
+          Tool.declare("echo",
+            describe: "d",
+            takes: [word: [answers: "name"]],
+            source: "answer.said = args.word"
+          )
         )
 
       hostile = "a\nb"
+
       assert {:ok, %{"said" => ^hostile}} =
                Tool.run(snapshot(world), %{name: "echo", arguments: %{"word" => hostile}, id: "1"})
     end
@@ -162,11 +189,14 @@ defmodule Blazie.ToolTest do
       loop(Process.get(:fake_converse), [], run, calls, [])
     end
 
-    defp loop(_c, _made, _run, 0, made), do: {:error, %{problem: :too_many_calls, repair: "raise `calls_allowed`"}}
+    defp loop(_c, _made, _run, 0, made),
+      do: {:error, %{problem: :too_many_calls, repair: "raise `calls_allowed`"}}
 
     defp loop(converse, messages, run, left, made) do
       case converse.(nil, messages, [], []) do
-        {:ok, {:said, said}} -> {:ok, said, Enum.reverse(made)}
+        {:ok, {:said, said}} ->
+          {:ok, said, Enum.reverse(made)}
+
         {:ok, {:calls, calls}} ->
           Enum.each(calls, run)
           loop(converse, messages, run, left - 1, made)

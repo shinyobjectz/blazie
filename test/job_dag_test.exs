@@ -45,8 +45,14 @@ defmodule Blazie.JobDagTest do
       {:ok, _} = World.append(world, [{"ada", "height", 180}])
 
       # A job that reads heights. Running it records what it read.
-      job = Job.new("watcher", fn snap -> [{"watcher", "saw", length(Snapshot.find(snap, attribute: "height"))}] end)
-      {:ok, _} = World.append(world, Attribute.define("saw", answers: "integer", cardinality: "many"))
+      job =
+        Job.new("watcher", fn snap ->
+          [{"watcher", "saw", length(Snapshot.find(snap, attribute: "height"))}]
+        end)
+
+      {:ok, _} =
+        World.append(world, Attribute.define("saw", answers: "integer", cardinality: "many"))
+
       {:ok, _} = World.append(world, Job.declare("watcher"))
       {:ok, _tx} = Job.run(job, world, snapshot(world), 1000)
 

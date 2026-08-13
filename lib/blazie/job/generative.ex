@@ -116,7 +116,9 @@ defmodule Blazie.Job.Generative do
       assertions
       |> Enum.flat_map(fn assertion ->
         attribute = elem(assertion, 1)
-        for requirement <- Attribute.requirements(snapshot, attribute), do: {elem(assertion, 0), "satisfied", requirement, job.id}
+
+        for requirement <- Attribute.requirements(snapshot, attribute),
+            do: {elem(assertion, 0), "satisfied", requirement, job.id}
       end)
       |> Enum.uniq()
 
@@ -125,7 +127,8 @@ defmodule Blazie.Job.Generative do
     {:ok, tx} =
       World.append(
         world,
-        stamped ++ satisfied ++ [{job.id, "tries", try_number, job.id}, {job.id, "ran_at", now, job.id}]
+        stamped ++
+          satisfied ++ [{job.id, "tries", try_number, job.id}, {job.id, "ran_at", now, job.id}]
       )
 
     {:ok, tx, %{tries: try_number}}

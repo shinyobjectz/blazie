@@ -23,7 +23,8 @@ defmodule Blazie.Model.Provider.OpenRouter do
   def generate(model, messages, opts), do: OpenAI.generate(model, messages, ours(opts))
 
   @impl true
-  def object(model, messages, schema, opts), do: OpenAI.object(model, messages, schema, ours(opts))
+  def object(model, messages, schema, opts),
+    do: OpenAI.object(model, messages, schema, ours(opts))
 
   @impl true
   def embed(model, texts, opts), do: OpenAI.embed(model, texts, ours(opts))

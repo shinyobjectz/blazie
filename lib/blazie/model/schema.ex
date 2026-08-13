@@ -45,7 +45,9 @@ defmodule Blazie.Model.Schema do
     if Keyword.keyword?(declaration) and Keyword.has_key?(declaration, :answers) do
       [{"value", shape(Keyword.get(declaration, :answers), declaration)}]
     else
-      Enum.map(declaration, fn {name, spec} -> {name, shape(Keyword.get(spec, :answers), spec)} end)
+      Enum.map(declaration, fn {name, spec} ->
+        {name, shape(Keyword.get(spec, :answers), spec)}
+      end)
     end
   end
 

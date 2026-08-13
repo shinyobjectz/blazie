@@ -336,7 +336,8 @@ defmodule Blazie.Attribute do
   defp literal(_value), do: "nil"
 
   defp reason(:refused, requirement, attribute),
-    do: "#{inspect(attribute)} requires #{inspect(requirement)}, and this value does not satisfy it."
+    do:
+      "#{inspect(attribute)} requires #{inspect(requirement)}, and this value does not satisfy it."
 
   defp reason({:because, why}, requirement, _attribute), do: "#{inspect(requirement)}: #{why}"
 

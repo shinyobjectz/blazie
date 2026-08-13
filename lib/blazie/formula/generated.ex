@@ -176,7 +176,8 @@ defmodule Blazie.Formula.Generated do
         end
         |> List.flatten()
 
-      {:ok, _} = World.append(world, seeded ++ Attribute.define(produces, answers: answers_for(expect)))
+      {:ok, _} =
+        World.append(world, seeded ++ Attribute.define(produces, answers: answers_for(expect)))
 
       case run_candidate(formula, Snapshot.open([world])) do
         {:error, why} ->
@@ -199,7 +200,8 @@ defmodule Blazie.Formula.Generated do
                 %{
                   example: example,
                   problem: :wrong_answer,
-                  repair: "given #{inspect(given)} it answered #{inspect(other)}, not #{inspect(expect)}"
+                  repair:
+                    "given #{inspect(given)} it answered #{inspect(other)}, not #{inspect(expect)}"
                 }
               ]
 
@@ -222,10 +224,11 @@ defmodule Blazie.Formula.Generated do
   # must hold too, or a formula could satisfy three cases and still write
   # something the world refuses.
   defp unmet(assertions, declared, example) do
-    three = Enum.map(assertions, fn
-      {id, field, value} -> {id, field, value}
-      {id, field, value, _by} -> {id, field, value}
-    end)
+    three =
+      Enum.map(assertions, fn
+        {id, field, value} -> {id, field, value}
+        {id, field, value, _by} -> {id, field, value}
+      end)
 
     case Attribute.unmet(three, declared) do
       [] -> []

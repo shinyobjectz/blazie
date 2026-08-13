@@ -38,8 +38,7 @@ defmodule Blazie.AgentUnattendedTest do
           [
             {"severity", "requires", "known"},
             {"known", "is", "formula"},
-            {"known", "source",
-             "return value == 'low' or value == 'medium' or value == 'high'"}
+            {"known", "source", "return value == 'low' or value == 'medium' or value == 'high'"}
           ]
       )
 

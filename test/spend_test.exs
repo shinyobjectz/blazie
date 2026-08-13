@@ -41,10 +41,14 @@ defmodule Blazie.SpendTest do
 
   describe "what a provider reported" do
     test "both usage shapes are read" do
-      assert Blazie.Model.Provider.spent(%{"usage" => %{"prompt_tokens" => 5, "completion_tokens" => 7}}) ==
+      assert Blazie.Model.Provider.spent(%{
+               "usage" => %{"prompt_tokens" => 5, "completion_tokens" => 7}
+             }) ==
                %{in: 5, out: 7}
 
-      assert Blazie.Model.Provider.spent(%{"usage" => %{"input_tokens" => 5, "output_tokens" => 7}}) ==
+      assert Blazie.Model.Provider.spent(%{
+               "usage" => %{"input_tokens" => 5, "output_tokens" => 7}
+             }) ==
                %{in: 5, out: 7}
     end
 

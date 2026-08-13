@@ -182,7 +182,9 @@ defmodule Blazie.Lua.Binding do
 
       true ->
         declaration =
-          if known?, do: [], else: Attribute.define(field, answers: answers_for(value, reference?))
+          if known?,
+            do: [],
+            else: Attribute.define(field, answers: answers_for(value, reference?))
 
         stage(declaration ++ [{entity_id(id), field, value}])
         {[], state}
@@ -393,7 +395,8 @@ defmodule Blazie.Lua.Binding do
   defp answers_for(value, _) when is_binary(value), do: "name"
   defp answers_for(_value, _), do: "any"
 
-  defp stage(assertions), do: Process.put(@staged, Enum.reverse(assertions) ++ Process.get(@staged, []))
+  defp stage(assertions),
+    do: Process.put(@staged, Enum.reverse(assertions) ++ Process.get(@staged, []))
 
   defp at_snapshot(nil), do: Process.get(:blazie_lua_snapshot)
 

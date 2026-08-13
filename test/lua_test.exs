@@ -179,5 +179,4 @@ defmodule Blazie.LuaTest do
       end
     end
   end
-
 end

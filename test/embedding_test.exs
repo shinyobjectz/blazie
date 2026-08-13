@@ -50,14 +50,19 @@ defmodule Blazie.Model.EmbeddingTest do
 
     test "not what has already been embedded", %{world: world} do
       {:ok, _} = World.append(world, [{"a", "body", "hello"}])
-      {:ok, _} = World.append(world, [{"a", "embedding", Symbol.new("text-3-small", [1.0]), "embedding"}])
+
+      {:ok, _} =
+        World.append(world, [{"a", "embedding", Symbol.new("text-3-small", [1.0]), "embedding"}])
 
       assert Embedding.pending(snapshot(world), "embedding", "body") == []
     end
 
     test "but yes when the text changed afterwards", %{world: world} do
       {:ok, _} = World.append(world, [{"a", "body", "hello"}])
-      {:ok, _} = World.append(world, [{"a", "embedding", Symbol.new("text-3-small", [1.0]), "embedding"}])
+
+      {:ok, _} =
+        World.append(world, [{"a", "embedding", Symbol.new("text-3-small", [1.0]), "embedding"}])
+
       {:ok, _} = World.append(world, [{"a", "body", "something else"}])
 
       # A correction upstream makes the vector stale, and nothing had to be

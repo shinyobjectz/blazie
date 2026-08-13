@@ -17,8 +17,10 @@ defmodule Blazie.Model.Provider do
   @type refusal :: %{problem: atom(), repair: String.t()}
 
   @callback generate(Reference.t(), [map()], keyword()) :: {:ok, String.t()} | {:error, refusal()}
-  @callback object(Reference.t(), [map()], keyword(), keyword()) :: {:ok, map()} | {:error, refusal()}
-  @callback embed(Reference.t(), [String.t()], keyword()) :: {:ok, [[float()]]} | {:error, refusal()}
+  @callback object(Reference.t(), [map()], keyword(), keyword()) ::
+              {:ok, map()} | {:error, refusal()}
+  @callback embed(Reference.t(), [String.t()], keyword()) ::
+              {:ok, [[float()]]} | {:error, refusal()}
 
   @doc """
   Ask, offering tools the model may call.
@@ -53,8 +55,9 @@ defmodule Blazie.Model.Provider do
     payload = Jason.encode!(body)
 
     request =
-      {String.to_charlist(url), Enum.map(headers, fn {k, v} -> {to_charlist(k), to_charlist(v)} end),
-       ~c"application/json", payload}
+      {String.to_charlist(url),
+       Enum.map(headers, fn {k, v} -> {to_charlist(k), to_charlist(v)} end), ~c"application/json",
+       payload}
 
     case :httpc.request(:post, request, [{:timeout, timeout}], body_format: :binary) do
       {:ok, {{_, status, _}, _headers, raw}} when status in 200..299 ->
@@ -85,7 +88,8 @@ defmodule Blazie.Model.Provider do
         {:error,
          %{
            problem: :not_json,
-           repair: "The provider answered something that is not json: #{String.slice(to_string(raw), 0, 200)}"
+           repair:
+             "The provider answered something that is not json: #{String.slice(to_string(raw), 0, 200)}"
          }}
     end
   end

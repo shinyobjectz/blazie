@@ -33,7 +33,11 @@ defmodule Blazie.AdversarialTest do
   end
 
   describe "malformed requests are refused, never fatal" do
-    test "every shape of junk is answered rather than fatal", %{conn: conn, token: token, world: world} do
+    test "every shape of junk is answered rather than fatal", %{
+      conn: conn,
+      token: token,
+      world: world
+    } do
       junk = [
         %{},
         %{"world" => world},
@@ -58,14 +62,22 @@ defmodule Blazie.AdversarialTest do
       end
     end
 
-    test "source that is not Lua is a refusal with a repair", %{conn: conn, token: token, world: world} do
+    test "source that is not Lua is a refusal with a repair", %{
+      conn: conn,
+      token: token,
+      world: world
+    } do
       body = json_response(run(conn, token, "this is not lua ((", %{"world" => world}), 422)
 
       assert body["error"]["problem"] == "not_lua"
       assert body["error"]["repair"] != ""
     end
 
-    test "an error raised inside Lua is a refusal, not a crash", %{conn: conn, token: token, world: world} do
+    test "an error raised inside Lua is a refusal, not a crash", %{
+      conn: conn,
+      token: token,
+      world: world
+    } do
       body = json_response(run(conn, token, "error('deliberate')", %{"world" => world}), 422)
 
       assert body["error"]["problem"] == "raised"
@@ -74,7 +86,11 @@ defmodule Blazie.AdversarialTest do
   end
 
   describe "a caller cannot reach past its grants" do
-    test "no way of naming a world gets past authorization", %{conn: conn, token: token, world: world} do
+    test "no way of naming a world gets past authorization", %{
+      conn: conn,
+      token: token,
+      world: world
+    } do
       forbidden = "not-granted-#{System.unique_integer([:positive])}"
 
       attempts = [
@@ -134,7 +150,9 @@ defmodule Blazie.AdversarialTest do
 
       # Staged writes are appended only after a chunk returns, so a guest killed
       # mid-run leaves nothing behind — the write above must not be there.
-      after_it = json_response(run(build_conn(), token, "return ada.height", %{"world" => world}), 200)
+      after_it =
+        json_response(run(build_conn(), token, "return ada.height", %{"world" => world}), 200)
+
       assert after_it["value"] == nil
     end
   end
@@ -152,7 +170,11 @@ defmodule Blazie.AdversarialTest do
       end
     end
 
-    test "redefining the deny list does not hand anything back", %{conn: conn, token: token, world: world} do
+    test "redefining the deny list does not hand anything back", %{
+      conn: conn,
+      token: token,
+      world: world
+    } do
       # `__denied` only decides whether an unknown name becomes an entity. The
       # globals themselves are genuinely absent from the state, so clearing it
       # gets an empty entity rather than `io` — the fence is the absence, and
@@ -164,6 +186,7 @@ defmodule Blazie.AdversarialTest do
 
       # Whatever it is, nothing on it works.
       escape = "__denied = {} return io.write ~= nil"
+
       assert %{"value" => false} =
                json_response(run(build_conn(), token, escape, %{"world" => world}), 200)
     end
@@ -177,7 +200,9 @@ defmodule Blazie.AdversarialTest do
       source = "__write('ada', 'height', 180, false, 'some-formula') return 1"
       assert json_response(run(conn, token, source, %{"world" => world}), 200)
 
-      read = json_response(run(build_conn(), token, "return ada.height", %{"world" => world}), 200)
+      read =
+        json_response(run(build_conn(), token, "return ada.height", %{"world" => world}), 200)
+
       assert read["value"] == 180
 
       # Written from outside, so it names nothing — whatever was appended to the

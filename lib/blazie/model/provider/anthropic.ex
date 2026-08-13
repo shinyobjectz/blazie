@@ -128,7 +128,11 @@ defmodule Blazie.Model.Provider.Anthropic do
         {:ok,
          {:calls,
           Enum.map(uses, fn use ->
-            %{id: Map.get(use, "id"), name: Map.get(use, "name"), arguments: Map.get(use, "input", %{})}
+            %{
+              id: Map.get(use, "id"),
+              name: Map.get(use, "name"),
+              arguments: Map.get(use, "input", %{})
+            }
           end)}}
     end
   end

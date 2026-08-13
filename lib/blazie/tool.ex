@@ -126,7 +126,8 @@ defmodule Blazie.Tool do
   @doc "The fact recording that a call happened and what it said."
   @spec called(term(), map(), term(), term()) :: tuple()
   def called(id, call, result, by) do
-    {id, "called", %{"tool" => call.name, "arguments" => call.arguments, "answered" => result}, by}
+    {id, "called", %{"tool" => call.name, "arguments" => call.arguments, "answered" => result},
+     by}
   end
 
   # ── plumbing ───────────────────────────────────────────────────────────────
@@ -183,7 +184,8 @@ defmodule Blazie.Tool do
   end
 
   @doc false
-  def declared?(%Snapshot{} = snapshot, name), do: name in Enum.map(job_ids(snapshot), &to_string/1)
+  def declared?(%Snapshot{} = snapshot, name),
+    do: name in Enum.map(job_ids(snapshot), &to_string/1)
 
   @doc false
   def as_job(%Snapshot{} = snapshot, name) do
