@@ -19,16 +19,51 @@ defmodule LazyRiver.LuaTest do
 
   describe "the world a formula is handed" do
     test "has no way out" do
-      for name <- ~w(os io package require load loadstring dofile loadfile) do
+      for name <- ~w(io package require load loadstring dofile loadfile) do
         assert {:ok, nil} = Lua.run("return #{name}", as: :formula),
                "#{name} is reachable from a formula"
       end
+
+      for name <- ~w(execute exit getenv remove rename tmpname date) do
+        assert {:ok, nil} = Lua.run("return os.#{name}", as: :formula),
+               "os.#{name} is reachable from a formula"
+      end
     end
 
-    test "has no clock and no randomness, which is what makes an answer keep" do
-      assert {:ok, nil} = Lua.run("return os", as: :formula)
-      assert {:ok, nil} = Lua.run("return math.random", as: :formula)
-      assert {:ok, nil} = Lua.run("return math.randomseed", as: :formula)
+    # Doctrine 19. What a formula may not have is a value that differs run to
+    # run — not a name it expects to find. Deleting `os` made ordinary Lua
+    # crash on its way to being deterministic; freezing it makes the same code
+    # answer, and answer the same forever.
+    test "has a clock, and it does not move" do
+      assert {:ok, 1000} = Lua.run("return os.time()", as: :formula, at: 1000)
+      assert {:ok, 1000} = Lua.run("return os.time()", as: :formula, at: 1000)
+      assert {:ok, 7} = Lua.run("return os.time()", as: :formula, at: 7)
+      assert {:ok, 0} = Lua.run("return os.clock()", as: :formula, at: 1000)
+    end
+
+    test "the clock does not move within one run either" do
+      source = "local a = os.time() local b = os.time() return b - a"
+      assert {:ok, 0} = Lua.run(source, as: :formula, at: 1000)
+    end
+
+    test "arithmetic on time is kept, because it computes nothing new" do
+      assert {:ok, 60} = Lua.run("return os.difftime(160, 100)", as: :formula, at: 1000)
+    end
+
+    test "has randomness, and it is the same randomness every time" do
+      source = "local t = {} for i = 1, 5 do t[i] = math.random(1, 1000) end
+                return table.concat(t, ',')"
+
+      runs = for _ <- 1..10, do: Lua.run(source, as: :formula, at: 1000)
+      assert runs |> Enum.uniq() |> length() == 1
+
+      # A different snapshot is a different sequence — deterministic, not fixed.
+      assert Lua.run(source, as: :formula, at: 2000) != hd(runs)
+    end
+
+    test "a job gets the real ones, because its answer happened once" do
+      assert {:ok, real} = Lua.run("return os.time()", as: :job, at: 1000)
+      assert real > 1_700_000_000, "a job's clock should be the wall clock, got #{inspect(real)}"
     end
 
     test "still has the parts of Lua that compute" do
@@ -83,11 +118,20 @@ defmodule LazyRiver.LuaTest do
     end
 
     test "reaching for something that was not granted says so in Lua's own words" do
-      assert {:error, refusal} = Lua.run("return os.time()", as: :formula)
+      # Not the clock — that is present and frozen, per doctrine 19. This is
+      # something genuinely absent, and the author is told what any Lua runtime
+      # would tell them.
+      assert {:error, refusal} = Lua.run("return os.execute('rm -rf /')", as: :formula)
 
       assert refusal.problem == :raised
-      # The guest is told what a Lua author would expect to be told.
       assert refusal.repair =~ "nil"
+    end
+
+    test "a formula reaching for the outside is refused, clock or no clock" do
+      for reach <- ["io.write('x')", "os.getenv('SECRET_KEY_BASE')", "http.get('http://x')"] do
+        assert {:error, %{problem: :raised}} = Lua.run("return #{reach}", as: :formula),
+               "#{reach} was not refused"
+      end
     end
   end
 

@@ -2066,17 +2066,41 @@ The docs are unusually candid that the fast one is a model, not the thing:
 > `convex-test` is a mock implementation of the Convex backend … it does not
 > perfectly replicate the behavior of the real backend.
 
-with named divergences — the ones that matter are that it **does not enforce the
-transaction read/write limits**, its **`_creationTime` and ID generation differ**,
-its **text and vector search are simplified**, and its **OCC/scheduling behaviour
-is not the real scheduler**. So the class of bug that hurts most in production
-(§9 — limits and write conflicts) is precisely the class the fast harness cannot
-catch. That is worth knowing before copying the design.
+and it publishes the divergences as a list, verbatim:
+
+> * **Error messages content.** You should not write product logic that relies on
+>   the content of error messages thrown by the real backend, as they are always
+>   subject to change.
+> * **Limits.** The mock doesn't enforce size and time limits.
+> * **ID format.** Your code should not depend on the document or storage ID format.
+> * **Runtime built-ins.** … Vitest uses a mock of Vercel's Edge Runtime, which is
+>   similar but might differ from the Convex runtime. **You should always test new
+>   code manually to make sure it doesn't use built-ins not available in the Convex
+>   runtime.**
+> * Some features have only simplified semantics, namely:
+>   * Text search returns all documents that include a word for which at least one
+>     word in the searched string is a prefix. **It does not sort the results by
+>     relevance.**
+>   * Vector search returns results sorted by cosine similarity, **but doesn't use an
+>     efficient vector index**.
+>   * **There is no support for cron jobs**, you should trigger your functions
+>     manually from the test.
+
+Read that list against §9. **The mock does not enforce limits, and does not model
+the real runtime's built-ins — so the two classes of bug that hurt most in
+production (transaction limits, and code that works locally but not in the isolate)
+are precisely the two the fast harness cannot catch.** Convex says so directly
+("always test new code manually"), which is honest and also an admission that the
+fast loop is not sufficient.
+
+Publishing the divergence list at all is the transferable part. A test harness that
+is a model of the system should ship a written statement of where the model is
+wrong, next to the harness.
 
 ### 8.2 The fast harness
 
 ```
-npm i -D convex-test vitest @edge-runtime/vm
+npm install --save-dev convex-test vitest @edge-runtime/vm
 ```
 
 ```json
@@ -2098,10 +2122,14 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "edge-runtime",
-    server: { deps: { inline: ["convex-test"] } },
   },
 });
 ```
+
+(One line of config — `edge-runtime` is what makes the test environment approximate
+the Convex isolate. Projects that also test a frontend split environments with
+Vitest's `projects` array, or `environmentMatchGlobs` on Vitest 3, so that
+`convex/**` runs in `edge-runtime` and the rest in `jsdom`.)
 
 and a test:
 
@@ -3156,10 +3184,29 @@ come from):
   <https://stack.convex.dev/schema-philosophy>
 - <https://github.com/get-convex/migrations> — the migrations component README
 
-**Community sentiment** (§9): Hacker News via the Algolia API, Reddit JSON
-endpoints across r/nextjs, r/reactjs, r/webdev, r/Supabase, r/typescript,
-r/ExperiencedDevs, r/SaaS, r/selfhosted, and the GitHub issue trackers for
-`get-convex/convex-backend` and `get-convex/convex-js`. Individual URLs and dates
-are attached inline in that section.
+**Criticism (§9)** — individual URLs and dates are inline in that section. The
+highest-signal sources were Convex's own:
+
+- <https://www.convex.sucks/> — their self-roast page
+- <https://www.youtube.com/watch?v=FMhaM3yXYbk> — *"Why Convex Sucks — For Now"*, 2025-08-13
+- <https://www.youtube.com/watch?v=fqGwg6np7ek> — follow-up, recorded 2026-02-25;
+  the six-gap list in §9.7
+- <https://news.convex.dev/how-convex-took-down-t3-chat-june-1-2025-postmortem/>
+- <https://news.convex.dev/self-hosting/> (2025-02-13) and
+  <https://news.convex.dev/convex-x-workos/> (2025-09-23)
+- <https://stack.convex.dev/high-throughput-mutations-via-precise-queries> and
+  <https://stack.convex.dev/why-doesn-t-convex-have-select-or-count>
+
+Third-party: Hacker News via the Algolia API (threads 31832333, 34585773, 34586016,
+34586364, 34587632, 40035309, 40037484, 41260776); the `get-convex/convex-backend`
+issue tracker (#6, #88, #95, #152, #211, #245, #279, #288, #328, #360, #414, #443,
+#466, #479, #498) and `convex-js` (#53); <https://diwaker.io/friction-log-convex/>
+(2025-09-15); <https://ocavue.com/posts/convex-first-look/> (2025-06-24);
+<https://github.com/get-convex/aggregate>. Reddit was unreachable from this
+environment, so community sentiment is drawn from HN and issue trackers instead.
+
+**Do not cite** `makerstack.co`, `fromscratch.dev/alternatives/convex`, or
+`trybuildpilot.com` on Convex — all AI-generated, all repeating the false claim that
+Convex cannot be self-hosted.
 
 ---
