@@ -99,7 +99,8 @@ defmodule Blazie.Lua.World do
     [
       {"__read", &read/2},
       {"__write", &write/2},
-      {"__each", &each/2}
+      {"__each", &each/2},
+      {"__fields", &fields/2}
     ]
     |> Enum.reduce(state, fn {name, fun}, acc ->
       {_, acc} = :luerl.set_table_keys([name], {:erl_func, fun}, acc)
@@ -131,16 +132,22 @@ defmodule Blazie.Lua.World do
   defp write([id, field, value, reference? | _rest], state) do
     field = to_string(field)
     snapshot = Process.get(:blazie_lua_snapshot)
+    known? = Attribute.defined?(snapshot, field) or declared_here?(field)
 
-    declaration =
-      if Attribute.defined?(snapshot, field) or declared_here?(field) do
-        []
-      else
-        Attribute.define(field, answers: answers_for(value, reference?))
-      end
+    cond do
+      # Retracting a field nobody ever wrote. There is nothing to unsay, and
+      # declaring one so that its retraction can be recorded would leave a
+      # ledger describing a field that never held anything.
+      is_nil(value) and not known? ->
+        {[], state}
 
-    stage(declaration ++ [{entity_id(id), field, value}])
-    {[], state}
+      true ->
+        declaration =
+          if known?, do: [], else: Attribute.define(field, answers: answers_for(value, reference?))
+
+        stage(declaration ++ [{entity_id(id), field, value}])
+        {[], state}
+    end
   end
 
   defp write(_args, state), do: {[], state}
@@ -164,6 +171,34 @@ defmodule Blazie.Lua.World do
   end
 
   defp each(_args, state), do: {[nil], state}
+
+  # Everything currently said about one entity, which is what `pairs(ada)`
+  # iterates. A retracted field is absent rather than present-and-nil: it was
+  # unsaid, and a data browser listing it as a column with nothing under it
+  # would be showing the retraction rather than the data.
+  defp fields([id | rest], state) do
+    snapshot = at_snapshot(List.first(rest))
+    id = entity_id(id)
+
+    held =
+      snapshot
+      |> Snapshot.find(id: id)
+      |> Enum.map(& &1.attribute)
+      |> Enum.uniq()
+      |> Enum.sort()
+      |> Enum.reduce([], fn field, acc ->
+        case Snapshot.value(snapshot, id, field) do
+          nil -> acc
+          value -> [{field, value} | acc]
+        end
+      end)
+      |> Enum.reverse()
+
+    {encoded, state} = :luerl.encode(held, state)
+    {[encoded], state}
+  end
+
+  defp fields(_args, state), do: {[nil], state}
 
   # ── deciding what a value is ───────────────────────────────────────────────
 
@@ -281,6 +316,10 @@ defmodule Blazie.Lua.World do
         end
       end,
       __tostring = function() return tostring(id) end,
+      -- `pairs(ada)` walks what is currently said about it. Lua 5.2's
+      -- __pairs, which Luerl honours, so listing an entity's fields needs no
+      -- vocabulary of its own.
+      __pairs = function() return next, __fields(id, tx), nil end,
     })
 
     __held[key] = e

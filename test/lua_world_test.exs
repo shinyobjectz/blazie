@@ -109,6 +109,105 @@ defmodule Blazie.LuaWorldTest do
     end
   end
 
+  describe "unsaying something" do
+    test "nil retracts a field", context do
+      {:ok, _, wrote} = run("ada.height = 180", context.snapshot)
+      snapshot = commit(context, wrote)
+      assert {:ok, 180, _} = run("return ada.height", snapshot)
+
+      {:ok, _, retraction} = run("ada.height = nil", snapshot)
+      after_it = commit(context, retraction)
+
+      assert {:ok, nil, _} = run("return ada.height", after_it)
+    end
+
+    test "what was true is still true where it was written", context do
+      {:ok, _, wrote} = run("ada.height = 180", context.snapshot)
+      snapshot = commit(context, wrote)
+      tx = snapshot |> Snapshot.name() |> Map.values() |> List.first()
+
+      {:ok, _, retraction} = run("ada.height = nil", snapshot)
+      after_it = commit(context, retraction)
+
+      # Retracting is a later fact, not an erasure. The only thing that
+      # actually destroys is erasure, and it destroys a key rather than a row.
+      assert {:ok, nil, _} = run("return ada.height", after_it)
+      assert {:ok, 180, _} = run("return at(#{tx}).ada.height", after_it)
+    end
+
+    test "a retracted field drops out of each", context do
+      {:ok, _, wrote} = run("ada.height = 180\ngrace.height = 180", context.snapshot)
+      snapshot = commit(context, wrote)
+
+      {:ok, _, retraction} = run("ada.height = nil", snapshot)
+      after_it = commit(context, retraction)
+
+      source = """
+      local found = {}
+      for p in each { height = 180 } do found[#found + 1] = p.id end
+      return table.concat(found, ',')
+      """
+
+      assert {:ok, "grace", _} = run(source, after_it)
+    end
+
+    test "retracting what was never written does nothing at all", context do
+      # Not an error, and not a declaration either: a ledger describing a field
+      # that never held anything would be worse than the no-op.
+      assert {:ok, _, []} = run("ada.nothing = nil", context.snapshot)
+    end
+  end
+
+  describe "pairs lists what is said about an entity" do
+    test "every field, and nothing else", context do
+      {:ok, _, wrote} =
+        run(
+          """
+          ada.height = 180
+          ada.name = 'Ada'
+          """,
+          context.snapshot
+        )
+
+      snapshot = commit(context, wrote)
+
+      source = """
+      local seen = {}
+      for field, value in pairs(ada) do seen[#seen + 1] = field .. '=' .. tostring(value) end
+      table.sort(seen)
+      return table.concat(seen, ',')
+      """
+
+      assert {:ok, "height=180,name=Ada", _} = run(source, snapshot)
+    end
+
+    test "a retracted field is absent rather than nil", context do
+      {:ok, _, wrote} = run("ada.height = 180\nada.name = 'Ada'", context.snapshot)
+      snapshot = commit(context, wrote)
+
+      {:ok, _, retraction} = run("ada.height = nil", snapshot)
+      after_it = commit(context, retraction)
+
+      source = """
+      local seen = {}
+      for field in pairs(ada) do seen[#seen + 1] = field end
+      return table.concat(seen, ',')
+      """
+
+      assert {:ok, "name", _} = run(source, after_it)
+    end
+
+    test "an entity nobody wrote lists nothing", context do
+      source = """
+      local n = 0
+      for _ in pairs(nobody) do n = n + 1 end
+      return n
+      """
+
+      assert {:ok, 0, _} = run(source, context.snapshot)
+    end
+  end
+
   describe "each" do
     setup context do
       {:ok, _, wrote} =
