@@ -31,7 +31,8 @@ if config_env() == :prod do
     # put them on an ephemeral disk, which is the in-memory keyring's bug
     # wearing a filesystem — every subject erased by accident on redeploy.
     key_dir: System.get_env("KEY_DIR") || "/data/keys",
-    kms_key: System.get_env("KMS_KEY")
+    kms_key: System.get_env("KMS_KEY"),
+    gcp_credentials: System.get_env("GOOGLE_APPLICATION_CREDENTIALS")
 
   if System.get_env("KEY_DIR") == nil do
     IO.warn(

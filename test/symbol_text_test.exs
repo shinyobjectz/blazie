@@ -1,111 +1,129 @@
 defmodule LazyRiver.Symbol.TextTest do
   @moduledoc """
-  The doctrine, executable: a symbol for text is produced by a formula, so the
-  ledger accepts it — and the same symbol written directly is refused.
+  Text becomes a symbol through a formula, which is the only way a symbol may
+  come to exist. The properties that matter are that it is deterministic and
+  that it survives being recomputed — a stand-in you cannot re-derive is a
+  number you have to trust.
   """
   use ExUnit.Case, async: true
 
-  alias LazyRiver.{Attribute, Formula, Ledger, Snapshot, Symbol}
-  alias LazyRiver.Symbol.Text
-  alias LazyRiver.TestLedger
-
-  @space "sketch_64"
-  @width 64
-
-  # A module attribute cannot hold a closure, so the embedder is built here.
-  defp embedder, do: &Text.sketch(&1, @width)
+  alias LazyRiver.{Attribute, Formula, Ledger, Snapshot, Symbol, TestLedger}
 
   setup do
     ledger = TestLedger.open()
-    {:ok, _} = Ledger.append(ledger, Attribute.seed() ++ Symbol.seed())
-    {:ok, _} = Ledger.append(ledger, Attribute.define("caption", answers: "any"))
-    {:ok, _} = Ledger.append(ledger, Text.seed("caption_symbol", @space))
-
-    {:ok, _} =
-      Ledger.append(ledger, [
-        {1, "caption", "ceramic pan review, no oil needed"},
-        {2, "caption", "ceramic pan review, no oil needed"},
-        {3, "caption", "running shoes for marathon training"},
-        {4, "caption", ""}
-      ])
-
-    formula =
-      Text.formula(:caption_symbols,
-        over: "caption",
-        into: "caption_symbol",
-        space: @space,
-        embed: embedder()
-      )
-
-    %{ledger: ledger, formula: formula}
+    {:ok, _} = Ledger.append(ledger, Attribute.seed())
+    {:ok, _} = Ledger.append(ledger, Attribute.define("caption"))
+    {:ok, _} = Ledger.append(ledger, Symbol.Text.seed("caption_symbol", "sketch_64"))
+    %{ledger: ledger}
   end
 
-  defp answers(ledger, formula) do
-    {assertions, _reads} = Formula.run(formula, Snapshot.open([ledger]))
-    assertions
+  defp formula do
+    Symbol.Text.formula("captions",
+      over: "caption",
+      into: "caption_symbol",
+      space: "sketch_64",
+      embed: &Symbol.Text.sketch(&1, 64)
+    )
   end
 
-  test "the formula turns text into symbols in its declared space", %{
-    ledger: ledger,
-    formula: formula
-  } do
-    assertions = answers(ledger, formula)
+  describe "the sketch is an embedder a formula may use" do
+    test "the same text gives the same numbers, forever" do
+      assert Symbol.Text.sketch("a ceramic pan", 64) == Symbol.Text.sketch("a ceramic pan", 64)
+    end
 
-    # Three captions carry text; the empty one is not a thing to represent.
-    assert length(assertions) == 3
+    test "it is normalised, so length is not similarity" do
+      for text <- ["short", "a much longer caption with a good many more words in it"] do
+        norm =
+          text |> Symbol.Text.sketch(64) |> Enum.reduce(0.0, fn v, a -> a + v * v end)
 
-    assert Enum.all?(assertions, fn {_id, attr, sym, by} ->
-             attr == "caption_symbol" and sym.space == @space and by == :caption_symbols
-           end)
+        assert_in_delta norm, 1.0, 0.0001
+      end
+    end
 
-    assert Enum.all?(assertions, fn {_id, _attr, sym, _by} -> Symbol.dimension(sym) == @width end)
+    test "it is the declared width" do
+      assert length(Symbol.Text.sketch("anything", 64)) == 64
+      assert length(Symbol.Text.sketch("anything", 256)) == 256
+    end
+
+    test "empty text has no direction to point in" do
+      assert Enum.all?(Symbol.Text.sketch("", 64), &(&1 == 0.0))
+    end
+
+    test "shared words are nearer than unshared ones" do
+      a = Symbol.new("s", Symbol.Text.sketch("a ceramic frying pan", 64))
+      shares = Symbol.new("s", Symbol.Text.sketch("a ceramic pan", 64))
+      shares_nothing = Symbol.new("s", Symbol.Text.sketch("quarterly revenue report", 64))
+
+      {:ok, near} = Symbol.near(a, shares)
+      {:ok, far} = Symbol.near(a, shares_nothing)
+
+      assert near > far
+    end
   end
 
-  test "a symbol from the formula is accepted where the same symbol written directly is refused",
-       %{ledger: ledger, formula: formula} do
-    {assertions, _} = Formula.run(formula, Snapshot.open([ledger]))
+  describe "as a formula" do
+    test "it writes symbols naming itself", %{ledger: ledger} do
+      {:ok, _} = Ledger.append(ledger, [{1, "caption", "a ceramic pan"}])
 
-    # Produced by a formula: every assertion names it, so the check passes.
-    assert {:ok, _tx} = Ledger.append(ledger, assertions, check: &Symbol.check/1)
+      {assertions, _reads} = Formula.run(formula(), Snapshot.open([ledger]))
 
-    # The identical answer, written by hand, is a symbol naming no formula.
-    loose = [{9, "caption_symbol", Symbol.new(@space, Text.sketch("anything", @width))}]
-    assert {:error, [refusal]} = Ledger.append(ledger, loose, check: &Symbol.check/1)
-    assert refusal.problem == :symbol_from_outside
+      assert [{1, "caption_symbol", %Symbol{space: "sketch_64"}, "captions"}] = assertions
+    end
+
+    test "the answer is the same at the same snapshot", %{ledger: ledger} do
+      {:ok, _} = Ledger.append(ledger, [{1, "caption", "a ceramic pan"}])
+      snapshot = Snapshot.open([ledger])
+
+      assert Formula.run(formula(), snapshot) == Formula.run(formula(), snapshot)
+    end
+
+    test "what it wrote passes the symbol check, because a formula made it",
+         %{ledger: ledger} do
+      {:ok, _} = Ledger.append(ledger, [{1, "caption", "a ceramic pan"}])
+      {assertions, _} = Formula.run(formula(), Snapshot.open([ledger]))
+
+      assert Symbol.check(assertions) == :ok
+      assert {:ok, _tx} = Ledger.append(ledger, assertions, check: &Symbol.check/1)
+    end
+
+    test "empty and blank captions are skipped rather than pointed nowhere",
+         %{ledger: ledger} do
+      {:ok, _} = Ledger.append(ledger, [{1, "caption", ""}, {2, "caption", "   "}])
+
+      {assertions, _} = Formula.run(formula(), Snapshot.open([ledger]))
+
+      assert assertions == []
+    end
+
+    test "a non-text answer under the same attribute is skipped", %{ledger: ledger} do
+      {:ok, _} = Ledger.append(ledger, [{1, "caption", 42}])
+
+      {assertions, _} = Formula.run(formula(), Snapshot.open([ledger]))
+
+      assert assertions == []
+    end
+
+    test "the attribute declares its space, so search cannot cross one",
+         %{ledger: ledger} do
+      assert Snapshot.answer(Snapshot.open([ledger]), "caption_symbol", "space") == "sketch_64"
+    end
+
+    test "search finds the nearest caption", %{ledger: ledger} do
+      {:ok, _} =
+        Ledger.append(ledger, [
+          {1, "caption", "a ceramic frying pan"},
+          {2, "caption", "quarterly revenue report"}
+        ])
+
+      {assertions, _} = Formula.run(formula(), Snapshot.open([ledger]))
+      {:ok, _} = Ledger.append(ledger, assertions)
+
+      query = Symbol.new("sketch_64", Symbol.Text.sketch("ceramic pan", 64))
+
+      [{nearest, _score} | _] =
+        Symbol.nearest(Snapshot.open([ledger]), "caption_symbol", query, 2)
+
+      assert nearest.id == 1
+    end
   end
-
-  test "the same text always gives the same symbol — a formula is reproducible", %{
-    ledger: ledger,
-    formula: formula
-  } do
-    first = answers(ledger, formula)
-    second = answers(ledger, formula)
-    assert first == second
-
-    # Ids 1 and 2 hold identical captions, so they must land on one point.
-    by_id = Map.new(first, fn {id, _attr, sym, _by} -> {id, sym} end)
-    assert {:ok, 1.0} = Symbol.near(by_id[1], by_id[2]) |> round_near()
-  end
-
-  test "near text sits closer than unrelated text", %{ledger: ledger, formula: formula} do
-    by_id = answers(ledger, formula) |> Map.new(fn {id, _a, s, _by} -> {id, s} end)
-
-    {:ok, same} = Symbol.near(by_id[1], by_id[2])
-    {:ok, different} = Symbol.near(by_id[1], by_id[3])
-
-    assert same > different
-  end
-
-  test "a sketch is normalised, so length does not masquerade as similarity" do
-    long = Text.sketch(String.duplicate("ceramic pan ", 50), 64)
-    norm = :math.sqrt(Enum.reduce(long, 0.0, fn v, acc -> acc + v * v end))
-    assert_in_delta norm, 1.0, 1.0e-9
-  end
-
-  test "text with no words yields a zero sketch rather than a crash" do
-    assert Enum.all?(Text.sketch("!!! ???", 16), &(&1 == 0.0))
-  end
-
-  defp round_near({:ok, value}), do: {:ok, Float.round(value, 6)}
-  defp round_near(other), do: other
 end

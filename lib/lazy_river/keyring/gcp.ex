@@ -24,17 +24,23 @@ defmodule LazyRiver.Keyring.GCP do
   or a write. The bill is a few cents and the latency is irrelevant, which is
   what makes it fine for the KMS to be at a different provider from the compute.
 
-  ## The residual risk, stated
+  ## A restore cannot resurrect anybody
 
   Erasure deletes an entry from a local store, and a store can be restored from
-  a backup. What closes that is a tombstone: erasure also writes a fact, and a
-  restore is only correct once those facts have been replayed against it.
-  Append-only tombstones are safe to back up, which is the point — the thing
-  that says "this person is gone" belongs in the ledger, and the thing that
+  a backup. What closes that is the tombstone `LazyRiver.Erasure` writes: an
+  append-only fact, safe to back up, saying this subject is gone. The keyring
+  reconciles against those every time it opens, so a key store rolled back to
+  before an erasure is corrected on the next boot rather than trusted.
+
+  The thing that says somebody is gone belongs in the ledger. The thing that
   must actually go does not.
 
-  That reconciliation is not built. Until it is, a restore of the key store can
-  resurrect a subject, and that is the honest limit of this module.
+  ## Being somebody
+
+  A service account key, an access token from the environment, or `gcloud` on a
+  workstation — in that order. The service-account flow is a signed claim
+  exchanged for a token and cached until it nearly expires, so a server needs
+  no SDK and no `gcloud`, and should have neither.
   """
 
   @behaviour LazyRiver.Keyring
@@ -118,15 +124,95 @@ defmodule LazyRiver.Keyring.GCP do
       raise "No KMS key configured. Set :kms_key to projects/…/cryptoKeys/…"
   end
 
-  # A token from the environment in production, from gcloud on a workstation.
-  # The metadata server is the third form and belongs here when there is a
-  # service account to read it from.
+  # Three ways to be somebody, in the order a deployment should prefer them: a
+  # service account it was given, a token handed in by the environment, or
+  # gcloud on a workstation. A server has no gcloud and should not have one.
   defp token(opts) do
     Keyword.get(opts, :token) ||
       System.get_env("GOOGLE_ACCESS_TOKEN") ||
-      case System.cmd("gcloud", ["auth", "print-access-token"], stderr_to_stdout: true) do
-        {token, 0} -> String.trim(token)
-        {out, _} -> raise "No Google access token available: #{out}"
-      end
+      service_account_token() ||
+      gcloud_token()
+  end
+
+  defp gcloud_token do
+    case System.cmd("gcloud", ["auth", "print-access-token"], stderr_to_stdout: true) do
+      {token, 0} -> String.trim(token)
+      {out, _} -> raise "No Google access token available: #{out}"
+    end
+  rescue
+    ErlangError -> raise "No Google access token available and no gcloud to ask."
+  end
+
+  # ── being a service account ────────────────────────────────────────────────
+  #
+  # Sign a claim that we are who the key says, exchange it for an access token,
+  # and keep the token until shortly before it expires. No SDK and no gcloud —
+  # the whole flow is a signature and one POST.
+
+  defp service_account_token do
+    with path when is_binary(path) <- Application.get_env(:lazy_river, :gcp_credentials),
+         {:ok, raw} <- File.read(path),
+         {:ok, account} <- Jason.decode(raw) do
+      cached_token(account)
+    else
+      _ -> nil
+    end
+  end
+
+  defp cached_token(account) do
+    now = System.system_time(:second)
+
+    case :persistent_term.get({__MODULE__, :token}, nil) do
+      {token, expires} when expires > now + 60 -> token
+      _ -> mint_token(account, now)
+    end
+  end
+
+  defp mint_token(account, now) do
+    claims = %{
+      "iss" => account["client_email"],
+      "scope" => "https://www.googleapis.com/auth/cloud-platform",
+      "aud" => "https://oauth2.googleapis.com/token",
+      "iat" => now,
+      "exp" => now + 3600
+    }
+
+    jwt = sign(%{"alg" => "RS256", "typ" => "JWT"}, claims, account["private_key"])
+
+    body =
+      URI.encode_query(%{
+        "grant_type" => "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "assertion" => jwt
+      })
+
+    request =
+      {~c"https://oauth2.googleapis.com/token", [], ~c"application/x-www-form-urlencoded", body}
+
+    case :httpc.request(:post, request, [{:timeout, 15_000}], []) do
+      {:ok, {{_, 200, _}, _, response}} ->
+        %{"access_token" => token, "expires_in" => ttl} =
+          response |> to_string() |> Jason.decode!()
+
+        :persistent_term.put({__MODULE__, :token}, {token, now + ttl})
+        token
+
+      {:ok, {{_, status, _}, _, response}} ->
+        raise "Google refused the service account (#{status}): #{to_string(response)}"
+
+      {:error, why} ->
+        raise "Could not reach Google to exchange the service account: #{inspect(why)}"
+    end
+  end
+
+  defp sign(header, claims, pem) do
+    signing_input =
+      Base.url_encode64(Jason.encode!(header), padding: false) <>
+        "." <> Base.url_encode64(Jason.encode!(claims), padding: false)
+
+    [entry] = :public_key.pem_decode(pem)
+    key = :public_key.pem_entry_decode(entry)
+    signature = :public_key.sign(signing_input, :sha256, key)
+
+    signing_input <> "." <> Base.url_encode64(signature, padding: false)
   end
 end

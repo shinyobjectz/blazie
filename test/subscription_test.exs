@@ -121,6 +121,28 @@ defmodule LazyRiver.SubscriptionTest do
     end
   end
 
+  describe "a ledger that goes away" do
+    test "takes its subscriptions quietly, without crashing" do
+      name = {:closing, System.unique_integer([:positive])}
+      {:ok, ledger} = Ledger.open(name)
+      {:ok, _} = Ledger.append(ledger, Attribute.seed())
+      {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
+
+      {:ok, _ref} = Subscription.watch([ledger], attribute: "height")
+      before = Subscription.count()
+
+      :ok = Ledger.close(name)
+
+      # No crash report, and the subscription is gone rather than waiting to
+      # fail on the next announcement.
+      Enum.reduce_while(1..100, nil, fn _, _ ->
+        if Subscription.count() < before, do: {:halt, :ok}, else: {:cont, Process.sleep(10)}
+      end)
+
+      assert Subscription.count() < before
+    end
+  end
+
   describe "letting go" do
     test "unwatching stops the pushes", %{ledger: ledger} do
       {:ok, ref} = Subscription.watch([ledger], attribute: "height")

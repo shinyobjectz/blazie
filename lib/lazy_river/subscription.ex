@@ -93,7 +93,18 @@ defmodule LazyRiver.Subscription do
     ref = Keyword.fetch!(opts, :ref)
 
     Process.monitor(to)
-    for ledger <- ledgers, do: Registry.register(LazyRiver.Watchers, watched_name(ledger), ref)
+
+    # Watch the ledgers too, not only the subscriber. A ledger that closes
+    # while somebody is watching it used to arrive as a crash — the next
+    # announcement tried to open a snapshot of something that had gone.
+    for ledger <- ledgers do
+      Registry.register(LazyRiver.Watchers, watched_name(ledger), ref)
+
+      case GenServer.whereis(ledger) do
+        pid when is_pid(pid) -> Process.monitor(pid)
+        _ -> :ok
+      end
+    end
 
     {:ok,
      %{
@@ -108,18 +119,28 @@ defmodule LazyRiver.Subscription do
   @impl true
   def handle_info({:appended, _ledger, _tx, facts}, state) do
     if Formula.stale?(state.reads, facts) do
-      snapshot = Snapshot.open(state.ledgers)
-      {answered, reads} = answer(state.question, snapshot)
+      try do
+        snapshot = Snapshot.open(state.ledgers)
+        {answered, reads} = answer(state.question, snapshot)
 
-      send(state.to, {:lazy_river, state.ref, %{name: Snapshot.name(snapshot), facts: answered}})
+        send(
+          state.to,
+          {:lazy_river, state.ref, %{name: Snapshot.name(snapshot), facts: answered}}
+        )
 
-      {:noreply, %{state | reads: reads}}
+        {:noreply, %{state | reads: reads}}
+      catch
+        # A ledger went between the announcement and the answer. The monitor
+        # will say so; there is nothing to report in the meantime.
+        :exit, _ -> {:stop, :normal, state}
+      end
     else
       {:noreply, state}
     end
   end
 
-  # Whoever asked has gone. There is nobody to push to.
+  # Whoever asked has gone, or a ledger being watched has. Either way there is
+  # nothing left to answer — going quietly beats crashing on the next write.
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state), do: {:stop, :normal, state}
 
   # ── questions ──────────────────────────────────────────────────────────────
