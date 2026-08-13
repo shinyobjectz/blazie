@@ -318,6 +318,10 @@ defmodule LazyRiver.Ledger do
          name: name,
          tx: resumed,
          facts: Enum.reverse(replayed),
+         # Counted rather than measured. `length/1` is O(n), and both the
+         # trim check and `resident/1` ran it — the trim check on EVERY
+         # append, which is the shape of cost the store was just cured of.
+         count: length(replayed),
          by_id: %{},
          by_attribute: %{},
          by_value: %{},
@@ -353,13 +357,19 @@ defmodule LazyRiver.Ledger do
     announce(state.name, tx, facts)
 
     # Newest first while resident; readers reverse. Appending is the hot path.
-    state = %{state | tx: tx, store: store, facts: Enum.reverse(facts) ++ state.facts}
+    state = %{
+      state
+      | tx: tx,
+        store: store,
+        facts: Enum.reverse(facts) ++ state.facts,
+        count: state.count + length(facts)
+    }
 
     {:reply, {:ok, tx}, state |> index(facts) |> trim()}
   end
 
   def handle_call(:tx, _from, state), do: {:reply, state.tx, state}
-  def handle_call(:resident, _from, state), do: {:reply, length(state.facts), state}
+  def handle_call(:resident, _from, state), do: {:reply, state.count, state}
 
   def handle_call({:raw_at, tx}, _from, state) do
     {:reply, state.facts |> Enum.drop_while(&(&1.tx > tx)) |> Enum.reverse(), state}
@@ -466,12 +476,13 @@ defmodule LazyRiver.Ledger do
   defp trim(%{resident: :unbounded} = state), do: state
 
   defp trim(state) do
-    if length(state.facts) > trunc(state.resident * 1.5) do
+    if state.count > trunc(state.resident * 1.5) do
       kept = keep_whole_transactions(state.facts, state.resident)
 
       %{
         state
         | facts: kept,
+          count: length(kept),
           by_id: %{},
           by_attribute: %{},
           by_value: %{},

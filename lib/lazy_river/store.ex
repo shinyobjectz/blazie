@@ -90,6 +90,30 @@ defmodule LazyRiver.Store.File do
   This makes opening cheaper, not the file smaller. Making it smaller means
   knowing which facts may be dropped, which is cardinality and erasure, and
   neither of those is here yet.
+
+  ## What this is not, and it is worth being blunt
+
+  **The file is never read again after `open/2`.** Everything is held in the
+  process, `replay/1` hands back what is held, and the writes go to disk so a
+  restart can rebuild that. So this is a memory store that also persists,
+  rather than a store that reads from disk — and three measured consequences
+  follow, none of which the shape above admits to.
+
+  Memory is the binding limit: 241 bytes per fact live, 87% of it the ledger's
+  three sort orders. About a million facts per ledger before stalls bite, six
+  million before a 4GB box does.
+
+  `resident:` therefore bounds what the *ledger* keeps and not what the store
+  keeps, so a bound of a thousand on a hundred thousand facts still holds a
+  hundred thousand here — it saves 63% of the bytes rather than 99%.
+
+  And a fact the ledger evicted is answered by re-scanning this list with no
+  index, which measured a thousand times slower than an indexed read. The one
+  lever against the memory wall is the lever that breaks reads.
+
+  Fixing it means a store that seeks: an offset index per transaction, reads
+  that go back to the file, and a cache with a policy. That is a different
+  module rather than a change to this one, which is why the seam exists.
   """
 
   @behaviour LazyRiver.Store
