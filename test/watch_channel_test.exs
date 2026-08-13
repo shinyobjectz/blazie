@@ -75,14 +75,14 @@ defmodule LazyRiver.Surface.WatchChannelTest do
     test "a matching write pushes an answer", ctx do
       {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
 
-      assert_push("value", %{"facts" => facts})
+      assert_push("answer", %{"facts" => facts})
       assert [%{"attribute" => "height", "value" => 180}] = facts
     end
 
     test "everything pushed can actually cross a wire", ctx do
       {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
 
-      assert_push("value", payload)
+      assert_push("answer", payload)
 
       # assert_push compares terms; a socket encodes them. A snapshot name is
       # keyed by ledger reference inside, and pushing one raw crashed the
@@ -95,7 +95,7 @@ defmodule LazyRiver.Surface.WatchChannelTest do
     test "the answer carries a name that still answers", ctx do
       {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
 
-      assert_push("value", %{"name" => name, "facts" => facts})
+      assert_push("answer", %{"name" => name, "facts" => facts})
 
       # The name is the contract: asking it again gives the same answer.
       reopened = Snapshot.reopen(%{ctx.ledger => name[ctx.name]})
@@ -105,15 +105,15 @@ defmodule LazyRiver.Surface.WatchChannelTest do
     test "a write outside the question is silent", ctx do
       {:ok, _} = Ledger.append(ctx.ledger, [{42, "colour", "blue"}])
 
-      refute_push("value", %{}, 50)
+      refute_push("answer", %{}, 50)
     end
 
     test "each matching write pushes again", ctx do
       {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
-      assert_push("value", %{"facts" => first})
+      assert_push("answer", %{"facts" => first})
 
       {:ok, _} = Ledger.append(ctx.ledger, [{43, "height", 190}])
-      assert_push("value", %{"facts" => second})
+      assert_push("answer", %{"facts" => second})
 
       assert length(first) == 1
       assert length(second) == 2

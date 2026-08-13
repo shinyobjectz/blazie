@@ -59,6 +59,22 @@ if config_env() == :prod do
     backup_target: backup_target,
     backup_every: String.to_integer(System.get_env("BACKUP_EVERY") || "900")
 
+  # A backup nobody has restored is a rumour, so the drill is on by default
+  # wherever a backup is. `DRILL_EVERY=0` turns it off and says so in the
+  # environment, which is a decision somebody made rather than a component
+  # quietly never wired.
+  #
+  # It stages into a scratch directory that is deliberately not the data volume:
+  # a restore must never share a path with the facts it is checking. If the
+  # container's temp space cannot hold the largest ledger, set DRILL_DIR to
+  # somewhere that can — never to LEDGER_DIR, which the drill refuses anyway.
+  drill_every = String.to_integer(System.get_env("DRILL_EVERY") || "21600")
+
+  config :lazy_river,
+    drill_every: if(drill_every > 0, do: drill_every),
+    drill_dir: System.get_env("DRILL_DIR"),
+    drill_max_bytes: String.to_integer(System.get_env("DRILL_MAX_BYTES") || "536870912")
+
   if backup_target == nil do
     IO.warn(
       "No backup target is configured, so nothing is being copied anywhere. Losing /data loses every fact and every key. Set BACKUP_BUCKET (with BACKUP_ENDPOINT and credentials) or BACKUP_DIR."

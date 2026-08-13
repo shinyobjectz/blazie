@@ -30,6 +30,19 @@ defmodule LazyRiver.Application do
     end
   end
 
+  # Two conditions, because there are two ways for a drill to be wrong. Without a
+  # target it has nothing to restore from and would fail every cadence saying so.
+  # Without `:drill_every` nobody asked for one, and a drill nobody asked for is
+  # a process pulling a ledger down onto a node's scratch disk on a timer.
+  defp drill do
+    case {Application.get_env(:lazy_river, :backup_target),
+          Application.get_env(:lazy_river, :drill_every)} do
+      {nil, _every} -> []
+      {_target, nil} -> []
+      {_target, every} -> [{LazyRiver.Drill, every: every}]
+    end
+  end
+
   @impl true
   def start(_type, _args) do
     children =
@@ -49,7 +62,7 @@ defmodule LazyRiver.Application do
         {LazyRiver.Formula.Engine, name: LazyRiver.Formula.Engine},
         {Phoenix.PubSub, name: LazyRiver.PubSub},
         LazyRiver.Surface.Endpoint
-      ] ++ vitals() ++ backup()
+      ] ++ vitals() ++ backup() ++ drill()
 
     # Three restarts in five seconds is too tight for a system where restarting
     # a component is a legitimate operation rather than only a symptom. Ten

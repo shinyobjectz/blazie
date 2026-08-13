@@ -32,7 +32,12 @@ defmodule LazyRiver.SubscriptionTest do
       {:ok, tx} = Ledger.append(ledger, [{42, "height", 180}])
 
       assert_receive {:lazy_river, ^ref, answer}
-      assert answer.name == %{ledger => tx}
+
+      # Keyed by what the ledger is called, not by where it is. That is what
+      # makes a name something JSON can carry and something a caller can send
+      # straight back — and it is why nothing between here and the socket has
+      # to translate it any more.
+      assert answer.name == %{Ledger.name_of(ledger) => tx}
 
       # And that name still answers the same forever.
       assert Snapshot.reopen(answer.name) |> Snapshot.find(attribute: "height") == answer.facts

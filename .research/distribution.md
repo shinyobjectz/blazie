@@ -14,6 +14,19 @@ River promises today needs consensus, and the reason is structural rather than
 lucky: there is no operation that writes to two ledgers, so there is no
 cross-ledger atomicity to preserve.
 
+**But "one owner" is the wrong place to put the guarantee.** The single most
+useful thing this research turned up: Jepsen showed that Datomic — the same
+architecture, fifteen years older — runs two live transactors during a failover,
+and that this is *safe*, because every commit is a compare-and-set on the
+database's head. Datomic removed the single-writer claim from its safety
+documentation as a result. Apache BookKeeper, whose unit is also called a
+ledger, says it plainly: "leader election is really leader suggestion… **it is
+the job of the log to guarantee that only one can write changes to the
+system**." So the recommendation is not a better lock. It is **a conditional
+append** — the writer states the head it believes is current, and the store
+refuses if it is not. That is a day's work at one node and it makes every later
+option safe rather than hopeful.
+
 **A cross-node snapshot is coherent.** It is exactly as coherent as a
 cross-ledger snapshot already is on one node — which is to say: stable, and
 never atomic. A snapshot name was never a point in a global order. It is a
@@ -33,6 +46,16 @@ and above what is already there, is a shorter deploy window and a way to hold
 more tenants than one machine holds — and the first of those is blocked on the
 *store* being shared, not on the cluster existing. Section 6 works through the
 failure list one at a time.
+
+There is one more thing to say before the detail, because it changes how §1
+should be read. **Today's position is not "one node, ready for a second."** A
+ledger owned by another node cannot be read, written or watched from here at all
+— `LazyRiver.Registry` is node-local and nothing routes. `watch` across nodes
+would join, receive nothing and never error. Erasure destroys a key on one
+machine. Two nodes running the backup job overwrite each other's keys in the
+bucket. A second node added today would not be a distributed database; it would
+be two databases sharing a name registry, and several of the ways that goes
+wrong are silent.
 
 ---
 
@@ -78,6 +101,51 @@ facts are on its own disk, unreachable under that name, and the survivor holds a
 different history at the same transaction numbers. That is the silent fork,
 achieved through the mechanism intended to prevent it.
 
+This is documented behaviour, not a bug. OTP's `global` docs say that when a
+name clash is discovered on heal, a `Resolve` function decides "which pid is
+correct"; the default, `random_exit_name/3`, "randomly selects one of the pids
+for registration and kills the other one".
+
+Three things about that sentence are worth knowing before relying on it.
+
+**It is not random.** The implementation in `lib/kernel/src/global.erl` —
+unchanged from OTP 21 through OTP 28 — is `minmax/2` comparing *node names*:
+
+```erlang
+minmax(P1, P2) ->
+    if node(P1) < node(P2) -> {P1, P2}; true -> {P2, P1} end.
+
+random_exit_name(Name, Pid, Pid2) ->
+    {Min, Max} = minmax(Pid, Pid2),
+    logger:log(info, "global: Name conflict terminating ~tw\n", [{Name, Max}]),
+    exit(Max, kill),
+    Min.
+```
+
+The pid on the lexicographically **lower node name** always survives. The
+function name and the docstring are both wrong. Which history survives a
+netsplit is not a coin toss; it is whichever node was named earlier in the
+alphabet.
+
+**The kill is untrappable, and this tree depends on it being trappable.**
+`exit(Max, kill)` cannot be caught. `Ledger.init/1` sets
+`Process.flag(:trap_exit, true)` with the comment "so the store is closed on an
+ordinary shutdown rather than only when the process is killed" — and
+`terminate/2` is what calls `state.module.close(state.store)`. A `:global`
+conflict resolution bypasses that entirely: the file handle is never closed, no
+final checkpoint is taken, and the losing ledger's resident-but-unflushed state
+goes with it.
+
+**It is logged below the default log level.** `logger:log(info, ...)`, against
+OTP's default primary level of `notice`. A silent fork resolved by killing a
+ledger writer produces, by default, *no log line at all*.
+
+**And the window is 45 to 75 seconds wide.** `:global` learns about a lost node
+from `net_kernel`, whose `net_ticktime` defaults to 60 seconds with
+`net_tickintensity` 4 — so a silently unreachable node is not declared down for
+somewhere between 45 and 75 seconds. That is the floor on how long two ledgers
+can both be appending before anything notices.
+
 With the OTP 25+ default (`prevent_overlapping_partitions: true`), the first run
 of the same script produced instead:
 
@@ -87,13 +155,57 @@ of the same script produced instead:
 ```
 
 — `:global` responded to the partition by tearing down connections to nodes that
-were perfectly reachable. That is the better of the two behaviours and it should
-be understood for what it is: `:global` trades a fork for a wider outage, and it
-makes that trade without being asked.
+were perfectly reachable. The docs describe this as actively disconnecting "from
+nodes that reports that they have lost connections to other nodes", advise
+*strongly* against disabling it, and note the fix "has to be enabled on all
+nodes in the network in order to work properly". That is the better of the two
+behaviours and it should be understood for what it is: `:global` trades a fork
+for a wider outage, and it makes that trade without being asked.
 
 `:global` is a same-partition mutual exclusion. It is not a placement mechanism,
 and it cannot become one, because it has no way to fence a process that comes
-back.
+back. Kleppmann's argument applies exactly: a lock without a monotonically
+increasing token cannot be made safe against a paused holder, because "GC can
+pause a running thread at *any point*, including the point that is maximally
+inconvenient for you (between the last check and the write operation)". A
+`:global` claim is precisely a lock with no token.
+
+One more `:global` property worth knowing before anyone proposes leaning on it
+harder: registration takes **one cluster-wide lock, keyed by the single atom
+`global`** — not one lock per name — across every node it knows about, with no
+quorum. Contention backs off from 250 ms, doubling to 8 seconds. The EU RELEASE
+project measured the consequence: "just 0.01% global commands limits scalability
+to around 60 nodes", and "the latency of the global commands increases
+dramatically with scale". `:global` is fine for claiming a ledger once per open,
+which is exactly how this tree uses it, and it does not become the basis of
+anything larger.
+
+### 1.1a And no other BEAM registry fixes this
+
+Worth settling now, because "swap `:global` for something better" is the
+reflexive first suggestion and it is wrong.
+
+| | Two nodes hold one name under partition? | How it resolves |
+|---|---|---|
+| `:global` | **Yes** | Kills the pid on the higher node name, untrappably, at `info` level |
+| `syn` 3.x | **Yes**, documented | Higher `erlang:system_time/0` wins — its own docs call this "a very simple mechanism that can be imprecise, as system clocks are not perfectly aligned in a cluster" |
+| `Swarm` (ring) | **Yes** — "network partitions result in all partitions running an instance" | Shuts down copies after heal. Dormant since 2021. |
+| `Horde` | **Yes** — and **also without a partition**: two simultaneous `register/3` calls both return `{:ok, pid}`, and the CRDT picks a loser ~200 ms later | `{:name_conflict, …}` exit |
+| `ra` | **No** — a minority cannot commit | n/a |
+
+Horde's own README redirects singleton users elsewhere, and its docs say the
+conflict exit "can be a common occurrence". Every CRDT- or gossip-based registry
+on the BEAM is in the same class as `:global` on the only question that matters
+here. The distinction is not `:global` versus a better registry; it is **a
+registry versus a log that refuses a stale writer** (§2.2).
+
+This is not a BEAM problem, either. Alquraan et al. studied 136
+network-partitioning failures across 25 cloud systems and found the majority
+"led to catastrophic effects, such as data loss, reappearance of deleted data,
+broken locks", that "88% of the failures can occur by isolating a single node",
+and that 29% came from *partial* partitions — "the majority of partial network
+partitioning failures are due to design flaws. This indicates that developers do
+not anticipate networks to fail in this way."
 
 ### 1.2 There is no routing, so a second node is a second database
 
@@ -177,19 +289,30 @@ A job is the one thing that reaches outside (doctrine 6), so a duplicate run is
 a duplicate side effect: a second POST, a second model call, a second backup.
 Nothing in the design currently makes a job cluster-singular.
 
-### 1.8 The two confirmed name bugs get worse, not merely carried
+### 1.8 One name bug is fixed; the other gets worse distributed
 
-`failure-modes.md` C1: a snapshot name is client-writable and a transaction
-above the ledger's current one is accepted, silently meaning "everything, so
-far". Distributed, a transaction number minted against one node's counter is not
-merely unbounded — it is meaningless on another node, so a name becomes
-ambiguous as well as unstable.
+`failure-modes.md` names two defects in the snapshot name. Their status differs,
+and the difference is instructive.
 
-C2: `Controller.named/2` zips `Map.values/1` against the caller's argument order,
-assigning each ledger somebody else's transaction. Across nodes it would assign
-each ledger another *machine's* transaction. Both are prerequisites, not
-consequences: there is no point designing distribution on top of a name that is
-already wrong at n = 1.
+**C2 is fixed, and the fix is a prerequisite for everything below.** While this
+was being written, `Snapshot.open/1` changed from keying on a ledger *reference*
+to keying on `Ledger.name_of/1`, and `Controller.named/2` — which zipped
+`Map.values/1` against the caller's argument order and so gave each ledger
+somebody else's transaction — is gone. `Snapshot.reopen/1` now normalises an
+address handed in where a name belongs.
+
+That matters more than a bug fix. A name keyed by a via-tuple into a *local*
+`Registry` is meaningless on another node by construction; a name keyed by the
+ledger's own name is not. The snapshot name is now the portable, machine-
+independent value §2.1 argues it always should have been. **Distribution just got
+materially cheaper, and this is the change that did it.**
+
+**C1 is not fixed.** A snapshot name is still client-writable and a transaction
+above the ledger's current one is still accepted, silently meaning "everything,
+so far" — there is no bound check in `Wire.snapshot_name/1`, `Snapshot.reopen/1`
+or the controller. Distributed, a transaction number minted against one node's
+counter is not merely unbounded; it is *ambiguous*, because nothing in the name
+says which counter it came from. Fix it before routing exists, not after.
 
 ---
 
@@ -232,12 +355,125 @@ position; the composition of immutable prefixes is immutable. Node placement
 appears nowhere in that argument. The name is a vector clock that never needs
 comparing, and vectors do not care where their components live.
 
-This is the same answer Datomic gives. A Datomic database has its own basis-t;
-several databases in one query have several, and Datomic offers no global
-timestamp across them and no cross-database consistency guarantee. The
-comparison is exact because the shape is the same.
+This is the same answer Datomic gives, and Datomic is the closest relative this
+design has. Datomic's ACID documentation says "the time basis of transactions is
+a global ordering of transactions for a **particular system**" — one database —
+and "a database value knows its time basis via `Database.basisT()`". There is no
+cross-database basis-t and no documented cross-database consistency guarantee.
+Datomic composes several databases in one query the same way `Snapshot` composes
+several ledgers: as several independent points, each stable, with no claim that
+they were taken together.
 
-### 2.2 So what does distribution actually cost?
+The rest of the Datomic comparison is worth having in front of you, because it
+is the same architecture arrived at independently. Datomic Pro is "a distributed
+database with arbitrary read scaling", with **"Writes (transactions): Single
+transactor process"** and **"Write availability: Failover to standby
+transactor"**, while "application processes have their own copy of the query
+engine and database in local memory". That is: one writer per database, no
+consensus in the write path, HA by a standby with a storage-level lock, and
+readers that evaluate locally. Doctrine 7 and doctrine 8 describe the same
+machine. Datomic Cloud reaches the same place by a different route, using
+"conditional writes with DynamoDB" for the transaction log — a compare-and-swap
+in storage, not a quorum.
+
+The conclusion to draw is not "Datomic did it so it is fine". It is narrower and
+stronger: **the shape Lazy River has chosen has a well-tested existence proof in
+which consensus appears nowhere in the write path, and the single writer is
+protected by a conditional write in the storage layer.** That is option B2 in
+§3, fifteen years early.
+
+Datomic's own multi-tenancy advice is the same conclusion from the other end:
+"the Datomic transactor is designed and intended to serve a single primary
+database… **if your architecture requirements necessitate multiple logical
+databases, we suggest running an individual transactor per active database**."
+That sentence is ledger-per-node placement, written by the people who built the
+reference implementation of this shape.
+
+### 2.2 The correction that matters most: the lock is not the safety property
+
+This is the single most useful thing the research turned up, and it changes the
+recommendation rather than decorating it.
+
+Jepsen tested Datomic Pro in 2024 and found that during a transactor failover,
+two transactors can be live at once:
+
+> "During this window Datomic is not a single-writer system, but a multi-writer
+> one! … Thankfully this doesn't matter: **Datomic's safety property follows
+> directly from the Sequential consistency of the storage system's CaS
+> operation. Any number of concurrent transactors ought to be safe.**"
+
+Datomic agreed, and **removed the single-writer argument from its safety
+documentation**. The actual mechanism is a conditional write, stated plainly in
+its ACID docs: "Writes are strong serializable because they are fully
+serialized. **Every successful transaction performs a storage CAS ensuring that
+its basis is the previous transaction.**"
+
+Apply that here and the whole design gets simpler and stronger:
+
+> **One owner per ledger is a liveness and throughput property, not a safety
+> property. Safety should come from the append being a compare-and-set on the
+> ledger's head: the writer supplies the transaction it believes is current, and
+> the store refuses the append if that is not what it finds.**
+
+With that in place, §1.1 stops being a correctness problem. Two nodes racing
+during a partition cannot fork a ledger, because the second one's append is
+refused by the store — the refusal carries its repair, like every other refusal
+here. `:global`, or a lease, or a placement map then exists only to stop two
+nodes wasting work and thrashing a cache, and getting it wrong costs throughput
+rather than history.
+
+This is also the *cheapest* fix available: it is a change to `Store`'s `append`
+callback (take the expected head, return a refusal if it does not match), and it
+is worth making at one node, where it costs nothing and is trivially testable.
+`Store.File` already has the byte offset it would compare; SlateDB, the store
+`mix.exs` names as the destination, already carries a `writer_epoch` in its
+manifest — "a monotonically increasing `u64` that is transactionally incremented
+by a writer on startup", where a fenced writer discovers it "has been fenced"
+and "should halt", and a "zombie writer is a writer with an epoch that is less
+than the `writer_epoch` in the current manifest". That is Kleppmann's fencing
+token, already implemented, in the library already chosen.
+
+Datomic Cloud went one step further and removed the failover window entirely by
+leaning on the CAS rather than on a lock: transactions are routed to "a
+preferred Node per database", but this is "a **performance optimization only:
+any Primary Compute Node can handle any transaction**", and if that node cannot
+be reached "any node can and will handle txes. **Consistency is ensured by CAS
+at the DynamoDB level** … **This is all immediate, there are no
+transfer/recovery intervals.**" Compare Datomic Pro's lock-based HA, where the
+documented worst-case peer recovery is `2 × (heartbeat_msec / 1000) + 1` —
+about **11 seconds** at the default 5-second heartbeat — followed by a
+catch-up period in which transactions "experience unusually long latencies (up
+to several seconds)".
+
+A lock buys an eleven-second outage. A conditional write buys none.
+
+The same conclusion has been reached independently by the system closest to this
+one in vocabulary as well as shape. Apache BookKeeper — whose unit of storage is
+also called a **ledger** — states the model as "a ledger has a single writer and
+multiple readers (SWMR)", and then says the important part outright:
+
+> "**In many cases, leader election is really leader suggestion. Multiple nodes
+> could think that they are leader at any one time. It is the job of the log to
+> guarantee that only one can write changes to the system.**"
+
+Its mechanism is fencing: a new writer marks the ledger in-recovery in the
+metadata store and fences the storage nodes, after which the old writer's
+appends error out rather than being accepted and later reconciled. A sobering
+coda worth carrying: even that had a data-loss bug found by TLA+ in 2021,
+because fencing one read path was not enough — recovery reads had to be fenced
+too. If this route is taken, the fence needs to be modelled, not assumed.
+
+**So the corrected shape of the answer is:**
+
+- The **log** enforces safety, by refusing an append whose expected head is not
+  the current head (or whose writer epoch is stale).
+- The **claim** — `:global`, a lease, a placement map — enforces only
+  efficiency: it stops two nodes doing the same work and thrashing the same
+  cache. Being wrong costs throughput.
+- Which means `:global` is *adequate for the job it would actually have*, and
+  the work is in `Store`, not in `Cluster`.
+
+### 2.3 So what does distribution actually cost?
 
 Precisely two things, and they are both about `open`, not about `ask`.
 
@@ -266,7 +502,7 @@ which ledger could not be reached. It must never be a partial answer: a partial
 answer at a name gets cached by the client forever, and there is no channel to
 tell it otherwise.
 
-### 2.3 What actually breaks it: replication
+### 2.4 What actually breaks it: replication
 
 Placement cannot make a name answer differently. Replication can.
 
@@ -296,7 +532,7 @@ answers for it and the number is returned after quorum commit (Raft). There is
 no correct middle. "Async replica, automatic failover" is the middle, and it is
 the one option in section 3 that should be refused outright.
 
-### 2.4 The restriction that falls out of doctrine 7
+### 2.5 The restriction that falls out of doctrine 7
 
 Doctrine 7 says the evaluator runs where the data is, and "a read is a pure
 function of a snapshot, never a round trip to a second server to fetch what it
@@ -331,18 +567,110 @@ implementation detail of a routing layer.
 | | What it buys | What it costs | What it forbids | Work |
 |---|---|---|---|---|
 | **A. One node** (today) | Everything currently true stays true. No new failure modes, no new vocabulary, no consensus. | Availability is one machine's; RPO is `BACKUP_EVERY` (900s default); RTO is a manual restore on the least-tested path in the system. Capacity is one machine's. | More tenants than one box holds. Zero-downtime deploys. Regional residency. | 0 |
-| **B. Ledger placement, `:global` claims, no replication** | Capacity across machines. Blast radius per node. Placement is the only new concept. Snapshot guarantee untouched (§2.3). | A partition forks a ledger (§1.1) unless the claim is replaced by a real lease. Every cross-node hop is a doctrine-7 violation unless a tenant's ledgers are co-placed. A node's death makes its tenants unavailable until a restore. | Cross-tenant snapshots. Ledger mobility (moving a ledger means moving its disk). | Routing in four operations, cross-node watch, cluster-singular jobs and keyring, backup key namespacing. Weeks. |
-| **B2. Placement with a fenced lease** | Everything B buys, plus a partition cannot fork: a returning owner is refused by its stale token. Ledger mobility, and with a shared store, seconds-not-minutes failover. | Needs a lease store that is not the cluster (object storage, or a small Raft group holding *only* the placement map). Needs the fencing token threaded through every write. | Same as B. | B plus the lease and the token. Weeks, and the store work in §6 first. |
-| **C. Primary/replica per ledger (async)** | A warm copy. Reads could be served locally. Sounds like HA. | **Breaks the central claim on every failover** (§2.3). Read-your-writes needs the primary anyway. Replica lag is a new unbounded quantity. | Nothing — and that is the problem: it forbids nothing and quietly withdraws the guarantee everything rests on. | Weeks, for a negative. |
+| **B. Ledger placement, `:global` claims, no replication** | Capacity across machines. Blast radius per node. Placement is the only new concept. Snapshot guarantee untouched (§2.4). | A partition forks a ledger (§1.1) unless the claim is replaced by a real lease. Every cross-node hop is a doctrine-7 violation unless a tenant's ledgers are co-placed. A node's death makes its tenants unavailable until a restore. | Cross-tenant snapshots. Ledger mobility (moving a ledger means moving its disk). | Routing in four operations, cross-node watch, cluster-singular jobs and keyring, backup key namespacing. Weeks. |
+| **B2. Placement with a conditional append and a writer epoch** | Everything B buys, plus a partition **cannot** fork: a returning owner's append is refused by the store because its epoch is stale. Ledger mobility, and with a shared store, seconds-not-minutes failover. No expiry to wait out. | The store participates in correctness: `Store.append/2` grows an expected-head argument, and the epoch has to live somewhere outside the cluster (object storage suffices). | Same as B. | The conditional append is a day. The epoch and the routing are weeks, and the store work in §6 comes first. |
+| **C. Primary/replica per ledger (async)** | A warm copy. Reads could be served locally. Sounds like HA. | **Breaks the central claim on every failover** (§2.4). Read-your-writes needs the primary anyway. Replica lag is a new unbounded quantity. | Nothing — and that is the problem: it forbids nothing and quietly withdraws the guarantee everything rests on. | Weeks, for a negative. |
 | **D. Raft per ledger (`ra`)** | RPO zero for an acknowledged transaction. Automatic failover with no lost-write window. The snapshot guarantee survives, because a tx is only returned after quorum. | A transaction becomes a network round trip plus remote fsyncs instead of a local write. `tx` stops being a cheap counter. Membership, snapshotting and recovery become operational surface. Three machines minimum per ledger, or a shared Raft group per placement unit. | A one-machine deployment. Cheap writes. | Months. A genuine second implementation of `Ledger`. |
 | **E. Global consensus / sequencer (FDB-shaped)** | One global transaction version; cross-ledger snapshots become atomic and cross-node ones trivially so. | Every read takes a read version from a central component — the exact round trip doctrine 7 refuses. The whole design's reason for existing goes away. | Doctrine 7. | Quarters. A different database. |
 
-A note on option D and doctrine 18 ("prefer what we do not maintain"). `ra` is
-maintained by the RabbitMQ team and is the right library if Raft is the answer —
-that is not the objection. The objection is that adopting it means *we* maintain
-per-ledger Raft cluster lifecycle, membership changes, and a recovery path, and
-doctrine 18's own corollary asks what happens the year they stop. The library is
-cheap; the operational surface it implies is not.
+Three notes on option D, because it is the one that deserves a fair hearing.
+
+**In its favour.** `ra` is the right library if Raft is the answer: maintained by
+the RabbitMQ team, "not tied to RabbitMQ", explicitly designed for exactly this
+shape — "in a data store a data partition can be its own Raft cluster… any long
+lived stateful entity that the user would like to replicate across cluster nodes
+can use a Raft cluster" — and it is continuously tested with Jepsen, which
+nothing else on this list is. Its shared WAL is the piece that makes
+per-ledger Raft affordable at all: "it is not practical or performant to have
+each server write log entries to their own log files", so all servers on a node
+funnel through one WAL and one `fsync` per batch. Idle ledgers cost almost
+nothing, because "leaders will not send append entries unless there is an update
+to be sent". And the Raft **term is a fencing token for free** — §2.2's
+requirement satisfied structurally rather than by us.
+
+**Against, specific to this tree.** A `ra` server id is `{atom(), node()}`.
+RabbitMQ's own runtime docs warn that "in environments with very large numbers of
+quorum queues, the [atom] limit may need a bump. Such workloads are recommended
+against." This tree has already made the opposite decision and written it down
+twice — `Ledger`'s moduledoc: "a ledger's name is any term, not an atom. Tenants
+arrive at runtime, and atoms are never collected — a name taken from a request
+would leak the atom table until the node fell over." One `ra` cluster per ledger
+reintroduces, at the library's boundary, precisely the leak this design refuses.
+That is not a detail; it is a collision between a documented decision here and a
+documented constraint there, and it has no clean workaround if ledgers are
+created from tenant input.
+
+Two more to price: `ra` effects are neither at-least-once nor at-most-once —
+"there is also a chance that effects will never be issued or reach their
+recipients. Ra makes no allowance for this" — which means `announce`/`watch`
+must be derived by a reader from the log rather than emitted as an effect. And
+the shared WAL cuts both ways: if the segment writer crashes it takes the whole
+`ra` supervision tree with it, so the blast radius is every ledger on the node.
+
+**And doctrine 18 cuts sideways, not for or against.** "Prefer what we do not
+maintain" favours the library; its own corollary — "name who else would have to
+keep it alive, and what happens to us the year they stop" — is answered well
+(RabbitMQ is not going anywhere). What doctrine 18 does not cover is that
+adopting `ra` means *we* maintain per-ledger Raft cluster lifecycle, membership
+changes, snapshotting policy and a recovery path. The library is cheap; the
+operational surface it implies is not. RabbitMQ's own guidance is to review the
+topology past ~5000 quorum queues, and a benchmark of 10,000 across three nodes
+measured a rolling cluster restart at **267–285 seconds**. That is the recovery
+cost of ledger-per-Raft-cluster at four figures of ledgers.
+
+### 3.1 There is a theorem here, and it says option B2 is enough
+
+The intuition in §2.2 — that safety belongs in the log and the claim is only an
+optimisation — is not folklore. It has been stated formally twice.
+
+**Vertical Paxos** (Lamport, Malkhi & Zhou, PODC 2009) separates the steady-state
+protocol from reconfiguration: "the use of a configuration master allows… a
+state-machine implementation to tolerate *k* failures using only *k* + 1
+processors instead of the 2*k* + 1 processors required without it", and "the
+configuration master need be called upon… only for reconfiguration". Its own
+summary of the special case is the design being proposed here: "if we call the
+leader the primary and all other acceptors backups, then we have a traditional
+primary-backup system."
+
+**Delos** (Facebook, OSDI 2020) sharpens it to the exact primitive:
+
+> "The Loglet does not have to support fault-tolerant consensus… it is not
+> required to provide high availability for append calls. Instead, the Loglet
+> provides a highly available `seal` command."
+>
+> "**A seal bit does not require fault-tolerant consensus… It can be implemented
+> via a fault-tolerant atomic register, which in turn is weaker than consensus
+> and not subject to the FLP impossibility result.**"
+
+And Delos's reconfiguration store is, in its own words, "simply a versioned
+register supporting a conditional write" — which is exactly what S3's `If-Match`
+became in November 2024.
+
+**Aurora** (SIGMOD 2018) is the production proof, and its scope is stated as
+"single-writer databases with read replicas". Its LSN space is "common across the
+database volume, monotonically increasing, and allocated by the database
+instance", and "**this is the key invariant that allows Aurora to avoid
+distributed consensus for most operations**". Storage nodes have no say: "storage
+nodes do not have a vote in determining whether to accept a write, they must do
+so." Fencing is by epoch, and their sentence about it is the best argument
+against a plain lease that anyone has written:
+
+> "Storage nodes will not accept requests at stale volume epochs. This boxes out
+> old instances with previously open connections… **Some systems use leases to
+> establish short term entitlements to access the system, but leases introduce
+> latency when one needs to wait for expiry. Aurora, rather than waiting for a
+> lease to expire, just changes the locks on the door.**"
+
+That changes the recommendation in one place: **prefer an epoch to a lease.** An
+epoch bumped in the store and validated on every append needs no expiry wait, no
+clock assumption and no `net_ticktime`; a new owner takes over the instant it can
+write, and the old one discovers it is fenced at its next append.
+
+The known counterweight, and it should be recorded: a fence is weaker than
+consensus but not therefore easier to get right. BookKeeper's fencing protocol
+carried a data-loss bug for roughly a decade until a TLA+ model found it in 2021
+— fencing the LAC read path was not sufficient; recovery reads had to be fenced
+too. If this route is taken, the fence gets modelled, not eyeballed.
 
 ---
 
@@ -355,7 +683,7 @@ the side of the partition holding the ledger's owning node.
 |---|---|---|---|
 | **`ask` at a name** | Answers normally. | Cannot answer. | Refuse, naming the unreachable ledger and its owner. **Never** a partial fact set — a partial answer at a name is cached forever. |
 | **`open`** | Returns a current name. | Cannot produce a name. | Refuse. Do not fall back to opening a fresh local ledger under that name — which is what `Ledger.open/2` does today when `:global` says nobody owns it, and under partition `:global` says exactly that (§1.1). This is the single most dangerous line of code in a distributed Lazy River. |
-| **`write`** | Appends normally. | Cannot append. | Refuse with a repair. Under B this is guaranteed only by good luck; under B2 the stale token makes it structural. |
+| **`write`** | Appends normally. | Cannot append. | Refuse with a repair. Under B this holds only by good luck; under B2 the stale epoch makes it structural — the far side may *try*, and the store refuses it. |
 | **`watch`** | Keeps pushing. | Stops pushing. | Must **terminate the subscription with a reason** the client receives. A watch that goes quiet is indistinguishable from data that stopped changing (§1.3), and that is the failure shape this repo has already decided it will not ship. |
 | **Keyring** | Can destroy locally; cannot reach the other side's KEK store or its 15-minute DEK cache. | Cannot reconcile against `$erasures` if that ledger is on the far side; fails silently today (§1.5). | Erasure must be refused, not partially performed, when any node that could answer for the subject is unreachable — and the refusal must say which. A partial erasure that reports success is a compliance failure, not an availability one. |
 | **Backup** | Runs, and copies its own view. | Runs, and copies its own view, over the same `keys/keks` object (§1.6). | Cluster-singular, or namespaced per node **and** per node in the restore path. Whichever is chosen, `verify/1` compares one node's disk against the whole bucket today and would have to learn what a complete cluster backup even is. |
@@ -363,7 +691,7 @@ the side of the partition holding the ledger's owning node.
 
 The general shape: under placement, a partition is an **availability** event for
 the tenants on the far side and nothing more — *provided* the claim is a fenced
-lease rather than a `:global` registration. With `:global`, a partition is a
+conditional append rather than a bare `:global` registration. Without it, a partition is a
 **correctness** event, because both sides will happily open the ledger.
 
 ---
@@ -382,10 +710,10 @@ and address it". Three changes:
 - Refusal rather than local start when the owner is unknown or unreachable
   (§4).
 - The C1 bound (a `tx` above the ledger's current one is refused) and the
-  session floor from §2.2. Both are worth doing at n = 1.
+  session floor from §2.3. Both are worth doing at n = 1.
 
 **`ask`** needs no protocol change *if* a tenant's ledgers are co-placed
-(§2.4) — the snapshot is entirely on one node, the evaluator runs there, and
+(§2.5) — the snapshot is entirely on one node, the evaluator runs there, and
 the caller's node forwards a question and receives an answer, which is one hop
 rather than a fan-out. If co-placement is rejected, `ask` becomes scatter-gather
 and doctrine 7 needs amending first.
@@ -396,7 +724,7 @@ subscriber's pid, which is location-transparent. What has to be added is the
 teardown story — a monitor across the node boundary and an explicit termination
 message on `:nodedown`, so silence is never the signal.
 
-**`write`** routes to the owner, and under B2 carries the fencing token so that
+**`write`** routes to the owner, and under B2 carries the writer epoch so that
 an owner returning from a pause is refused rather than appending into a history
 someone else has continued. Note that `Ledger.append/3` runs the vocabulary
 check *before* the `GenServer.call` — that check reads the ledger's own
@@ -433,12 +761,44 @@ currently a per-node operation.
 "A key destroyed on one node is destroyed everywhere" requires exactly one place
 where the key lives. Three ways to get there:
 
-1. **KEKs into KMS, one key version per subject.** Correct and priced out — the
-   `Keyring.GCP` moduledoc already does this arithmetic (about six cents per key
-   version per month, ~$600/month at ten thousand subjects). It also introduces
-   a destruction *delay*: KMS key-version destruction is scheduled rather than
-   immediate, so "erasure is now" becomes "erasure is scheduled", which is a
-   different sentence and has to be the one the docs say.
+1. **KEKs into KMS, one key version per subject.** Priced out, and — this is new
+   — also *worse*, not merely dearer. The `Keyring.GCP` moduledoc already does
+   the arithmetic (about six cents per key version per month, ~$600/month at ten
+   thousand subjects). What it does not say is what KMS destruction actually
+   means:
+   - Cloud KMS key versions spend a **default 30 days** in
+     `DESTROY_SCHEDULED`, restorable throughout. The minimum is 24 hours, the
+     maximum 120 days, and it is settable **only at key creation**. (The
+     often-repeated "24 hours by default" is wrong.)
+   - After that, "**key material can remain in Google systems for up to 45 days
+     from the scheduled destruction time**", covering "both active systems and
+     data center backups". **So the honest floor is about 45 days and the
+     default path is about 75** — from the API call to gone.
+   - Destroy is **per-location**. Key material "is confined to the selected
+     region while at rest and in use"; there is no cross-location destruction.
+   - And the consistency model runs the wrong way for this: "enabling a key
+     version is a strongly consistent operation", while "**disabling** a key
+     version is an **eventually consistent** operation… in exceptional cases the
+     key version remains usable for several hours after it is disabled." The
+     docs say nothing at all about destroy propagation. The mechanism is
+     visible: "when you create or read key versions, consensus is always
+     required among the datacenters storing the key material… when you perform
+     cryptographic operations… **consensus is not required**." The decrypt path
+     never asks the quorum that knows the key is dead.
+
+   NIST SP 800-88r1 §2.6.3 states the general form of the objection —
+   "sanitization using CE should not be trusted on devices that have been
+   backed-up or escrowed the key(s)" — and its fourth precondition, *be able to
+   verify it*, is simply unsatisfiable against a cloud KMS: you cannot verify
+   Google's 45-day backup expiry, you accept it on contract.
+
+   **This inverts the usual reading of the current design.** Holding
+   per-subject KEKs in a local store with the KMS holding only a master is not
+   a compromise made for price; on latency, verifiability and blast radius it
+   is the *better* architecture, and the doc should say so in those terms. What
+   the local store lacks is irreversibility against a restore — which is what
+   the tombstone reconciliation is for, and which §1.5 shows breaks in a
+   cluster.
 2. **The keyring becomes a cluster singleton**, claimed the way a ledger is
    claimed, with every node calling it to wrap and unwrap. Destroy is then a
    single-node operation again and is correct. Costs: a cross-node call per
@@ -462,7 +822,40 @@ have to be stated and tested rather than assumed:
   vector.** The tombstone-reconciliation story covers a *rollback in time*; it
   does not cover a *copy from a peer* that never had the tombstone applied,
   because reconciliation runs at keyring open and only against the tombstones it
-  can read (§1.5).
+  can read (§1.5). This is NIST's escrow objection with a peer node playing the
+  part of the escrow, and it compounds with §1.6, where two nodes write the same
+  `keys/keks` object.
+
+And one thing worth recording even though it is not a distribution question,
+because it changes what the erasure claim can honestly say. The regulatory
+position on crypto-shredding has moved and is more specific than the README's
+framing:
+
+- WP29 Opinion 05/2014 classifies "deterministic encryption or keyed-hash
+  function with deletion of the key" as **pseudonymisation, not anonymisation**,
+  and names "believing that a pseudonymised dataset is anonymised" as a common
+  mistake. Anyone citing WP29 *for* crypto-shredding is misreading it.
+- EDPB Guidelines 02/2025 on blockchain ¶51 is the closest thing to an
+  endorsement, and it is conditional: on key deletion "the encrypted data will
+  be unintelligible, **at least until the algorithm is broken**, the decryption
+  techniques advance sufficiently… or if the key had already been compromised or
+  leaked", and "encrypted personal data is still personal data". ¶96 adds a
+  standing reassessment duty, naming quantum computers. **A crypto-shred is a
+  claim that has to be maintained, not a ticket that closes.**
+- ¶53 is the interesting one for a fact log: a **perfectly hiding cryptographic
+  commitment** is strictly stronger, because once the data and witness are
+  deleted the commitment is "neither possible to recover nor to recognise" —
+  information-theoretically, with no "until the algorithm is broken" clause.
+  "Commitment on the log, data off-log, delete the witness" dominates
+  "ciphertext on the log, delete the key" on exactly the axis regulators care
+  about.
+- And the road not taken is worth naming, because someone else took it with the
+  same constraints: Amazon QLDB faced an immutable ledger plus Article 17 and
+  did **not** crypto-shred. It built **redaction** — a physical delete-in-place
+  that "deletes only the user data in the specified revision, and leaves the
+  journal sequence and the document metadata unchanged", so the hash chain still
+  verifies. That is structurally what EDPB ¶53 blesses, and it is a live
+  alternative to doctrine 16's mechanism, though not to its intent.
 
 ---
 
@@ -473,10 +866,10 @@ Worth doing as a list, because the answer changes the recommendation.
 | Failure | What covers it today | What a second node adds |
 |---|---|---|
 | Process or ledger crash | OTP supervision; restart in milliseconds, replay from checkpoint. | Nothing. |
-| Node crash / VM restart | Supervisor tree restart, or the platform restarting the container; `LEDGER_DIR` is a mounted volume. Seconds to tens of seconds. | Nothing, unless the ledger can *move*, which needs a lease and a store the other node can read. |
+| Node crash / VM restart | Supervisor tree restart, or the platform restarting the container; `LEDGER_DIR` is a mounted volume. Seconds to tens of seconds. | Nothing, unless the ledger can *move*, which needs an epoch and a store the other node can read. |
 | Deploy | The node goes and comes back. Tens of seconds of unavailability, every deploy. | Zero-downtime deploys — **but only with a shared store.** With local disks, moving a ledger means moving a volume. |
 | Disk death | The backup job. RPO = `BACKUP_EVERY` (900s default), and note `LEDGER_SYNC` is off by default, so a returned transaction survives a process death and not a power loss. | Nothing that a shorter cadence and `LEDGER_SYNC=true` do not do more cheaply. |
-| Machine death | Backup covers durability, not availability. Recovery is a restore — minutes to hours, on the code path `failure-modes.md` names as the least-tested in the system. | This is the real one. Placement plus a shared store turns a restore into a lease handoff. |
+| Machine death | Backup covers durability, not availability. Recovery is a restore — minutes to hours, on the code path `failure-modes.md` names as the least-tested in the system. | This is the real one. Placement plus a shared store turns a restore into an epoch bump. |
 | Region death | Nothing. | Nothing, unless placement is region-aware, which is a further step. |
 | Load / capacity | One machine's. | This is the other real one, and it is where placement is unambiguously the right tool. |
 
@@ -499,14 +892,21 @@ is a second node.
 
 ## 7. Recommendation
 
-**Do not build consensus. Do not build replication. Build placement, and build
-the store first.** In this order:
+**Do not build consensus. Do not build replication. Put the guarantee in the log,
+not in the registry — and build the store before the cluster.** In this order:
 
 **0 — Fix the name.** C1 (refuse a `tx` above the ledger's current, with a
 repair rather than a clamp) and C2 (`Controller.named/2`). Add the session floor
-from §2.2. These are prerequisites: designing distribution on a name that is
+from §2.3. These are prerequisites: designing distribution on a name that is
 already wrong at one node is designing on sand. They are also worth doing
 whatever the answer to distribution turns out to be.
+
+**0b — Make `append` conditional.** Add an expected-head argument to `Store`'s
+`append/2` and refuse, with a repair, when it does not match. This is the
+`writer_epoch`/CAS of §2.2 and §3.1, it is a day's work at one node, and it is
+what makes every later option safe rather than hopeful. Do it before anything
+else on this list, because it is the only item that is both cheap now and
+load-bearing later.
 
 **1 — Tell the truth about `:global`, today.** Change `LazyRiver.Cluster`'s
 moduledoc to say what §1.1 measures: `:global` is same-partition mutual
@@ -518,16 +918,39 @@ currently reads as reassurance.
 
 **2 — Move the store to object storage.** The single highest-leverage piece of
 work on this list, and it is not a distribution project. It converts "move a
-ledger" from a volume migration into a lease handoff, and it collapses five rows
+ledger" from a volume migration into an epoch bump, and it collapses five rows
 of the §6 table.
 
-**3 — Then placement, with a fenced lease (option B2).** Ledger → node, held as
-a lease with a monotonic token, the token threaded through every append so a
-returning owner is refused rather than accepted. Object storage with conditional
-writes is a sufficient lease store and avoids introducing a consensus system to
-hold a map of a few thousand entries. With it: routing in the four operations,
-cross-node watch, cluster-singular (or per-placement-unit) keyring and jobs,
-and a backup that knows what a cluster is.
+**3 — Then placement, with an epoch rather than a lease (option B2).** Ledger →
+node, with a monotonically increasing epoch bumped in the store on takeover and
+validated on every append. **Prefer the epoch to the lease**, for Aurora's
+reason: a lease has to be waited out, an epoch does not — "rather than waiting
+for a lease to expire, just changes the locks on the door." Put the epoch **in
+the object key**, as Neon's generation numbers and SlateDB's writer epochs both
+do, so a stale writer and the current one cannot collide on one object at all
+rather than racing for it.
+
+Object storage is a sufficient home for that epoch and avoids introducing a
+consensus system to hold a map of a few thousand entries: S3 has had
+`If-None-Match` (put-if-absent) since August 2024, `If-Match` (compare-and-swap)
+since November 2024, and conditional deletes since September 2025, and AWS's own
+position is that these address concurrent writes "without needing external
+coordination systems". Two caveats to design around, both load-bearing:
+
+- **Conditional writes are only sound if every writer uses them.** AWS says so
+  directly: "non-conditional operations can bypass conditional logic… True
+  concurrency control requires all requests to follow identical rules." Enforce
+  it with the `s3:if-match` / `s3:if-none-match` bucket-policy condition keys,
+  not by convention.
+- **The rate ceiling is roughly 10–15 conditional writes per second on one hot
+  key.** That is fine for an epoch bumped on takeover and a lease renewed every
+  few seconds. It is nowhere near enough for a CAS per transaction, so the
+  per-append conditional check belongs in the store's local write path, not in a
+  round trip to the bucket.
+
+With placement: routing in the four operations, cross-node watch,
+cluster-singular (or per-placement-unit) keyring and jobs, and a backup that
+knows what a cluster is.
 
 **4 — Adopt co-placement as a rule, in writing.** A tenant's ledgers move
 together; a snapshot never spans a placement unit. This is what keeps doctrine 7
@@ -539,10 +962,25 @@ months-long project that changes what a transaction costs. It is not an
 incremental step from B2, and pretending otherwise is how C gets built by
 accident.
 
+**6 — And do not go the other way either.** The temptation, when consensus looks
+expensive, is eventual consistency with merge-on-read. That road is thoroughly
+mapped and it ends badly for a system making this system's promises. Jepsen
+measured Riak losing **71% of acknowledged writes on a fully-connected, healthy
+cluster with no partitions**, and **92% with `PR=PW=R=W=quorum`** — because
+last-write-wins over wall-clock timestamps has no reliable notion of "last".
+Basho's own engineer wrote it best in 2013: "Last write wins, except when it
+doesn't, but even then it does… there is no reliable definition of 'last write';
+because system clocks across multiple servers are going to drift." The industry
+converged away from it: Amazon's 2022 paper says DynamoDB "shared most of the
+name of the previous Dynamo system but little of its architecture", uses
+Multi-Paxos, and that "**only the leader replica can serve write and strongly
+consistent read requests**". Immutability makes this worse here, not better — a
+merged wrong answer would be cached under a name forever.
+
 The smallest step that buys real availability, stated on its own because it was
-asked for directly: **a shared store plus a fenced lease** — steps 2 and 3.
-Everything before that is honesty work, and everything after it is a different
-system.
+asked for directly: **a conditional append, a shared store, and an epoch** —
+steps 0b, 2 and 3. Everything before that is honesty work, and everything after
+it is a different system.
 
 ---
 
@@ -553,11 +991,12 @@ system.
 - *RPO zero.* An acknowledged transaction on a node that then loses its disk
   costs whatever the backup cadence is. If that is unacceptable, D is the only
   option and it should be chosen deliberately.
-- *Automatic failover.* A dead node's tenants are unavailable until the lease
-  expires and the ledger is reopened elsewhere — seconds with a shared store,
-  a restore without one.
+- *Automatic failover.* A dead node's tenants are unavailable until another node
+  bumps the epoch and reopens the ledger — seconds with a shared store, a
+  restore without one. (With an epoch rather than a lease there is no expiry to
+  wait out, which is the point of §3.1.)
 
-**By choosing co-placement (§2.4):**
+**By choosing co-placement (§2.5):**
 
 - *Cross-tenant snapshots.* A question can never span two placement units. In
   exchange, doctrine 7 stays literally true and `ask` stays one hop.
@@ -566,12 +1005,17 @@ system.
   also its own placement unit. That is a scheduling constraint to state, not a
   contradiction.
 
-**By choosing a fenced lease over `:global`:**
+**By choosing an epoch in the store over `:global` alone:**
 
-- *Zero dependencies.* `:global` is in OTP and costs nothing. A lease means a
-  store that is not the cluster, and a story for what happens when it is
-  unreachable. Doctrine 18 cuts both ways here: the lease store is something
-  else to keep alive, but so is a bespoke split-brain resolver.
+- *Zero dependencies.* `:global` is in OTP and costs nothing. An epoch means a
+  store that participates — `Store.append/2` grows an argument, and object
+  storage becomes load-bearing for correctness rather than only for bytes.
+  Doctrine 18 cuts both ways: the store is something else to keep alive, but so
+  is a bespoke split-brain resolver.
+- *Nothing else.* Note what is **not** on this list: `:global` does not have to
+  be removed. Once the log refuses a stale writer, `:global` is doing a job it is
+  good at. This is the cheapest part of the whole proposal and it should not be
+  confused for the expensive part.
 
 **Regardless of option, we give up these, and they should be priced:**
 
@@ -610,8 +1054,8 @@ right project.
 **3. Availability or durability?** The backup already covers "the disk died".
 If the answer is durability, the cheapest real improvements are `LEDGER_SYNC`,
 a shorter cadence, and a restore that has actually been run — none of which is a
-second node. If the answer is availability, the work is a shared store and a
-fenced lease, and consensus still never enters the picture. If the answer is
+second node. If the answer is availability, the work is a conditional append,
+a shared store and an epoch, and consensus still never enters the picture. If the answer is
 "both, and RPO zero", that is option D and it should be said out loud, because
 it is a months-long project that changes what a transaction costs.
 
@@ -619,5 +1063,199 @@ it is a months-long project that changes what a transaction costs.
 
 ## Sources
 
-*Filled in below from the research pass; every claim about another system is
-cited, and claims about this tree are cited to the file and line.*
+Claims about this tree are cited to the module in the text. Everything else is
+below. Where a fact was measured rather than read, it says so.
+
+**Measured here, 2026-08-13**
+
+- The `:global` netsplit transcript in §1.1: OTP 29 / erts 17.0.5, three nodes
+  via `:peer`, `prevent_overlapping_partitions` disabled to keep the observer
+  connected. Script at
+  `<scratchpad>/global_split.exs` and `split2.exs`; it is thirty lines and runs
+  in ten seconds, which is why §7 step 1 asks for it as a test.
+
+**`:global`, OTP and the BEAM**
+
+- `global` module reference, incl. `Resolve`, `random_exit_name/3`,
+  `random_notify_name/3`, `notify_all_name/3`, and
+  `prevent_overlapping_partitions` (OTP 25+) —
+  <https://www.erlang.org/doc/apps/kernel/global.html>
+- `random_exit_name/3` / `minmax/2` implementation (the "not random" finding) —
+  `lib/kernel/src/global.erl`, unchanged OTP 21 → OTP 28
+- `net_ticktime` (60 s) and `net_tickintensity` (4), giving the 45–75 s
+  detection window — <https://www.erlang.org/doc/apps/kernel/kernel_app.html>
+- Global-operation scalability ("0.01% global commands limits scalability to
+  around 60 nodes") — RELEASE project, *Improving the Scalability of the Erlang
+  Distributed Actor Model*,
+  <https://www.dcs.gla.ac.uk/research/sd-erlang/release-summary-arxiv.pdf>
+- Horde: CAP statement, duplicate processes, `{:name_conflict, …}`, and the
+  README's redirect for singletons — <https://horde.hexdocs.pm/readme.html>,
+  <https://hexdocs.pm/horde/eventual_consistency.html>
+- `syn` conflict resolution by system time — <https://github.com/ostinelli/syn>
+- `Swarm` partition behaviour — <https://github.com/bitwalker/swarm>
+- Mnesia `{inconsistent_database, running_partitioned_network, Node}` and "what
+  data to keep after a communication failure is outside the scope of Mnesia" —
+  <https://www.erlang.org/doc/apps/mnesia/mnesia_chap7.html>
+- `ra`: multi-Raft model, shared WAL rationale, `wal_sync_method`, "thousands of
+  ra clusters", server id `{atom(), node()}`, Jepsen testing —
+  <https://github.com/rabbitmq/ra>,
+  <https://github.com/rabbitmq/ra/blob/main/docs/internals/INTERNALS.md>
+- `ra` effects: "there is also a chance that effects will never be issued or
+  reach their recipients. Ra makes no allowance for this" — INTERNALS, above
+- Atom-table warning for large numbers of quorum queues —
+  <https://www.rabbitmq.com/docs/runtime>
+- ~5000 quorum-queue guidance — <https://www.rabbitmq.com/docs/quorum-queues>;
+  10,000-queue restart benchmark (267–285 s) —
+  <https://www.rabbitmq.com/blog/2025/09/01/6-khepri-default>
+- Khepri: why RabbitMQ left Mnesia, majority requirement, whole dataset in
+  memory — <https://github.com/rabbitmq/khepri>,
+  <https://www.rabbitmq.com/docs/metadata-store>
+
+**Datomic — the closest relative**
+
+- "No per-db write scaling… only one transaction can occur at a time in a given
+  database"; peers hold the query engine and database in local memory —
+  <https://docs.datomic.com/overview/architecture.html>
+- "Every successful transaction performs a storage CAS ensuring that its basis is
+  the previous transaction"; "the time basis of transactions is a global ordering
+  of transactions for a particular system" —
+  <https://docs.datomic.com/transactions/acid.html>
+- Single transactor process, failover to standby, `heartbeat-interval-msec`
+  5000, `2 × (hb/1000) + 1` ≈ 11 s recovery, post-failover latency cliff —
+  <https://docs.datomic.com/operation/ha.html>
+- **Jepsen: two transactors can be live at once, and it is safe because of the
+  CAS** — <https://jepsen.io/analyses/datomic-pro-1.0.7075>; Datomic's response,
+  including removing the single-writer safety argument —
+  <https://blog.datomic.com/2024/05/Jepsen-tests-Datomic.html>
+- Cloud: consistent hash ring is "a performance optimization only"; "any node can
+  and will handle txes. Consistency is ensured by CAS at the DynamoDB level…
+  there are no transfer/recovery intervals" —
+  <https://docs.datomic.com/glossary.html>,
+  <https://docs.datomic.com/operation/cloud-ha.html>
+- Cross-database: peers may join across databases, clients may not —
+  <https://docs.datomic.com/reference/clients-and-peers.html>. **No cross-database
+  point-in-time guarantee is documented anywhere; the conclusion in §2.1 is
+  inferential** (per-database `basisT`, per-connection `sync` and `transact`) —
+  <https://docs.datomic.com/javadoc/datomic/Database.html>,
+  <https://docs.datomic.com/transactions/client-synchronization.html>
+- "Run an individual transactor per active database" —
+  <https://forum.datomic.com/t/multi-tenancy-databases/238>
+
+**The theorem: consensus in the control plane, a fence in the data plane**
+
+- Vertical Paxos — Lamport, Malkhi & Zhou, PODC 2009 —
+  <https://lamport.azurewebsites.net/pubs/vertical-paxos.pdf>
+- Delos — "a seal bit does not require fault-tolerant consensus… weaker than
+  consensus and not subject to FLP", OSDI 2020 —
+  <https://www.usenix.org/system/files/osdi20-balakrishnan.pdf>
+- Aurora — "storage nodes do not have a vote… they must do so"; "rather than
+  waiting for a lease to expire, just changes the locks on the door", SIGMOD 2018
+  — <https://pages.cs.wisc.edu/~yxy/cs839-s20/papers/aurora-sigmod-18.pdf>
+- CORFU — the sequencer "is merely an optimization… not required for either
+  safety or progress", NSDI 2012 —
+  <https://www.usenix.org/system/files/conference/nsdi12/nsdi12-final30.pdf>
+- Apache BookKeeper — "a ledger has a single writer and multiple readers";
+  "leader election is really leader suggestion… it is the job of the log to
+  guarantee that only one can write changes to the system" —
+  <https://bookkeeper.apache.org/docs/development/protocol/>; the 2021 TLA+
+  data-loss finding — <https://github.com/apache/bookkeeper/issues/2614>
+- FoundationDB — Active Disk Paxos for coordinators only; singletons "are not
+  performance bottlenecks"; "consistent reads do require obtaining a read version
+  from the primary data center"; median recovery 3.08 s, p90 5.28 s over 289
+  production reconfigurations — <https://www.foundationdb.org/files/fdb-paper.pdf>
+- CockroachDB — HLC, 500 ms `--max-offset`, self-termination at 80% skew against
+  half the cluster, serializable but explicitly **not** strictly serializable —
+  <https://www.cockroachlabs.com/docs/stable/architecture/transaction-layer>,
+  <https://www.cockroachlabs.com/blog/consistency-model/>
+
+**Fencing, leases and object storage**
+
+- Kleppmann, *How to do distributed locking* — the GC-pause argument, "you cannot
+  fix this problem by inserting a check on the lock expiry just before writing
+  back to storage", and "this requires the storage server to take an active role
+  in checking tokens" —
+  <https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html>
+- Chubby's *sequencer* and lock generation number, the same idea in 2006 —
+  <https://static.googleusercontent.com/media/research.google.com/en//archive/chubby-osdi06.pdf>
+- Gray & Cheriton, *Leases*, SOSP 1989 —
+  <https://web.stanford.edu/class/cs240/readings/leases.pdf>
+- SlateDB `writer_epoch` — "a monotonically increasing u64 that is
+  transactionally incremented by a writer on startup"; "a zombie writer is a
+  writer with an epoch that is less than the `writer_epoch` in the current
+  manifest" —
+  <https://raw.githubusercontent.com/slatedb/slatedb/main/rfcs/0001-manifest.md>
+  (SlateDB is the store named in this repo's own `mix.exs` deps comment)
+- Neon generation numbers — "enables strong anti-split-brain properties… without
+  implementing a consensus mechanism directly in the pageservers" —
+  <https://github.com/neondatabase/neon/pull/4919>
+- S3 conditional writes: `If-None-Match` (2024-08-20) —
+  <https://aws.amazon.com/about-aws/whats-new/2024/08/amazon-s3-conditional-writes/>;
+  `If-Match` (2024-11-25) —
+  <https://aws.amazon.com/about-aws/whats-new/2024/11/amazon-s3-functionality-conditional-writes/>;
+  the "non-conditional operations can bypass conditional logic" caveat —
+  <https://aws.amazon.com/blogs/storage/building-multi-writer-applications-on-amazon-s3-using-native-controls/>
+- The ~10–15 conditional writes/sec ceiling on a hot key — Chris Douglas,
+  *Conditional Operations in Object Stores*, 2026-01-30 —
+  <https://cdouglas.github.io/posts/2026/01/conditional>
+
+**Why not eventual consistency**
+
+- Jepsen on Riak: 71% of acknowledged writes lost on a healthy, fully-connected
+  cluster; 92% at `PR=PW=R=W=quorum` — <https://aphyr.com/posts/285-jepsen-riak>
+- "Last write wins, except when it doesn't, but even then it does… there is no
+  reliable definition of 'last write'" — Basho, 2013 —
+  <https://riak.com/posts/technical/clocks-are-bad-or-welcome-to-distributed-systems/>
+- DynamoDB "shared most of the name of the previous Dynamo system but little of
+  its architecture"; Multi-Paxos; "only the leader replica can serve write and
+  strongly consistent read requests", USENIX ATC 2022 —
+  <https://www.usenix.org/system/files/atc22-elhemali.pdf>
+- Alquraan et al., *An Analysis of Network-Partitioning Failures in Cloud
+  Systems*, OSDI 2018 — 88% reachable by isolating one node, 29% partial
+  partitions — <https://www.usenix.org/system/files/osdi18-alquraan.pdf>
+
+**Erasure, keys and the law**
+
+- Cloud KMS key states: default 30 days scheduled-for-destruction, minimum 24 h,
+  maximum 120 days, set at creation only —
+  <https://cloud.google.com/kms/docs/key-states>
+- "Key material can remain in Google systems for up to 45 days from the scheduled
+  destruction time" — <https://cloud.google.com/kms/docs/destroy-restore>
+- Enable is strongly consistent, **disable is eventually consistent**; "when you
+  perform cryptographic operations… consensus is not required" —
+  <https://cloud.google.com/kms/docs/consistency>,
+  <https://cloud.google.com/kms/docs/locations>
+- NIST SP 800-88r1 §2.6, §2.6.3 — Cryptographic Erase, and "sanitization using CE
+  should not be trusted on devices that have been backed-up or escrowed the
+  key(s)" —
+  <https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-88r1.pdf>
+- WP29 Opinion 05/2014 — key-deletion encryption is **pseudonymisation, not
+  anonymisation** —
+  <https://ec.europa.eu/justice/article-29/documentation/opinion-recommendation/files/2014/wp216_en.pdf>
+- EDPB Guidelines 02/2025 ¶51 (unintelligible "at least until the algorithm is
+  broken"), ¶53 (perfectly hiding commitments), ¶96 (standing reassessment) —
+  <https://www.edpb.europa.eu/system/files/2026-07/edpb_guidelines_202502_blockchain_v2_en.pdf>
+- Amazon QLDB redaction — physical delete-in-place preserving the journal hash
+  chain, chosen instead of crypto-shredding —
+  <https://docs.aws.amazon.com/qldb/latest/developerguide/what-is.html>
+
+**Within this repo**
+
+- `.research/failure-modes.md` — C1 (client-writable name, future-pinned
+  transaction), C2 (`Controller.named/2` permutation), C4 (eviction stops
+  sealing), C5 (`:erased` is indistinguishable from corruption), C10 (formula
+  cache serves plaintext after erasure), and finding 5 (backup retention makes
+  crypto-shredding reversible by the controller). Every "gets worse distributed"
+  note in §1.8 refers to those entries.
+- `.monty/ontology.db` — doctrine 6, 7, 8, 16, 17, 18, 20; words `led`, `snp`,
+  `snp.name`, `opn`, `wrt`, `wch`.
+
+**Not found, and recorded as gaps**
+
+- No official Datomic statement, either way, on cross-database point-in-time
+  consistency. §2.1's conclusion is inference from documented per-database
+  scoping, not a quotable denial.
+- No published per-operation latency figures for `ra` as a library; everything
+  quantitative comes from RabbitMQ quorum-queue benchmarks.
+- No Jepsen analysis of Mnesia, `:global`, or Horde exists. Do not attribute one.
+- The ICO's 2025 encryption guidance addresses encryption-with-key-retained and
+  is silent on the destroyed-key case — neither for nor against.

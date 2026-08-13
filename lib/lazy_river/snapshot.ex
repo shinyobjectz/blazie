@@ -19,7 +19,18 @@ defmodule LazyRiver.Snapshot do
   @enforce_keys [:at]
   defstruct [:at]
 
-  @type name :: %{Ledger.ref() => non_neg_integer()}
+  @typedoc """
+  Which ledgers, at which transaction — keyed by **what each ledger is called**,
+  never by where it currently lives.
+
+  Those were different maps until they were not allowed to be. A snapshot named
+  by process addresses is not something JSON can carry, not something a caller
+  can send back, and not the same map after a restart — so every layer that
+  handed one outwards translated it first, and `watch` crashed on every real
+  push because one of them forgot. One meaning, one shape, and the translations
+  are gone.
+  """
+  @type name :: %{Ledger.name() => non_neg_integer()}
   @type t :: %__MODULE__{at: name()}
 
   @doc """
@@ -30,22 +41,30 @@ defmodule LazyRiver.Snapshot do
   """
   @spec open([Ledger.ref()]) :: t()
   def open(ledgers) when is_list(ledgers) do
-    %__MODULE__{at: Map.new(ledgers, &{&1, Ledger.tx(&1)})}
+    %__MODULE__{at: Map.new(ledgers, &{Ledger.name_of(&1), Ledger.tx(&1)})}
   end
 
   @doc "The snapshot's name — small, stable, and safe to hand to a caller."
   @spec name(t()) :: name()
   def name(%__MODULE__{at: at}), do: at
 
-  @doc "Reopen a snapshot from a name. The same name is the same snapshot."
+  @doc """
+  Reopen a snapshot from a name. The same name is the same snapshot.
+
+  A name arrives from outside here, so an address handed in where a name
+  belongs is normalised rather than trusted — otherwise it would be stored, and
+  the shape a snapshot promises would depend on who built it.
+  """
   @spec reopen(name()) :: t()
-  def reopen(at) when is_map(at), do: %__MODULE__{at: at}
+  def reopen(at) when is_map(at) do
+    %__MODULE__{at: Map.new(at, fn {ledger, tx} -> {Ledger.name_of(ledger), tx} end)}
+  end
 
   @doc "Every fact visible in this snapshot, oldest first across all ledgers."
   @spec facts(t()) :: [Fact.t()]
   def facts(%__MODULE__{at: at}) do
     at
-    |> Enum.flat_map(fn {ledger, tx} -> Ledger.facts_at(ledger, tx) end)
+    |> Enum.flat_map(fn {ledger, tx} -> Ledger.facts_at(Ledger.via(ledger), tx) end)
     |> Enum.sort_by(& &1.tx)
   end
 
@@ -65,7 +84,7 @@ defmodule LazyRiver.Snapshot do
     record_read(pattern)
 
     at
-    |> Enum.flat_map(fn {ledger, tx} -> Ledger.find_at(ledger, tx, pattern) end)
+    |> Enum.flat_map(fn {ledger, tx} -> Ledger.find_at(Ledger.via(ledger), tx, pattern) end)
     |> Enum.sort_by(& &1.tx)
   end
 

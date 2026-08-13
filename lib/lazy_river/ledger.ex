@@ -180,6 +180,23 @@ defmodule LazyRiver.Ledger do
   @spec via(name()) :: ref()
   def via(name), do: {:via, Registry, {LazyRiver.Registry, name}}
 
+  @doc """
+  What a ledger is called, given its address.
+
+  An address is where a ledger is; a name is what it is called. Everything a
+  caller holds or stores is the name, because an address is a live thing that
+  means nothing after a restart and nothing at all on paper.
+  """
+  @spec name_of(ref()) :: name()
+  def name_of({:via, Registry, {LazyRiver.Registry, name}}), do: name
+  def name_of(pid) when is_pid(pid), do: raise(ArgumentError, pid_has_no_name())
+  def name_of(name), do: name
+
+  defp pid_has_no_name do
+    "A ledger's name cannot be recovered from a bare pid. Open it by name — " <>
+      "Ledger.open/2 hands back an address that carries one."
+  end
+
   # ── writing ────────────────────────────────────────────────────────────────
 
   @doc """

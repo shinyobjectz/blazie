@@ -24,7 +24,7 @@ defmodule LazyRiver.Surface.Controller do
 
   def open(conn, %{"ledgers" => names}) when is_list(names) do
     with {:ok, refs} <- open_all(names) do
-      json(conn, %{"name" => refs |> Snapshot.open() |> Snapshot.name() |> named(names)})
+      json(conn, %{"name" => refs |> Snapshot.open() |> Snapshot.name()})
     else
       {:error, refusal} -> refuse(conn, refusal)
     end
@@ -76,17 +76,18 @@ defmodule LazyRiver.Surface.Controller do
     end
   end
 
-  # A snapshot's name is keyed by ledger reference inside; over the wire it is
-  # keyed by the name the caller used.
-  defp named(internal, names) do
-    internal |> Map.values() |> Enum.zip(names) |> Map.new(fn {tx, name} -> {name, tx} end)
-  end
-
+  # A name goes out exactly as it is held: keyed by what each ledger is called.
+  # There is nothing to translate, which is the point — the version of this that
+  # translated zipped a map's values against the caller's list and trusted the
+  # two to line up, and a map does not promise the order anybody put things in.
   defp reopen(name) do
     Enum.reduce_while(name, {:ok, %{}}, fn {ledger, tx}, {:ok, acc} ->
+      # Opened rather than merely trusted: a name is a plain map a caller can
+      # write by hand, so naming a ledger here has to go through the same door
+      # as naming one anywhere else.
       case Ledger.open(ledger) do
-        {:ok, ref} ->
-          {:cont, {:ok, Map.put(acc, ref, tx)}}
+        {:ok, _ref} ->
+          {:cont, {:ok, Map.put(acc, ledger, tx)}}
 
         _ ->
           {:halt,

@@ -619,7 +619,15 @@ defmodule LazyRiver.ThroughputTest do
       # set, and a checkpoint serialises every fact ever written. That is a
       # stall inside `handle_call`, so it lands on whichever writer is unlucky
       # and on every writer queued behind it.
-      header(["resident facts", "p50 us", "p99 us", "max us", "stall vs p50"])
+      header([
+        "resident facts",
+        "p50 us",
+        "p99 us",
+        "max us",
+        "stall vs p50",
+        "checkpoint KB",
+        "KB rewritten per txn"
+      ])
 
       {_name, ledger} = open_ledger(:file, sync: false, checkpoint_every: 1_000)
       filled = 0
@@ -635,7 +643,19 @@ defmodule LazyRiver.ThroughputTest do
           end
 
         s = stats(latencies)
-        row([size, s.p50, s.p99, s.max, "#{round(s.max / max(s.p50, 1))}x"])
+        path = inside(pid_of(ledger), & &1.store.path)
+        checkpoint = File.stat!(path <> ".checkpoint").size
+
+        row([
+          size,
+          s.p50,
+          s.p99,
+          s.max,
+          "#{round(s.max / max(s.p50, 1))}x",
+          div(checkpoint, 1024),
+          Float.round(checkpoint / 1_000 / 1024, 1)
+        ])
+
         size + 2_100
       end)
     end
@@ -793,7 +813,8 @@ defmodule LazyRiver.ThroughputTest do
         "facts written",
         "ledger list",
         "store list",
-        "process MB",
+        "live MB",
+        "live B/fact written",
         "txn/s"
       ])
 
@@ -811,12 +832,15 @@ defmodule LazyRiver.ThroughputTest do
             {length(state.facts), length(state.store.facts)}
           end)
 
+        {live, _indexes} = sizes_inside(pid_of(ledger))
+
         row([
           inspect(bound),
           100_000,
           ledger_list,
           store_list,
-          Float.round(process_bytes(ledger) / 1_048_576, 2),
+          Float.round(live / 1_048_576, 2),
+          Float.round(live / 100_000, 1),
           rate(1_000, elapsed)
         ])
       end
