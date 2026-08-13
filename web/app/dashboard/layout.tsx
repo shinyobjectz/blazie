@@ -1,6 +1,8 @@
 "use client"
 
 import { Check, ChevronDown } from "lucide-react"
+import { usePathname } from "next/navigation"
+import { useEffect } from "react"
 
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import {
@@ -36,6 +38,7 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
+  const pathname = usePathname()
   const { held, error, retry } = useClusterState()
   const { width, setWidth, remember } = useSidebarWidth()
 
@@ -62,6 +65,14 @@ export default function DashboardLayout({
   }
 
   if (!held.who.login) return <SignIn can={held.who.can.sign_in} />
+
+  // Signed in and holding nothing: there is exactly one useful thing to do and
+  // this is it. Every other page asks a cluster a question, so leaving somebody
+  // on the orbit with no cluster shows an empty sky and no way to read it as
+  // "open one" rather than "something is broken".
+  if (held.clusters.length === 0 && pathname !== "/dashboard/clusters") {
+    return <Onboarding />
+  }
 
   return (
     <ClusterHeld value={held}>
@@ -163,6 +174,28 @@ function SignIn({ can }: { can: boolean }) {
           `wrangler pages secret put`.
         </p>
       )}
+    </main>
+  )
+}
+
+/**
+ * The first screen anybody sees, and the only one that works with nothing.
+ *
+ * A redirect rather than a page of its own, because the clusters page already
+ * IS this when it is empty — two screens saying "open one" would drift apart,
+ * and the one you would keep is the one that can also show you the cluster
+ * afterwards.
+ */
+function Onboarding() {
+  useEffect(() => {
+    window.location.replace("/dashboard/clusters/")
+  }, [])
+
+  return (
+    <main className="px-6 py-20">
+      <p className="font-mono mx-auto max-w-3xl text-sm text-muted-foreground">
+        you hold no clusters yet — opening one…
+      </p>
     </main>
   )
 }
