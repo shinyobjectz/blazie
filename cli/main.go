@@ -71,10 +71,8 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		asJSON, err = cmdWhoami(ctx, rest, out)
 	case "ledger":
 		asJSON, err = cmdLedger(ctx, rest, out)
-	case "ask":
-		asJSON, err = cmdAsk(ctx, rest, out)
-	case "write":
-		asJSON, err = cmdWrite(ctx, rest, out)
+	case "run":
+		asJSON, err = cmdRun(ctx, rest, out)
 	case "watch":
 		asJSON, err = cmdWatch(ctx, rest, out, errOut)
 	case "config":
@@ -450,10 +448,19 @@ func cmdLedger(ctx context.Context, args []string, out io.Writer) (bool, error) 
 		return false, err
 	}
 
-	if rest := flags.set.Args(); len(rest) != 1 || rest[0] != "ls" {
+	rest := flags.set.Args()
+	switch {
+	case len(rest) == 2 && rest[0] == "new":
+		return cmdLedgerNew(ctx, flags, rest[1], out)
+
+	case len(rest) == 1 && rest[0] == "ls":
+		// fall through to the listing below
+
+	default:
 		return flags.asJSON, &usageError{&Refusal{
 			Problem: "unknown_command",
-			Repair:  "The only one is `blazie ledger ls` — the ledgers this token may name.",
+			Repair: "There are two: `blazie ledger ls` for the ledgers this token may " +
+				"name, and `blazie ledger new <name>` to take one.",
 		}}
 	}
 
@@ -485,111 +492,129 @@ func cmdLedger(ctx context.Context, args []string, out io.Writer) (bool, error) 
 	return flags.asJSON, nil
 }
 
-// ── ask ─────────────────────────────────────────────────────────────────────
-
-func cmdAsk(ctx context.Context, args []string, out io.Writer) (bool, error) {
-	flags := newFlags("ask")
-	attribute := flags.set.String("attribute", "", "match this attribute")
-	id := flags.set.String("id", "", "match this id")
-	value := flags.set.String("value", "", "match this value")
-	by := flags.set.String("by", "", "match facts produced by this formula or job")
-	stringly := flags.set.Bool("string", false, "take --id and --value as strings, never as JSON")
-	if err := flags.parse(args); err != nil {
-		return false, err
-	}
-
-	ledgers := flags.set.Args()
-	if len(ledgers) == 0 {
-		return flags.asJSON, &usageError{&Refusal{
-			Problem: "no_ledgers",
-			Repair: "Name the ledgers to ask. Asking none is not asking everything — " +
-				"`blazie ask <ledger> [<ledger>...]`.",
-		}}
-	}
-
+// cmdLedgerNew takes a name. Claiming grants it to whoever claimed it, which is
+// the part a caller could never write for itself — every request is checked
+// against the ledgers it may name, so a new one was refused before it could be
+// created.
+func cmdLedgerNew(ctx context.Context, flags *common, name string, out io.Writer) (bool, error) {
 	client, _, err := flags.client()
 	if err != nil {
 		return flags.asJSON, err
 	}
 
-	pattern := Pattern{Attribute: *attribute, By: *by}
-	if isSet(flags.set, "id") {
-		pattern.ID = parseID(*id, *stringly)
-	}
-	if isSet(flags.set, "value") {
-		pattern.Value = parseValue(*value, *stringly)
-	}
-
-	// Two calls, because they are two operations: opening names the ledgers and
-	// hands back the snapshot, and the ask puts the question to that snapshot.
-	// The name is printed alongside the answer for the reason the name exists —
-	// asking again at it gives these same facts forever.
-	name, err := client.Open(ctx, ledgers)
-	if err != nil {
-		return flags.asJSON, err
-	}
-
-	facts, err := client.Ask(ctx, name, pattern)
+	at, err := client.Claim(ctx, name)
 	if err != nil {
 		return flags.asJSON, err
 	}
 
 	if flags.asJSON {
-		writeJSON(out, map[string]any{"name": name, "facts": facts})
+		writeJSON(out, map[string]any{"ledger": name, "name": at})
 		return flags.asJSON, nil
 	}
 
-	fmt.Fprintf(out, "%s\n\n", styleFor(out).dim(nameString(name)))
-	RenderFacts(out, facts)
+	s := styleFor(out)
+	fmt.Fprintf(out, "%s\n", s.bold(name))
+	fmt.Fprintf(out, "%s\n", s.dim("yours. run against it with `blazie run "+name+" '<lua>'`"))
 	return flags.asJSON, nil
 }
 
-// ── write ───────────────────────────────────────────────────────────────────
+// ── run ─────────────────────────────────────────────────────────────────────
 
-func cmdWrite(ctx context.Context, args []string, out io.Writer) (bool, error) {
-	flags := newFlags("write")
-	stringly := flags.set.Bool("string", false, "take the id and value as strings, never as JSON")
+func cmdRun(ctx context.Context, args []string, out io.Writer) (bool, error) {
+	flags := newFlags("run")
+	file := flags.set.String("f", "", "read the lua from a file, or - for stdin")
+	pin := flags.set.String("at", "", "read at this snapshot name, as json")
+	as := flags.set.String("as", "", "formula (default) or job — a job gets a clock and http")
 	if err := flags.parse(args); err != nil {
 		return false, err
 	}
 
 	rest := flags.set.Args()
-	if len(rest) != 4 {
+	if len(rest) == 0 {
 		return flags.asJSON, &usageError{&Refusal{
-			Problem: "incomplete_assertion",
-			Repair: "A fact is an id, an attribute and a value, written into one ledger — " +
-				"`blazie write <ledger> <id> <attribute> <value>`.",
+			Problem: "no_ledger",
+			Repair: "Name the ledger to run against — `blazie run <ledger> '<lua>'` or " +
+				"`blazie run <ledger> -f script.lua`.",
 		}}
 	}
 
-	ledger, id, attribute, value := rest[0], rest[1], rest[2], rest[3]
+	ledger := rest[0]
+	source, err := sourceFrom(rest[1:], *file)
+	if err != nil {
+		return flags.asJSON, err
+	}
 
 	client, _, err := flags.client()
 	if err != nil {
 		return flags.asJSON, err
 	}
 
-	// Three wide, always. A fact written from here came from outside and names
-	// no formula — the node refuses `by` rather than dropping it, so there is
-	// deliberately no flag for it.
-	name, err := client.Write(ctx, ledger, []Assertion{{
-		ID:        parseID(id, *stringly),
-		Attribute: attribute,
-		Value:     parseValue(value, *stringly),
-	}})
+	opts := RunOptions{As: *as}
+	if *pin != "" {
+		if err := json.Unmarshal([]byte(*pin), &opts.Name); err != nil {
+			return flags.asJSON, &usageError{&Refusal{
+				Problem: "bad_name",
+				Repair: "A snapshot name is the json object a run hands back, like " +
+					`{"main":42}. ` + fmt.Sprintf("%q is not one.", *pin),
+			}}
+		}
+	}
+
+	result, err := client.Run(ctx, ledger, source, opts)
 	if err != nil {
 		return flags.asJSON, err
 	}
 
 	if flags.asJSON {
-		writeJSON(out, map[string]any{"name": name})
+		writeJSON(out, result)
 		return flags.asJSON, nil
 	}
 
-	s := styleFor(out)
-	fmt.Fprintf(out, "%s\n", s.bold(nameString(name)))
-	fmt.Fprintf(out, "%s\n", s.dim("the snapshot your fact is in — ask at it and you get it back"))
+	RenderRun(out, result)
 	return flags.asJSON, nil
+}
+
+// sourceFrom takes the Lua from wherever it was given: an argument, a file, or
+// stdin. Both at once is refused rather than one silently winning — a script
+// that meant `-f` and also passed a string has a bug, and picking for it hides
+// the bug rather than the ambiguity.
+func sourceFrom(args []string, file string) (string, error) {
+	inline := strings.TrimSpace(strings.Join(args, " "))
+
+	switch {
+	case inline != "" && file != "":
+		return "", &usageError{&Refusal{
+			Problem: "two_sources",
+			Repair:  "Give the lua as an argument or with -f, not both.",
+		}}
+
+	case file == "-":
+		read, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", &Refusal{Problem: "unreadable", Repair: err.Error()}
+		}
+		return string(read), nil
+
+	case file != "":
+		read, err := os.ReadFile(file)
+		if err != nil {
+			return "", &Refusal{
+				Problem: "unreadable",
+				Repair:  fmt.Sprintf("Could not read %s: %v", file, err),
+			}
+		}
+		return string(read), nil
+
+	case inline != "":
+		return inline, nil
+
+	default:
+		return "", &usageError{&Refusal{
+			Problem: "no_source",
+			Repair: "Give the lua to run — `blazie run <ledger> 'ada.height = 180'`, " +
+				"`-f script.lua`, or `-f -` for stdin.",
+		}}
+	}
 }
 
 // ── watch ───────────────────────────────────────────────────────────────────
@@ -787,20 +812,28 @@ func writeUsage(out io.Writer) {
   blazie config             where the settings are and which node is in force
 
 %s
-  blazie ledger ls                        the ledgers this token may name
-  blazie ask <ledger>...                  open, then put a question to the snapshot
-  blazie write <ledger> <id> <attr> <val> one fact, and the snapshot it lands in
-  blazie watch <ledger>...                the same question, answered again as facts land
+  blazie ledger ls                the ledgers this token may name
+  blazie ledger new <name>        take a name, and hold what you took
+  blazie run <ledger> '<lua>'     run it, and print what it returned
+  blazie run <ledger> -f <file>   the same, from a file (- for stdin)
+  blazie watch <ledger>...        answered again as things land
 
 %s
-  --attribute <name>   match one attribute            (ask, watch)
-  --id <id>            match one id                   (ask, watch)
-  --value <value>      match one value                (ask)
-  --by <name>          match what a formula or job produced   (ask)
-  --string             take --id and --value as text, never as JSON
-  --json               print what the node said, unshaped     (every command)
+  ada.height = 180                     a field is a field
+  ada.friend = grace                   an edge is a field holding an entity
+  ada.height = nil                     unsay it; what was true stays true
+  for p in each { height = 180 } do    find
+  at(42).ada.height                    what it was then
+
+%s
+  -f <file>            read the lua from a file, or - for stdin   (run)
+  --at <name>          read at this snapshot, as json             (run)
+  --as job             give it a clock and http                   (run)
+  --attribute <name>   match one attribute                     (watch)
+  --id <id>            match one id                            (watch)
+  --json               print what the node said, unshaped  (every command)
   --url <url>          the node to talk to
-  --no-browser         never offer to open a browser          (login)
+  --no-browser         never offer to open a browser           (login)
 
 %s
   BLAZIE_URL      the node, unless --url says otherwise
@@ -809,7 +842,8 @@ func writeUsage(out io.Writer) {
 `,
 		s.bold("blazie"),
 		s.bold("Signing in"),
-		s.bold("The four operations"),
+		s.bold("Working"),
+		s.bold("The whole language surface"),
 		s.bold("Flags"),
 		s.bold("Environment"))
 }

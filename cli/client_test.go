@@ -8,100 +8,140 @@ import (
 	"testing"
 )
 
-func TestOpenAskAndWriteSendWhatTheControllerExpects(t *testing.T) {
+func TestRunSendsWhatTheControllerExpects(t *testing.T) {
 	node := &fakeNode{replies: []reply{
-		{status: 200, body: map[string]any{"name": map[string]any{"tenant-7": 12}}},
-		{status: 200, body: map[string]any{"facts": []any{
-			map[string]any{"id": 1, "attribute": "height", "value": 180, "tx": 12, "by": nil},
-		}}},
-		{status: 200, body: map[string]any{"name": map[string]any{"tenant-7": 13}}},
+		{status: 200, body: map[string]any{
+			"value": float64(180),
+			"name":  map[string]any{"tenant-7": 12},
+			"wrote": 0,
+		}},
 	}}
 	client, _ := clientWith(t, node)
-	ctx := context.Background()
 
-	name, err := client.Open(ctx, []string{"tenant-7"})
+	result, err := client.Run(context.Background(), "tenant-7", "return ada.height", RunOptions{})
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatalf("run: %v", err)
 	}
-	if name["tenant-7"] != 12 {
-		t.Fatalf("got %v", name)
+	if result.Value != float64(180) {
+		t.Fatalf("got %v", result.Value)
 	}
-
-	facts, err := client.Ask(ctx, name, Pattern{Attribute: "height"})
-	if err != nil {
-		t.Fatalf("ask: %v", err)
-	}
-	if len(facts) != 1 || facts[0].Attribute != "height" || facts[0].Tx != 12 {
-		t.Fatalf("got %+v", facts)
+	if result.Name["tenant-7"] != 12 {
+		t.Fatalf("got %v", result.Name)
 	}
 
-	if _, err := client.Write(ctx, "tenant-7", []Assertion{
-		{ID: int64(1), Attribute: "height", Value: float64(181)},
-	}); err != nil {
-		t.Fatalf("write: %v", err)
+	if got := node.sent[0].Path; got != "/run" {
+		t.Fatalf("run went to %s", got)
+	}
+	if got := node.sent[0].Body["source"]; got != "return ada.height" {
+		t.Fatalf("the source arrived as %v", got)
 	}
 
-	if got := node.sent[0].Path; got != "/open" {
-		t.Fatalf("open went to %s", got)
-	}
-	if got := node.sent[1].Path; got != "/ask" {
-		t.Fatalf("ask went to %s", got)
-	}
-	if got := node.sent[2].Path; got != "/write" {
-		t.Fatalf("write went to %s", got)
-	}
-
-	// The name goes back exactly as it was held, keyed by what each ledger is
-	// called. Anything else and the node reopens the wrong transaction.
-	askedAt, ok := node.sent[1].Body["name"].(map[string]any)
-	if !ok || askedAt["tenant-7"] != float64(12) {
-		t.Fatalf("the ask carried %v", node.sent[1].Body["name"])
-	}
-
-	// An empty pattern field is absent rather than empty — `{"attribute": ""}`
-	// is refused by the node as an attribute that is not a name.
-	pattern, _ := node.sent[1].Body["pattern"].(map[string]any)
-	if _, present := pattern["value"]; present {
-		t.Fatalf("an unasked-for field was sent: %v", pattern)
-	}
-
-	// Three wide, always. A fact written from a client names no formula.
-	written, _ := node.sent[2].Body["facts"].([]any)
-	first, _ := written[0].(map[string]any)
-	if _, present := first["by"]; present {
-		t.Fatalf("the CLI claimed provenance it cannot have: %v", first)
-	}
-	if len(first) != 3 {
-		t.Fatalf("an assertion is three wide, got %v", first)
+	// Absent rather than empty. `also: []` and `as: ""` are things the node
+	// would have to interpret, and there is nothing to interpret them as.
+	for _, unasked := range []string{"name", "also", "as"} {
+		if _, present := node.sent[0].Body[unasked]; present {
+			t.Fatalf("%s was sent without being asked for: %v", unasked, node.sent[0].Body)
+		}
 	}
 }
 
-// `--json` promises what the node said, so a fact that names no formula has to
-// come back out as null and not as "". A script telling "produced by nothing"
-// from "produced by a formula called nothing" depends on the difference.
-func TestANullProducerSurvivesJSON(t *testing.T) {
-	node := &fakeNode{replies: []reply{{status: 200, body: map[string]any{"facts": []any{
-		map[string]any{"id": 1, "attribute": "height", "value": 180, "tx": 12, "by": nil},
-		map[string]any{"id": 2, "attribute": "height", "value": 181, "tx": 12, "by": "$backup"},
-	}}}}}
+func TestRunCarriesThePinnedNameWhenThereIsOne(t *testing.T) {
+	node := &fakeNode{replies: []reply{{status: 200, body: map[string]any{
+		"value": nil, "name": map[string]any{"tenant-7": 12}, "wrote": 0,
+	}}}}
 	client, _ := clientWith(t, node)
 
-	facts, err := client.Ask(context.Background(), SnapshotName{"tenant-7": 12}, Pattern{})
+	_, err := client.Run(context.Background(), "tenant-7", "return 1", RunOptions{
+		Name: SnapshotName{"tenant-7": 12},
+		Also: []string{"shared"},
+		As:   "job",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if facts[0].By != nil {
-		t.Fatalf("a fact from outside should keep its null, got %q", *facts[0].By)
+	// The name goes back exactly as it was held, keyed by what each ledger is
+	// called. Anything else and the node reopens the wrong transaction.
+	pinned, ok := node.sent[0].Body["name"].(map[string]any)
+	if !ok || pinned["tenant-7"] != float64(12) {
+		t.Fatalf("the run carried %v", node.sent[0].Body["name"])
 	}
-	if facts[0].Producer() != "" {
-		t.Fatalf("got %q", facts[0].Producer())
+	if node.sent[0].Body["as"] != "job" {
+		t.Fatalf("as arrived as %v", node.sent[0].Body["as"])
 	}
-	if facts[1].Producer() != "$backup" {
-		t.Fatalf("got %q", facts[1].Producer())
+	also, _ := node.sent[0].Body["also"].([]any)
+	if len(also) != 1 || also[0] != "shared" {
+		t.Fatalf("also arrived as %v", node.sent[0].Body["also"])
+	}
+}
+
+// A chunk returns whatever Lua returns, so the client cannot assume a shape.
+func TestRunTakesAnyShapeBack(t *testing.T) {
+	for _, value := range []any{
+		float64(180),
+		"Ada",
+		true,
+		[]any{float64(1), float64(2)},
+		map[string]any{"id": "ada", "height": float64(180)},
+		nil,
+	} {
+		node := &fakeNode{replies: []reply{{status: 200, body: map[string]any{
+			"value": value, "name": map[string]any{"t": 1}, "wrote": 0,
+		}}}}
+		client, _ := clientWith(t, node)
+
+		result, err := client.Run(context.Background(), "t", "return x", RunOptions{})
+		if err != nil {
+			t.Fatalf("%v: %v", value, err)
+		}
+		if got, _ := json.Marshal(result.Value); string(got) != mustJSON(value) {
+			t.Fatalf("got %s, want %s", got, mustJSON(value))
+		}
+	}
+}
+
+func TestClaimTakesAName(t *testing.T) {
+	node := &fakeNode{replies: []reply{{status: 201, body: map[string]any{
+		"ledger": "orders", "name": map[string]any{"orders": 0},
+	}}}}
+	client, _ := clientWith(t, node)
+
+	if _, err := client.Claim(context.Background(), "orders"); err != nil {
+		t.Fatal(err)
+	}
+	if got := node.sent[0].Path; got != "/ledgers" {
+		t.Fatalf("claim went to %s", got)
+	}
+	if got := node.sent[0].Body["ledger"]; got != "orders" {
+		t.Fatalf("claim carried %v", got)
+	}
+}
+
+func mustJSON(value any) string {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
+}
+
+// `--json` promises what the node said, so a fact that names no formula has to
+// come back out as null and not as "". A script telling "produced by nothing"
+// from "produced by a formula called nothing" depends on the difference. This is
+// about the watch channel now — the last fact-shaped surface blazie has.
+func TestANullProducerSurvivesJSON(t *testing.T) {
+	outside := Fact{ID: 1, Attribute: "height", Value: 180, Tx: 12, By: nil}
+	made := "$backup"
+	derived := Fact{ID: 2, Attribute: "height", Value: 181, Tx: 12, By: &made}
+
+	if outside.Producer() != "" {
+		t.Fatalf("got %q", outside.Producer())
+	}
+	if derived.Producer() != "$backup" {
+		t.Fatalf("got %q", derived.Producer())
 	}
 
-	raw, err := json.Marshal(facts[0])
+	raw, err := json.Marshal(outside)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +174,7 @@ func TestARefusalKeepsItsStatusProblemAndRepair(t *testing.T) {
 	}}}
 	client, _ := clientWith(t, node)
 
-	_, err := client.Open(context.Background(), []string{"tenant-7"})
+	_, err := client.Run(context.Background(), "tenant-7", "return 1", RunOptions{})
 	refusal := mustRefusal(t, err)
 
 	if refusal.Status != http.StatusForbidden || refusal.Problem != "not_granted" {

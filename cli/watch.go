@@ -11,6 +11,46 @@ import (
 	"time"
 )
 
+// Fact and Pattern live here, and only here.
+//
+// The watch channel is the last fact-shaped surface blazie has: `run` replaced
+// open/ask/write and speaks Lua, but a subscription still pushes rows. When the
+// channel learns to push what a chunk would have returned, both of these go with
+// it — they are not part of what a user of this CLI is meant to know.
+
+// Fact is the row shape a subscription pushes: an id, an attribute said about
+// it, the value, and the transaction that recorded it — plus, optionally, the
+// formula or job that produced it.
+//
+// By is a pointer so that null survives `--json` as null. A fact that came from
+// outside names no formula, and "produced by nothing" and "produced by a
+// formula called nothing" are not the same claim to a script reading this.
+type Fact struct {
+	ID        any     `json:"id"`
+	Attribute string  `json:"attribute"`
+	Value     any     `json:"value"`
+	Tx        int64   `json:"tx"`
+	By        *string `json:"by"`
+}
+
+// Producer is the formula or job behind this fact, or "" when it came from
+// outside.
+func (f Fact) Producer() string {
+	if f.By == nil {
+		return ""
+	}
+	return *f.By
+}
+
+// Pattern is what a subscription watches: fields named are fields matched,
+// fields omitted are fields that may be anything.
+type Pattern struct {
+	ID        any    `json:"id,omitempty"`
+	Attribute string `json:"attribute,omitempty"`
+	Value     any    `json:"value,omitempty"`
+	By        string `json:"by,omitempty"`
+}
+
 // watch — the same question asked again as the snapshot advances.
 //
 // A Phoenix channel, which is a small protocol on top of the websocket in

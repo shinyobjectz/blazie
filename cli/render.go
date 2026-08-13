@@ -259,3 +259,47 @@ func nameString(name SnapshotName) string {
 	}
 	return strings.Join(parts, " ")
 }
+
+// RenderRun prints what a chunk gave back.
+//
+// The value first, because that is what was asked for. Then the name, because a
+// caller holds the name and never the bytes — running the same source at it
+// gives this same answer forever, which is the whole reason it is printed at all
+// rather than kept for the `--json` path.
+func RenderRun(w io.Writer, result *RunResult) {
+	s := styleFor(w)
+
+	switch {
+	case result.Value == nil:
+		fmt.Fprintf(w, "%s\n", s.dim("nil — the chunk returned nothing"))
+
+	case isScalar(result.Value):
+		fmt.Fprintf(w, "%v\n", result.Value)
+
+	default:
+		// A table comes back as JSON already; indenting is the only thing left
+		// to do to it, and printing Go's own map formatting would show a shape
+		// nobody sent.
+		pretty, err := json.MarshalIndent(result.Value, "", "  ")
+		if err != nil {
+			fmt.Fprintf(w, "%v\n", result.Value)
+		} else {
+			fmt.Fprintf(w, "%s\n", pretty)
+		}
+	}
+
+	wrote := "read only"
+	if result.Wrote > 0 {
+		wrote = fmt.Sprintf("wrote %d", result.Wrote)
+	}
+	fmt.Fprintf(w, "%s\n", s.dim(fmt.Sprintf("%s · %s", nameString(result.Name), wrote)))
+}
+
+func isScalar(value any) bool {
+	switch value.(type) {
+	case string, float64, bool, int, int64:
+		return true
+	default:
+		return false
+	}
+}

@@ -199,84 +199,60 @@ func (c *Client) Me(ctx context.Context) (*Me, error) {
 	return &me, err
 }
 
-// ── the four operations ─────────────────────────────────────────────────────
+// ── the two operations ──────────────────────────────────────────────────────
 
-// SnapshotName is which ledgers, at which transaction. A caller holds this and
+// SnapshotName is which ledger, at which transaction. A caller holds this and
 // never the bytes, which is why an answer can be cached against it forever.
 type SnapshotName map[string]int64
 
-// Fact is the only row shape there is: an id, an attribute said about it, the
-// answer, and the transaction that recorded it — plus, optionally, the formula
-// or job that produced it.
+// RunResult is what a chunk gave back.
 //
-// By is a pointer so that null survives `--json` as null. A fact that came from
-// outside names no formula, and "produced by nothing" and "produced by a
-// formula called nothing" are not the same claim to a script reading this.
-type Fact struct {
-	ID        any     `json:"id"`
-	Attribute string  `json:"attribute"`
-	Value     any     `json:"value"`
-	Tx        int64   `json:"tx"`
-	By        *string `json:"by"`
+// Value is `any` because a chunk returns whatever Lua returns — a number, a
+// string, a list, a table. There was a version of this file with a Fact struct
+// and a Pattern struct in it; both are gone, because neither is something a
+// caller of this CLI has any longer.
+type RunResult struct {
+	Value any          `json:"value"`
+	Name  SnapshotName `json:"name"`
+	Wrote int          `json:"wrote"`
 }
 
-// Producer is the formula or job behind this fact, or "" when it came from
-// outside — which is every fact a client ever writes.
-func (f Fact) Producer() string {
-	if f.By == nil {
-		return ""
+// RunOptions are the ways to change what a chunk sees.
+//
+// Name pins the snapshot to read, so the same source at the same name answers
+// the same forever. Also widens the world to read; writes land in the ledger
+// given to Run and nowhere else. As is "formula" (the default, no clock and no
+// network) or "job".
+type RunOptions struct {
+	Name SnapshotName `json:"name,omitempty"`
+	Also []string     `json:"also,omitempty"`
+	As   string       `json:"as,omitempty"`
+}
+
+// Run sends Lua to a ledger and is given back what it returned.
+func (c *Client) Run(ctx context.Context, ledger, source string, opts RunOptions) (*RunResult, error) {
+	body := map[string]any{"ledger": ledger, "source": source}
+	if opts.Name != nil {
+		body["name"] = opts.Name
 	}
-	return *f.By
+	if len(opts.Also) > 0 {
+		body["also"] = opts.Also
+	}
+	if opts.As != "" {
+		body["as"] = opts.As
+	}
+
+	var out RunResult
+	_, err := c.call(ctx, http.MethodPost, "/run", body, &out)
+	return &out, err
 }
 
-// Pattern is what an ask puts to a snapshot: fields named are fields matched,
-// fields omitted are fields that may be anything.
-//
-// The wire calls this "pattern" and so does this, deliberately — the word for
-// it in the vocabulary is `question`, and taking that name here for a struct
-// that is only half of one would be two things wearing one noun.
-type Pattern struct {
-	ID        any    `json:"id,omitempty"`
-	Attribute string `json:"attribute,omitempty"`
-	Value     any    `json:"value,omitempty"`
-	By        string `json:"by,omitempty"`
-}
-
-// Open names ledgers and is given a snapshot of them.
-func (c *Client) Open(ctx context.Context, ledgers []string) (SnapshotName, error) {
+// Claim takes a ledger name, which is granted to whoever claimed it.
+func (c *Client) Claim(ctx context.Context, ledger string) (SnapshotName, error) {
 	var out struct {
 		Name SnapshotName `json:"name"`
 	}
-	_, err := c.call(ctx, http.MethodPost, "/open",
-		map[string]any{"ledgers": ledgers}, &out)
-	return out.Name, err
-}
-
-// Ask puts a question to a snapshot and is given the facts that answer it.
-func (c *Client) Ask(ctx context.Context, name SnapshotName, pattern Pattern) ([]Fact, error) {
-	var out struct {
-		Facts []Fact `json:"facts"`
-	}
-	_, err := c.call(ctx, http.MethodPost, "/ask",
-		map[string]any{"name": name, "pattern": pattern}, &out)
-	return out.Facts, err
-}
-
-// Assertion is a fact on its way in. Three wide, always: a fact written from
-// outside names no formula, and the node refuses `by` rather than dropping it.
-type Assertion struct {
-	ID        any    `json:"id"`
-	Attribute string `json:"attribute"`
-	Value     any    `json:"value"`
-}
-
-// Write adds facts and is given the snapshot that includes them — which is what
-// lets a caller read its own write without polling for it.
-func (c *Client) Write(ctx context.Context, ledger string, facts []Assertion) (SnapshotName, error) {
-	var out struct {
-		Name SnapshotName `json:"name"`
-	}
-	_, err := c.call(ctx, http.MethodPost, "/write",
-		map[string]any{"ledger": ledger, "facts": facts}, &out)
+	_, err := c.call(ctx, http.MethodPost, "/ledgers",
+		map[string]any{"ledger": ledger}, &out)
 	return out.Name, err
 }
