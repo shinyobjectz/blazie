@@ -12,7 +12,15 @@ export PATH := "/opt/homebrew/opt/erlang/bin:" + env_var('PATH')
 #
 # To develop montology against this repo, point MONTY at the checkout:
 #   just --set monty "uvx --from ../montology/.monty/cli monty" check
-monty := "uvx --from 'git+https://github.com/socialite-ml/montology@main#subdirectory=.monty/cli' monty"
+# Pinned to the local montology rather than to GitHub main, because main is
+# behind: `onto add` there refuses without `--pos` and does not accept `--pos`,
+# so no word can be recorded by anyone. The fix is already in the working tree
+# next door; this points at it until that is pushed.
+# So `$@` in a recipe body carries each argument whole, which is what keeps a
+# quoted sentence a sentence instead of a dozen positional arguments.
+set positional-arguments
+
+monty := "uv run --project " + justfile_directory() + "/../montology/.monty/cli monty"
 
 _default:
     @just --list
@@ -39,8 +47,12 @@ onto-sync:
     @{{monty}} sync
 
 # Any monty command through the pinned engine.
+# `{{ARGS}}` unquoted splits a quoted definition into words, so `onto add`
+# arrived as a dozen positional arguments and was refused for having too many.
+# Just's own quoting is what keeps a sentence a sentence.
 monty *ARGS:
-    @{{monty}} {{ARGS}}
+    @{{monty}} "$@"
+
 
 # Regenerate the README banner from the running site, so it cannot drift from
 # the hero it is meant to look like. Needs `just web` running on :3111.
