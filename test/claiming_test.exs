@@ -40,46 +40,30 @@ defmodule Blazie.ClaimingTest do
 
       conn |> as(token) |> post("/ledgers", %{"ledger" => name})
 
-      # A claimed ledger starts empty, and empty includes its vocabulary — so
-      # the first write into one has to define what it is about to say. That is
-      # the bootstrap working, not a gap: `is`, `answers` and `cardinality`
-      # define themselves, and everything else is built from them.
-      define =
-        Enum.map(
-          Blazie.Attribute.define("height", answers: "integer"),
-          fn {id, attribute, value} ->
-            %{"id" => id, "attribute" => attribute, "value" => value}
-          end
-        )
-
-      build_conn()
-      |> as(token)
-      |> post("/write", %{"ledger" => name, "facts" => define})
-      |> json_response(200)
-
       # The point of claiming is that the next request works. A grant that
       # needed a second step to take effect would be a grant nobody could use.
+      # Nothing here defines anything first: a claimed ledger starts empty, and
+      # empty includes its vocabulary, so a field declaring itself is the
+      # difference between this working and a fresh ledger refusing every write.
       written =
         build_conn()
         |> as(token)
-        |> post("/write", %{
-          "ledger" => name,
-          "facts" => [%{"id" => "ada", "attribute" => "height", "value" => 180}]
-        })
+        |> post("/run", %{"ledger" => name, "source" => "ada.height = 180"})
         |> json_response(200)
 
       assert %{"name" => %{^name => tx}} = written
 
-      asked =
+      read =
         build_conn()
         |> as(token)
-        # Narrowed to ada: the ledger also holds the three facts that defined
-        # `height`, because a definition is a fact like any other and asking for
-        # everything correctly returns the vocabulary too.
-        |> post("/ask", %{"name" => %{name => tx}, "pattern" => %{"id" => "ada"}})
+        |> post("/run", %{
+          "ledger" => name,
+          "source" => "return ada.height",
+          "name" => %{name => tx}
+        })
         |> json_response(200)
 
-      assert [%{"id" => "ada", "value" => 180, "by" => nil}] = asked["facts"]
+      assert read["value"] == 180
     end
   end
 

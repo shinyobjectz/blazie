@@ -66,6 +66,7 @@ defmodule Blazie.Surface.Authorize do
   defp named(%{params: params}) do
     [
       names(Map.get(params, "ledgers")),
+      names(Map.get(params, "also")),
       keys(Map.get(params, "name")),
       List.wrap(Map.get(params, "ledger"))
     ]

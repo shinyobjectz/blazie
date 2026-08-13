@@ -123,7 +123,12 @@ defmodule Blazie.Lua.World do
 
   defp read(_args, state), do: {[nil, false], state}
 
-  defp write([id, field, value, reference?], state) do
+  # Extra arguments are ignored rather than dropping the call. These are plain
+  # globals a guest can call directly, so arity is something a guest chooses —
+  # and a silent no-op that looks like a successful write is worse than an
+  # ignored argument. There is no fourth slot to put a producer in either way:
+  # what is staged is three wide, so provenance cannot be claimed from in here.
+  defp write([id, field, value, reference? | _rest], state) do
     field = to_string(field)
     snapshot = Process.get(:blazie_lua_snapshot)
 

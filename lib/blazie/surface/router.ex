@@ -51,8 +51,6 @@ defmodule Blazie.Surface.Router do
 
     get("/me", IdentityController, :me)
 
-    post("/open", Controller, :open)
-    post("/ask", Controller, :ask)
-    post("/write", Controller, :write)
+    post("/run", Controller, :run)
   end
 end

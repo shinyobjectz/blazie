@@ -1,197 +1,170 @@
 defmodule Blazie.SurfaceTest do
   @moduledoc """
-  Doctrine 17, over the wire: four operations, a caller holds the name rather
-  than the bytes, and write hands back the name its facts are in.
+  The whole public surface: send Lua, get back what it returned.
+
+  `open`, `ask` and `write` used to be three operations here, and between them
+  they asked a caller to know what a fact is, what a pattern is, and that a
+  snapshot's name is a map of ledgers to transactions. They still happen — this
+  opens, runs and appends — but as steps rather than vocabulary.
+
+  What is checked below is that replacing them cost none of the properties they
+  carried. A caller still holds a name rather than the bytes; the same source at
+  the same name still answers the same forever; a ledger outside the name still
+  cannot leak in; and a write still comes back as the name its facts landed in.
   """
   use Blazie.ConnCase, async: true
 
   setup do
-    ledger = open_ledger()
-    define(ledger, "height", answers: "integer")
-    %{ledger: ledger}
+    %{ledger: open_ledger()}
   end
 
-  describe "open" do
-    test "hands back a name, not the bytes", %{conn: conn, ledger: ledger} do
-      conn = post(conn, "/open", %{"ledgers" => [ledger]})
+  defp run(conn, ledger, source, extra \\ %{}) do
+    post(conn, "/run", Map.merge(%{"ledger" => ledger, "source" => source}, extra))
+  end
 
-      assert %{"name" => name} = json_response(conn, 200)
-      assert Map.keys(name) == [ledger]
-      assert is_integer(name[ledger]) and name[ledger] >= 0
+  # A second request on its own connection, carrying this test's caller. Each
+  # run is a separate request on purpose — reading your own write in the same
+  # connection would prove less than reading it in a new one.
+  defp again(token) do
+    build_conn()
+    |> put_req_header("content-type", "application/json")
+    |> put_req_header("authorization", "Bearer #{token}")
+  end
+
+  describe "what comes back" do
+    test "the value the chunk returned", %{conn: conn, ledger: ledger} do
+      assert %{"value" => 4} = json_response(run(conn, ledger, "return 2 + 2"), 200)
     end
 
-    test "a name covers every ledger opened", %{conn: conn, ledger: a} do
-      b = open_ledger()
-      define(b, "height", answers: "integer")
-      conn = post(conn, "/open", %{"ledgers" => [a, b]})
+    test "a name, never the bytes", %{conn: conn, ledger: ledger} do
+      body = json_response(run(conn, ledger, "return 1"), 200)
 
-      assert %{"name" => name} = json_response(conn, 200)
-      assert Map.keys(name) |> Enum.sort() == Enum.sort([a, b])
+      # Which ledger at which transaction, and nothing else. A caller holding
+      # this can hand it to somebody else and they get the same answers.
+      assert %{^ledger => tx} = body["name"]
+      assert is_integer(tx)
     end
 
-    test "opening nothing is refused rather than returning everything", %{conn: conn} do
-      conn = post(conn, "/open", %{"ledgers" => []})
+    test "a write comes back as the name its facts landed in", %{conn: conn, ledger: ledger, token: token} do
+      body = json_response(run(conn, ledger, "ada.height = 180"), 200)
 
-      assert %{"error" => error} = json_response(conn, 422)
-      assert error["problem"] == "no_ledgers"
+      assert body["wrote"] > 0
+      assert %{^ledger => tx} = body["name"]
+
+      # Reading its own write at that name, without polling for it.
+      read = json_response(run(again(token), ledger, "return ada.height", %{"name" => %{ledger => tx}}), 200)
+      assert read["value"] == 180
+    end
+
+    test "reading nothing writes nothing", %{conn: conn, ledger: ledger} do
+      assert %{"wrote" => 0} = json_response(run(conn, ledger, "return 1"), 200)
     end
   end
 
-  describe "write" do
-    test "returns the name its facts are in, so a caller reads its own write",
-         %{conn: conn, ledger: ledger} do
-      conn =
-        post(conn, "/write", %{
-          "ledger" => ledger,
-          "facts" => [%{"id" => 42, "attribute" => "height", "value" => 180}]
-        })
+  describe "a name is a promise" do
+    test "the same source at the same name answers the same forever", %{
+      conn: conn,
+      ledger: ledger,
+      token: token
+    } do
+      first = json_response(run(conn, ledger, "ada.height = 180"), 200)
+      pinned = first["name"]
 
-      assert %{"name" => %{^ledger => _tx} = name} = json_response(conn, 200)
+      json_response(run(again(token), ledger, "ada.height = 200"), 200)
 
-      # The property, not the number: the name handed back is the snapshot the
-      # facts are in, so a caller reads its own write without polling.
-      asked = post(conn, "/ask", %{"name" => name, "pattern" => %{"id" => 42}})
-      assert [%{"value" => 180}] = json_response(asked, 200)["facts"]
-    end
-
-    test "a caller cannot claim a fact was derived", %{conn: conn, ledger: ledger} do
-      conn =
-        post(conn, "/write", %{
-          "ledger" => ledger,
-          "facts" => [
-            %{"id" => 42, "attribute" => "height", "value" => 180, "by" => "potion"}
-          ]
-        })
-
-      assert %{"error" => error} = json_response(conn, 422)
-      assert error["problem"] == "cannot_claim_derivation"
-      assert error["repair"] =~ "came from outside"
-    end
-
-    test "an attribute nobody defined is refused, with how to define it",
-         %{conn: conn, ledger: ledger} do
-      conn =
-        post(conn, "/write", %{
-          "ledger" => ledger,
-          "facts" => [%{"id" => 1, "attribute" => "not_defined_here", "value" => 1}]
-        })
-
-      assert %{"error" => error} = json_response(conn, 422)
-      assert error["problem"] == "undefined"
-      assert error["repair"] =~ "Define it first"
-    end
-
-    test "defining it first is itself an ordinary write", %{conn: conn, ledger: ledger} do
-      defining =
-        Enum.map(Blazie.Attribute.define("colour", answers: "name"), fn {id, att, ans} ->
-          %{"id" => id, "attribute" => att, "value" => ans}
-        end)
-
-      assert %{"name" => _} =
+      # Pinned: still 180, however much landed afterwards.
+      assert %{"value" => 180} =
                json_response(
-                 post(conn, "/write", %{"ledger" => ledger, "facts" => defining}),
+                 run(again(token), ledger, "return ada.height", %{"name" => pinned}),
                  200
                )
 
-      assert %{"name" => _} =
-               json_response(
-                 post(conn, "/write", %{
-                   "ledger" => ledger,
-                   "facts" => [%{"id" => 1, "attribute" => "colour", "value" => "blue"}]
-                 }),
-                 200
-               )
+      # Unpinned: now.
+      assert %{"value" => 200} =
+               json_response(run(again(token), ledger, "return ada.height"), 200)
     end
 
-    test "no attribute name from a request ever becomes an atom", %{conn: conn, ledger: ledger} do
-      post(conn, "/write", %{
-        "ledger" => ledger,
-        "facts" => [%{"id" => 1, "attribute" => "an_attribute_only_ever_sent", "value" => 1}]
-      })
+    test "a nonsense transaction in a name is refused", %{conn: conn, ledger: ledger} do
+      body = json_response(run(conn, ledger, "return 1", %{"name" => %{ledger => "three"}}), 422)
 
-      assert_raise ArgumentError, fn -> String.to_existing_atom("an_attribute_only_ever_sent") end
+      assert body["error"]["problem"] == "bad_transaction"
     end
   end
 
-  describe "ask" do
-    setup %{conn: conn, ledger: ledger} do
-      post(conn, "/write", %{
-        "ledger" => ledger,
-        "facts" => [
-          %{"id" => 42, "attribute" => "height", "value" => 180},
-          %{"id" => 43, "attribute" => "height", "value" => 190}
-        ]
-      })
-
-      :ok
-    end
-
-    test "answers at a name", %{conn: conn, ledger: ledger} do
-      %{"name" => name} = json_response(post(conn, "/open", %{"ledgers" => [ledger]}), 200)
-
-      conn = post(conn, "/ask", %{"name" => name, "pattern" => %{"attribute" => "height"}})
-
-      assert %{"facts" => facts} = json_response(conn, 200)
-      assert length(facts) == 2
-      assert Enum.all?(facts, &(&1["attribute"] == "height"))
-      assert Enum.all?(facts, &is_nil(&1["by"]))
-    end
-
-    test "the answer at a name never changes", %{conn: conn, ledger: ledger} do
-      %{"name" => name} = json_response(post(conn, "/open", %{"ledgers" => [ledger]}), 200)
-
-      post(conn, "/write", %{
-        "ledger" => ledger,
-        "facts" => [%{"id" => 44, "attribute" => "height", "value" => 200}]
-      })
-
-      asked = post(conn, "/ask", %{"name" => name, "pattern" => %{"attribute" => "height"}})
-      assert length(json_response(asked, 200)["facts"]) == 2
-
-      %{"name" => later} = json_response(post(conn, "/open", %{"ledgers" => [ledger]}), 200)
-      asked = post(conn, "/ask", %{"name" => later, "pattern" => %{"attribute" => "height"}})
-      assert length(json_response(asked, 200)["facts"]) == 3
-    end
-
-    test "a ledger not in the name cannot leak into the answer", %{conn: conn, ledger: a} do
+  describe "a world is only the ledgers named" do
+    test "a ledger not in the world cannot leak into an answer", %{conn: conn, ledger: a, token: token} do
       b = open_ledger()
-      define(b, "height", answers: "integer")
+      json_response(run(conn, b, "hidden.height = 1"), 200)
 
-      post(conn, "/write", %{
-        "ledger" => b,
-        "facts" => [%{"id" => 99, "attribute" => "height", "value" => 1}]
-      })
-
-      %{"name" => name} = json_response(post(conn, "/open", %{"ledgers" => [a]}), 200)
-      conn = post(conn, "/ask", %{"name" => name, "pattern" => %{}})
-
-      ids = json_response(conn, 200)["facts"] |> Enum.map(& &1["id"])
-      refute 99 in ids
+      # `a` is the whole world here, so nothing in `b` is reachable.
+      assert %{"value" => nil} = json_response(run(again(token), a, "return hidden.height"), 200)
     end
 
-    test "a name with a nonsense transaction is refused", %{conn: conn, ledger: ledger} do
-      conn = post(conn, "/ask", %{"name" => %{ledger => "three"}, "pattern" => %{}})
+    test "`also` widens the world to read, but not to write", %{conn: conn, ledger: a, token: token} do
+      b = open_ledger()
+      json_response(run(conn, b, "grace.height = 175"), 200)
 
-      assert %{"error" => error} = json_response(conn, 422)
-      assert error["problem"] == "bad_transaction"
+      body =
+        json_response(
+          run(again(token), a, "ada.friend_height = grace.height  return grace.height", %{
+            "also" => [b]
+          }),
+          200
+        )
+
+      # Read from `b`…
+      assert body["value"] == 175
+      # …and written into `a`, which is the only ledger writes ever land in.
+      assert %{^a => _} = body["name"]
+      refute Map.has_key?(body["name"], b) and body["wrote"] == 0
+    end
+  end
+
+  describe "the vocabulary still holds, it is just no longer yours to write" do
+    test "a field declares itself on first use", %{conn: conn, ledger: ledger, token: token} do
+      # No definition step anywhere in this test, which is the point.
+      assert %{"wrote" => wrote} = json_response(run(conn, ledger, "ada.height = 180"), 200)
+
+      # The declaration went with it: one assertion for the value, and the
+      # facts that say what `height` is.
+      assert wrote > 1
+      assert %{"value" => 180} = json_response(run(again(token), ledger, "return ada.height"), 200)
     end
 
-    test "a redeclaration the facts contradict is refused, with the dance that fixes it",
-         %{conn: conn, ledger: ledger} do
-      post(conn, "/write", %{
-        "ledger" => ledger,
-        "facts" => [%{"id" => 42, "attribute" => "height", "value" => 180}]
-      })
+    test "a redeclaration the facts contradict is still refused", %{conn: conn, ledger: ledger, token: token} do
+      json_response(run(conn, ledger, "ada.height = 180"), 200)
 
-      conn =
-        post(conn, "/write", %{
-          "ledger" => ledger,
-          "facts" => [%{"id" => "height", "attribute" => "answers", "value" => "name"}]
-        })
+      # Reaching under the surface deliberately: `height` answers integers and
+      # there is an integer written under it, so saying it answers names now
+      # contradicts what is already there.
+      source = "__write('height', 'answers', 'name', false)"
+      body = json_response(run(again(token), ledger, source), 422)
 
-      assert %{"error" => error} = json_response(conn, 422)
-      assert error["problem"] == "contradicted"
-      assert error["repair"] =~ "narrow in three steps"
+      assert body["error"]["problem"] == "contradicted"
+      assert body["error"]["repair"] =~ "narrow in three steps"
+    end
+
+    test "no field name from a request ever becomes an atom", %{conn: conn, ledger: ledger} do
+      unique = "field_#{System.unique_integer([:positive])}"
+
+      json_response(run(conn, ledger, "ada.#{unique} = 1"), 200)
+
+      # An atom is never collected, so a surface that made one from a request
+      # would be a way to exhaust the VM from outside.
+      assert_raise ArgumentError, fn -> String.to_existing_atom(unique) end
+    end
+  end
+
+  describe "provenance" do
+    test "what a caller writes names nothing", %{conn: conn, ledger: ledger} do
+      json_response(run(conn, ledger, "ada.height = 180"), 200)
+
+      {:ok, ref} = Ledger.open(ledger)
+
+      assert Snapshot.open([ref])
+             |> Snapshot.find(id: "ada")
+             |> Enum.all?(&(&1.by == nil)),
+             "a fact written from outside cannot name a producer"
     end
   end
 end

@@ -154,6 +154,13 @@ defmodule Blazie.Attribute do
   end
 
   def check(assertions, known) do
+    # A transaction is atomic, so a batch that defines a field and uses it is
+    # coherent: at the moment anything can read this, both are there. Checking
+    # only against what was already written refused exactly that batch, which
+    # made "define it first" a separate round trip nobody could avoid — and
+    # made a surface where fields declare themselves impossible to build.
+    known = MapSet.union(known, declared_in(assertions))
+
     assertions
     |> Enum.map(&attribute_of/1)
     |> Enum.uniq()
@@ -162,6 +169,10 @@ defmodule Blazie.Attribute do
       [] -> :ok
       undefined -> {:error, Enum.map(undefined, &refusal/1)}
     end
+  end
+
+  defp declared_in(assertions) do
+    for {id, @is, "attribute"} <- assertions, into: MapSet.new(), do: id
   end
 
   @doc """
