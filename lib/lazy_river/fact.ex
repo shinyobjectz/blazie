@@ -29,6 +29,38 @@ defmodule LazyRiver.Fact do
         }
 
   @doc """
+  A fact as it came off disk, in whatever shape it was written in.
+
+  **An append-only store must read every shape it has ever written, forever.**
+  Nothing is ever rewritten here, so a fact recorded under an older row shape
+  is still on disk and still has to answer. There is no migration that could
+  fix it, because a migration is a rewrite and a rewrite is the one thing this
+  database does not do.
+
+  This was found by a deployment rather than a test, and could not have been
+  found by one: renaming the third slot from `answer` to `value` made every
+  ledger already on the box unreadable, because `term_to_binary` stores a
+  struct's keys and `binary_to_term` gives them straight back. Every test wrote
+  its facts with the same code that read them, so every test passed.
+
+  Shape is sniffed rather than versioned, because the records that need reading
+  were written before there was a version to write. Records from here on carry
+  their shape in their keys just the same, so the next rename adds a clause.
+  """
+  @spec from_stored(term()) :: term()
+  def from_stored(%{__struct__: __MODULE__, answer: value} = older) do
+    %__MODULE__{
+      id: older.id,
+      attribute: older.attribute,
+      value: value,
+      tx: older.tx,
+      by: Map.get(older, :by)
+    }
+  end
+
+  def from_stored(fact), do: fact
+
+  @doc """
   Did this fact reach the outside world?
 
   A fact naming no formula and no job came from outside and cannot be

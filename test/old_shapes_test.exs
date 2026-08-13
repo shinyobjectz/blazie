@@ -1,0 +1,184 @@
+defmodule LazyRiver.OldShapesTest do
+  @moduledoc """
+  An append-only store must read every shape it has ever written, forever.
+
+  Nothing here is ever rewritten, so a fact recorded under an older row shape is
+  still on disk and still has to answer. There is no migration that could fix
+  it, because a migration is a rewrite and a rewrite is the one thing this
+  database does not do.
+
+  ## Why this file exists
+
+  Renaming the third slot of a fact from `answer` to `value` made every ledger
+  already on the production box unreadable. `term_to_binary` stores a struct's
+  keys, `binary_to_term` hands them straight back, and the index then asked a
+  fact from last week for a key it was never written with.
+
+  The whole suite passed. It passed because every test wrote its facts with the
+  same code that read them, so no test ever held a record older than itself. A
+  deployment found it in fourteen seconds.
+
+  So these tests write the bytes by hand, in the shape a previous version wrote
+  them, and never construct them with today's struct.
+  """
+  use ExUnit.Case, async: true
+
+  alias LazyRiver.{Fact, Ledger, Snapshot, Store}
+
+  setup do
+    dir = Path.join(System.tmp_dir!(), "lr_shapes_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+    %{dir: dir, name: {:shapes, System.unique_integer([:positive])}}
+  end
+
+  # A fact exactly as a previous version of this code wrote it: the third slot
+  # called `answer`, and no `value` key at all. Built as a bare map with the
+  # struct tag so today's compiler cannot quietly correct it.
+  defp older_fact(id, attribute, value, tx) do
+    %{__struct__: Fact, id: id, attribute: attribute, answer: value, tx: tx, by: nil}
+  end
+
+  defp record(facts) do
+    payload = :erlang.term_to_binary(facts)
+    <<byte_size(payload)::32, :erlang.crc32(payload)::32, payload::binary>>
+  end
+
+  defp write_older_log(ctx, transactions) do
+    path = Path.join(ctx.dir, Store.File.filename(ctx.name))
+    bytes = transactions |> Enum.map(&record/1) |> IO.iodata_to_binary()
+    File.write!(path, bytes)
+    path
+  end
+
+  describe "a log written by an older version" do
+    test "still opens", ctx do
+      write_older_log(ctx, [
+        [older_fact("is", "is", "attribute", 1)],
+        [older_fact("height", "is", "attribute", 2)]
+      ])
+
+      {:ok, store} = Store.File.open(ctx.name, dir: ctx.dir)
+      facts = Store.File.replay(store)
+      Store.File.close(store)
+
+      assert length(facts) == 2
+      assert Enum.all?(facts, &match?(%Fact{}, &1))
+    end
+
+    test "and every fact answers under the name it has now", ctx do
+      write_older_log(ctx, [[older_fact("ada", "height", 180, 1)]])
+
+      {:ok, store} = Store.File.open(ctx.name, dir: ctx.dir)
+      [fact] = Store.File.replay(store)
+      Store.File.close(store)
+
+      assert fact.value == 180
+      assert fact.id == "ada"
+      assert fact.attribute == "height"
+      refute Map.has_key?(fact, :answer)
+    end
+
+    test "a whole ledger of them opens and can be asked", ctx do
+      write_older_log(ctx, [
+        [older_fact("is", "is", "attribute", 1)],
+        [older_fact("height", "is", "attribute", 2)],
+        [older_fact("ada", "height", 180, 3)],
+        [older_fact("grace", "height", 175, 4)]
+      ])
+
+      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> Ledger.close(ctx.name) end)
+
+      snapshot = Snapshot.open([ledger])
+      assert Snapshot.value(snapshot, "ada", "height") == 180
+      assert length(Snapshot.find(snapshot, attribute: "height")) == 2
+    end
+
+    test "the index is built over them, so a value lookup works", ctx do
+      write_older_log(ctx, [
+        [older_fact("is", "is", "attribute", 1)],
+        [older_fact("ada", "height", 180, 2)]
+      ])
+
+      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> Ledger.close(ctx.name) end)
+
+      # The badkey crash that took production down came from the index, which
+      # reads the third slot of every fact as it is built.
+      assert [%Fact{id: "ada"}] = Ledger.find_at(ledger, 2, value: 180)
+    end
+
+    test "and writing to it afterwards works, old and new shapes side by side", ctx do
+      write_older_log(ctx, [
+        [older_fact("is", "is", "attribute", 1)],
+        [older_fact("ada", "height", 180, 2)]
+      ])
+
+      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> Ledger.close(ctx.name) end)
+
+      {:ok, _} = Ledger.append(ledger, [{"grace", "height", 175}])
+
+      snapshot = Snapshot.open([ledger])
+      assert Snapshot.value(snapshot, "ada", "height") == 180
+      assert Snapshot.value(snapshot, "grace", "height") == 175
+    end
+  end
+
+  describe "a checkpoint written by an older version" do
+    test "is read in the old shape too", ctx do
+      path = Path.join(ctx.dir, Store.File.filename(ctx.name))
+      olds = [older_fact("ada", "height", 180, 1), older_fact("grace", "height", 175, 2)]
+
+      # A checkpoint holds facts and the byte offset it had reached. An empty
+      # log with a checkpoint covering it is exactly what a reopen after
+      # checkpointing looks like.
+      payload = :erlang.term_to_binary({2, 0, olds})
+
+      File.write!(
+        path <> ".checkpoint",
+        <<byte_size(payload)::32, :erlang.crc32(payload)::32, payload::binary>>
+      )
+
+      File.write!(path, <<>>)
+
+      {:ok, store} = Store.File.open(ctx.name, dir: ctx.dir)
+      facts = Store.File.replay(store)
+      Store.File.close(store)
+
+      assert length(facts) == 2
+      assert Enum.map(facts, & &1.value) == [180, 175]
+    end
+  end
+
+  describe "translating a shape" do
+    test "an older fact becomes a current one", _ctx do
+      assert %Fact{id: "ada", attribute: "height", value: 180, tx: 3, by: nil} =
+               Fact.from_stored(older_fact("ada", "height", 180, 3))
+    end
+
+    test "a current fact is left exactly alone", _ctx do
+      current = %Fact{id: "ada", attribute: "height", value: 180, tx: 3}
+      assert Fact.from_stored(current) === current
+    end
+
+    test "provenance survives the translation", _ctx do
+      older = %{
+        __struct__: Fact,
+        id: "ada",
+        attribute: "doubled",
+        answer: 360,
+        tx: 4,
+        by: "doubling"
+      }
+
+      assert %Fact{by: "doubling", value: 360} = Fact.from_stored(older)
+    end
+
+    test "anything that is not a fact passes through untouched", _ctx do
+      assert Fact.from_stored(:not_a_fact) == :not_a_fact
+      assert Fact.from_stored(%{id: "x"}) == %{id: "x"}
+    end
+  end
+end

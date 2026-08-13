@@ -125,6 +125,32 @@ defmodule LazyRiver.ThroughputTest do
     bytes
   end
 
+  # Runs inside the ledger and hands the answer back, because a term's size is
+  # only honest where it lives — sharing does not survive being copied out.
+  # The state is returned untouched, so this reads without writing.
+  defp inside(pid, fun) do
+    me = self()
+    tag = make_ref()
+
+    :sys.replace_state(pid, fn state ->
+      send(me, {tag, fun.(state)})
+      state
+    end)
+
+    receive do
+      {^tag, answer} -> answer
+    after
+      60_000 -> raise "the ledger never answered from inside"
+    end
+  end
+
+  defp sizes_inside(pid) do
+    inside(pid, fn state ->
+      {:erts_debug.size_shared(state) * 8,
+       :erts_debug.size_shared({state.by_id, state.by_attribute, state.by_value}) * 8}
+    end)
+  end
+
   defp row(cells), do: IO.puts("| " <> Enum.join(cells, " | ") <> " |")
 
   defp header(cells) do
@@ -468,7 +494,7 @@ defmodule LazyRiver.ThroughputTest do
 
       one = nil
 
-      Enum.reduce([1, 8, 64], one, fn count, one ->
+      Enum.reduce([1, 2, 4, 8, 16, 64], one, fn count, one ->
         ledgers =
           for _ <- 1..count do
             {_name, ledger} = open_ledger(:memory, [])
@@ -584,6 +610,99 @@ defmodule LazyRiver.ThroughputTest do
     end
   end
 
+  # ── 5b. two cliffs the other tables only hint at ───────────────────────────
+
+  describe "cliffs" do
+    @tag :throughput
+    test "a checkpoint writes the whole ledger, and the ledger waits for it" do
+      # Production configures `checkpoint_every: 1000` whenever `ledger_dir` is
+      # set, and a checkpoint serialises every fact ever written. That is a
+      # stall inside `handle_call`, so it lands on whichever writer is unlucky
+      # and on every writer queued behind it.
+      header(["resident facts", "p50 us", "p99 us", "max us", "stall vs p50"])
+
+      {_name, ledger} = open_ledger(:file, sync: false, checkpoint_every: 1_000)
+      filled = 0
+
+      Enum.reduce([10_000, 100_000, 500_000], filled, fn size, filled ->
+        fill(ledger, size - filled, 5_000)
+
+        # Enough single-fact appends to cross the checkpoint threshold twice.
+        latencies =
+          for _ <- 1..2_100 do
+            {us, :ok} = timed_append(ledger, assertions(1), 60_000)
+            us
+          end
+
+        s = stats(latencies)
+        row([size, s.p50, s.p99, s.max, "#{round(s.max / max(s.p50, 1))}x"])
+        size + 2_100
+      end)
+    end
+
+    @tag :throughput
+    test "bounding memory unbounds reads" do
+      # What a bounded ledger evicted is answered by re-reading the store, and
+      # `Store.File.replay/1` hands back everything it ever loaded. So the read
+      # that memory bounding was supposed to make affordable is the one it
+      # makes O(everything) — and it runs inside the same call as the writes.
+      header(["resident bound", "facts", "resident", "find_at by id p50 us", "p99 us", "max us"])
+
+      for bound <- [:unbounded, 1_000] do
+        opts = if bound == :unbounded, do: [], else: [resident: bound]
+        {_name, ledger} = open_ledger(:file, [sync: false] ++ opts)
+        fill(ledger, 100_000, 5_000)
+
+        known = hd(ids(1))
+        {:ok, _} = Ledger.append(ledger, [{known, "height", 1}])
+        tx = Ledger.tx(ledger)
+
+        Enum.each(1..3, fn _ -> Ledger.find_at(ledger, tx, id: known) end)
+
+        latencies =
+          for _ <- 1..30 do
+            {us, _} = timed(fn -> Ledger.find_at(ledger, tx, id: known) end)
+            us
+          end
+
+        s = stats(latencies)
+        row([inspect(bound), 100_000, Ledger.resident(ledger), s.p50, s.p99, s.max])
+      end
+    end
+
+    @tag :throughput
+    test "a wide read costs the write budget, and grows with the ledger" do
+      header(["facts in ledger", "find_at attribute p50 us", "p99 us", "appends it displaces"])
+
+      {_name, ledger} = open_ledger(:file, sync: false)
+      filled = 0
+
+      Enum.reduce([10_000, 100_000, 500_000], filled, fn size, filled ->
+        fill(ledger, size - filled, 5_000)
+        tx = Ledger.tx(ledger)
+
+        Enum.each(1..2, fn _ -> Ledger.find_at(ledger, tx, attribute: "height") end)
+
+        read =
+          for _ <- 1..10 do
+            {us, _} = timed(fn -> Ledger.find_at(ledger, tx, attribute: "height") end)
+            us
+          end
+
+        append =
+          for _ <- 1..30 do
+            {us, :ok} = timed_append(ledger, assertions(1), 60_000)
+            us
+          end
+
+        r = stats(read)
+        a = stats(append)
+        row([size, r.p50, r.p99, round(r.p50 / max(a.p50, 1))])
+        size + 30
+      end)
+    end
+  end
+
   # ── 6. what a resident fact costs in bytes ─────────────────────────────────
 
   describe "memory" do
@@ -619,6 +738,52 @@ defmodule LazyRiver.ThroughputTest do
     end
 
     @tag :throughput
+    test "live bytes, and which structure is holding them" do
+      # Process heap is what the VM reserved, which is not what is live — it
+      # grows in steps and a collection does not hand the slack back. The live
+      # figure has to be taken *inside* the ledger, because the same five
+      # references share one copy of each fact there and `:sys.get_state`
+      # copies the state out, which flattens exactly the sharing being counted.
+      header([
+        "facts",
+        "live B in process",
+        "live B/fact",
+        "3 sort orders B",
+        "heap B",
+        "heap/live",
+        "copied-out B/fact"
+      ])
+
+      {_name, ledger} = open_ledger(:file, sync: false)
+
+      Enum.reduce([1_000, 10_000, 100_000], 0, fn size, filled ->
+        fill(ledger, size - filled)
+
+        {live, indexes} = sizes_inside(pid_of(ledger))
+        heap = process_bytes(ledger)
+        copied = :erts_debug.size_shared(:sys.get_state(pid_of(ledger))) * 8
+
+        row([
+          size,
+          live,
+          Float.round(live / size, 1),
+          indexes,
+          heap,
+          Float.round(heap / live, 2),
+          Float.round(copied / size, 1)
+        ])
+
+        size
+      end)
+
+      IO.puts(
+        "\n(the last column is what the same state weighs once copied out of the " <>
+          "process — five references to one fact become five facts. Every reply " <>
+          "a ledger sends pays that.)"
+      )
+    end
+
+    @tag :throughput
     test "a bounded ledger, for contrast" do
       # `resident:` is the only lever that exists. It costs a rebuild of all
       # three sort orders every time the high-water mark is crossed, and it
@@ -641,13 +806,16 @@ defmodule LazyRiver.ThroughputTest do
         # Reaching into the state is the only way to separate what the ledger
         # is holding from what its store is holding, and the difference is the
         # whole point of the row.
-        state = :sys.get_state(pid_of(ledger))
+        {ledger_list, store_list} =
+          inside(pid_of(ledger), fn state ->
+            {length(state.facts), length(state.store.facts)}
+          end)
 
         row([
           inspect(bound),
           100_000,
-          length(state.facts),
-          length(state.store.facts),
+          ledger_list,
+          store_list,
           Float.round(process_bytes(ledger) / 1_048_576, 2),
           rate(1_000, elapsed)
         ])

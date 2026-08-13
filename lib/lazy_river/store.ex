@@ -94,6 +94,8 @@ defmodule LazyRiver.Store.File do
 
   @behaviour LazyRiver.Store
 
+  alias LazyRiver.Fact
+
   # How much of the log may be un-checkpointed before writing another one:
   # half of what is already checkpointed. Lower means opening scans less and
   # more total bytes are written; higher is the reverse. Both are constant
@@ -180,7 +182,10 @@ defmodule LazyRiver.Store.File do
 
   defp scan(<<size::32, crc::32, payload::binary-size(size), rest::binary>>, acc) do
     if :erlang.crc32(payload) == crc do
-      scan(rest, [:erlang.binary_to_term(payload) | acc])
+      # Whatever row shape this transaction was written under. Nothing is ever
+      # rewritten, so old shapes are still on disk and still have to answer.
+      transaction = payload |> :erlang.binary_to_term() |> Enum.map(&Fact.from_stored/1)
+      scan(rest, [transaction | acc])
     else
       # A torn record. Everything past it is unreadable, so this is the end.
       Enum.reverse(acc)
@@ -241,7 +246,9 @@ defmodule LazyRiver.Store.File do
     with {:ok, <<size::32, crc::32, payload::binary-size(size)>>} <- File.read(path),
          true <- :erlang.crc32(payload) == crc,
          {at, offset, facts} <- :erlang.binary_to_term(payload) do
-      {facts, at, offset}
+      # A checkpoint is as old as the log it summarises, so it carries old
+      # shapes too.
+      {Enum.map(facts, &Fact.from_stored/1), at, offset}
     else
       # No checkpoint, or one that did not survive. The log is whole either
       # way, so reading from the start is always correct — just slower.
