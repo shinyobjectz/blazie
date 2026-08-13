@@ -65,6 +65,7 @@ describing the system is a second source that drifts.
     mix test --include crash    # a real process, SIGKILL'd mid-write
     mix test --include load     # what it costs at size
     mix test --include gcp      # talks to Cloud KMS
+    mix test --include live     # talks to a real model (OPENROUTER_API_KEY)
 
 ## The operation
 

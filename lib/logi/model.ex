@@ -18,9 +18,10 @@ defmodule Logi.Model do
   # from outside would be a way to exhaust the atom table from the wire.
   @known %{
     "openai" => Logi.Provider.OpenAI,
-    "anthropic" => Logi.Provider.Anthropic
+    "anthropic" => Logi.Provider.Anthropic,
+    "openrouter" => Logi.Provider.OpenRouter
   }
-  @provider_atoms [:openai, :anthropic]
+  @provider_atoms [:openai, :anthropic, :openrouter]
   @doc false
   def known_atoms, do: @provider_atoms
 
