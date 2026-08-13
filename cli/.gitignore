@@ -1,3 +1,9 @@
-# The binary this builds. Built, never committed — `go build -o blazie .`
+# Built, never committed.
+#
+# `cli` is here because `go build ./...` names the binary after the directory
+# and drops it in the working tree — which is how an 8 MB Mach-O executable
+# got swept into a commit once already. Build with `-o` and it lands where you
+# meant it to.
 /blazie
 /blazie-*
+/cli

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -45,13 +46,21 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return 2
 	}
 
+	// Read off the raw arguments rather than a parsed flag, because this has to
+	// hold for the refusals that happen before any parsing succeeds. `--json`
+	// promising machine-readable output only once the command line was already
+	// right would be a promise that breaks exactly when a script needs it.
+	asJSON := slices.Contains(args, "--json") || slices.Contains(args, "-json")
+
 	command, rest, err := hoistGlobals(args)
 	if err != nil {
-		RenderRefusal(errOut, unwrapUsage(err))
+		if asJSON {
+			RenderRefusalJSON(errOut, unwrapUsage(err))
+		} else {
+			RenderRefusal(errOut, unwrapUsage(err))
+		}
 		return 2
 	}
-
-	var asJSON bool
 
 	switch command {
 	case "login":
@@ -434,16 +443,18 @@ func cmdWhoami(ctx context.Context, args []string, out io.Writer) (bool, error) 
 // ── ledger ls ───────────────────────────────────────────────────────────────
 
 func cmdLedger(ctx context.Context, args []string, out io.Writer) (bool, error) {
-	if len(args) == 0 || args[0] != "ls" {
-		return false, &usageError{&Refusal{
+	// Flags first, so `blazie ledger --json ls` and `blazie ledger ls --json`
+	// are the same command rather than one of them being a mystery.
+	flags := newFlags("ledger ls")
+	if err := flags.parse(args); err != nil {
+		return false, err
+	}
+
+	if rest := flags.set.Args(); len(rest) != 1 || rest[0] != "ls" {
+		return flags.asJSON, &usageError{&Refusal{
 			Problem: "unknown_command",
 			Repair:  "The only one is `blazie ledger ls` — the ledgers this token may name.",
 		}}
-	}
-
-	flags := newFlags("ledger ls")
-	if err := flags.parse(args[1:]); err != nil {
-		return false, err
 	}
 
 	client, _, err := flags.client()

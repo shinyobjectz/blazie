@@ -29,3 +29,10 @@ blazie-*.tar
 # Keys are never in the repo.
 /priv/keys/
 /tmp/
+
+# Compiled CLI binaries. `go build` drops one in the working tree, and a
+# sweeping `git add` will take it — 8.4MB of Mach-O, twice, before anyone
+# noticed.
+cli/cli
+cli/blazie
+cli/dist/
