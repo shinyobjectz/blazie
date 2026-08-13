@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  Bot,
   Database,
   Fingerprint,
   HardDrive,
@@ -37,6 +38,7 @@ import {
 const items: { href: string; label: string; icon: typeof Table2 }[] = [
   { href: "/dashboard", label: "data", icon: Table2 },
   { href: "/dashboard/editor", label: "editor", icon: SquareTerminal },
+  { href: "/dashboard/agents", label: "agents", icon: Bot },
   { href: "/dashboard/worlds", label: "worlds", icon: Database },
   { href: "/dashboard/storage", label: "storage", icon: HardDrive },
   { href: "/dashboard/activity", label: "activity", icon: Activity },
