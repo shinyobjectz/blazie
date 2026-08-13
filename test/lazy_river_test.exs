@@ -16,13 +16,13 @@ defmodule LazyRiverTest do
     test "a fact is an id, an attribute, an answer and a transaction", %{a: a} do
       {:ok, tx} = Ledger.append(a, [{42, "height", 180}])
 
-      assert [%Fact{id: 42, attribute: "height", answer: 180, tx: ^tx, by: nil}] =
+      assert [%Fact{id: 42, attribute: "height", value: 180, tx: ^tx, by: nil}] =
                Ledger.facts_at(a, tx)
     end
 
     test "an edge is a fact whose answer is another id", %{a: a} do
       {:ok, tx} = Ledger.append(a, [{42, "parent", 7}])
-      assert [%Fact{answer: 7}] = Ledger.facts_at(a, tx)
+      assert [%Fact{value: 7}] = Ledger.facts_at(a, tx)
     end
   end
 
@@ -45,9 +45,9 @@ defmodule LazyRiverTest do
 
       {:ok, _} = Ledger.append(a, [{42, "height", 181}])
 
-      assert Snapshot.answer(early, 42, "height") == 180
-      assert Snapshot.answer(Snapshot.reopen(name), 42, "height") == 180
-      assert Snapshot.answer(Snapshot.open([a]), 42, "height") == 181
+      assert Snapshot.value(early, 42, "height") == 180
+      assert Snapshot.value(Snapshot.reopen(name), 42, "height") == 180
+      assert Snapshot.value(Snapshot.open([a]), 42, "height") == 181
     end
 
     test "a name reopens to the same snapshot", %{a: a} do
@@ -60,7 +60,7 @@ defmodule LazyRiverTest do
 
     test "a writer reads its own write without polling", %{a: a} do
       {:ok, tx} = Ledger.append(a, [{42, "height", 180}])
-      assert [%Fact{answer: 180}] = Ledger.facts_at(a, tx)
+      assert [%Fact{value: 180}] = Ledger.facts_at(a, tx)
     end
 
     test "a fact written after a transaction is invisible at it", %{a: a} do
@@ -85,7 +85,7 @@ defmodule LazyRiverTest do
       {:ok, _} = Ledger.append(b, [{99, "held_by", :tenant_b}])
 
       assert [%Fact{id: 42}] = Snapshot.facts(Snapshot.open([a]))
-      assert Snapshot.answer(Snapshot.open([a]), 99, "held_by") == nil
+      assert Snapshot.value(Snapshot.open([a]), 99, "held_by") == nil
     end
   end
 
@@ -96,7 +96,7 @@ defmodule LazyRiverTest do
 
       snapshot = Snapshot.open([a])
 
-      assert Snapshot.answer(snapshot, 42, "height") == 181
+      assert Snapshot.value(snapshot, 42, "height") == 181
       assert length(Snapshot.find(snapshot, id: 42, attribute: "height")) == 2
     end
   end

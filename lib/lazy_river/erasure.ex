@@ -97,7 +97,7 @@ defmodule LazyRiver.Erasure do
   @doc "Could facts about this entity be erased? True only if a subject was declared."
   @spec erasable?(Snapshot.t(), term()) :: boolean()
   def erasable?(%Snapshot{} = snapshot, id),
-    do: Snapshot.answer(snapshot, id, @subject) != nil
+    do: Snapshot.value(snapshot, id, @subject) != nil
 
   # ── what the ledger uses ───────────────────────────────────────────────────
 
@@ -137,8 +137,8 @@ defmodule LazyRiver.Erasure do
   def reveal(answer), do: answer
 
   @doc false
-  def reveal_fact(%Fact{answer: {:sealed, _, _, _, _, _}} = fact),
-    do: %{fact | answer: reveal(fact.answer)}
+  def reveal_fact(%Fact{value: {:sealed, _, _, _, _, _}} = fact),
+    do: %{fact | value: reveal(fact.value)}
 
   def reveal_fact(%Fact{} = fact), do: fact
 end

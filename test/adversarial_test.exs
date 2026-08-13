@@ -48,7 +48,7 @@ defmodule LazyRiver.AdversarialTest do
       conn =
         post(conn, "/write", %{
           "ledger" => ledger,
-          "facts" => [%{"id" => nested, "attribute" => "height", "answer" => 1}]
+          "facts" => [%{"id" => nested, "attribute" => "height", "value" => 1}]
         })
 
       assert %{"error" => %{"problem" => "bad_id"}} = json_response(conn, 422)
@@ -61,7 +61,7 @@ defmodule LazyRiver.AdversarialTest do
       conn =
         post(conn, "/write", %{
           "ledger" => ledger,
-          "facts" => [%{"id" => 1, "attribute" => huge, "answer" => 1}]
+          "facts" => [%{"id" => 1, "attribute" => huge, "value" => 1}]
         })
 
       assert %{"error" => %{"problem" => "undefined"}} = json_response(conn, 422)
@@ -113,9 +113,9 @@ defmodule LazyRiver.AdversarialTest do
   describe "the wire cannot be talked into lying" do
     test "no assertion shape lets a caller claim provenance" do
       claims = [
-        %{"id" => 1, "attribute" => "x", "answer" => 1, "by" => "formula"},
-        %{"id" => 1, "attribute" => "x", "answer" => 1, "by" => nil},
-        %{"id" => 1, "attribute" => "x", "answer" => 1, "by" => %{}}
+        %{"id" => 1, "attribute" => "x", "value" => 1, "by" => "formula"},
+        %{"id" => 1, "attribute" => "x", "value" => 1, "by" => nil},
+        %{"id" => 1, "attribute" => "x", "value" => 1, "by" => %{}}
       ]
 
       for claim <- claims do
@@ -132,7 +132,7 @@ defmodule LazyRiver.AdversarialTest do
 
       for shape <- shapes do
         assert {:error, %{problem: :cannot_write_symbol}} =
-                 Wire.assertion(%{"id" => 1, "attribute" => "x", "answer" => shape})
+                 Wire.assertion(%{"id" => 1, "attribute" => "x", "value" => shape})
       end
     end
 

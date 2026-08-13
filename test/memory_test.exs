@@ -54,7 +54,7 @@ defmodule LazyRiver.MemoryTest do
       ledger = on_disk(ctx.name, ctx.dir, resident: 100)
       write(ledger, 1..1000)
 
-      assert [%{answer: 1000}] = Snapshot.find(Snapshot.open([ledger]), id: 1000)
+      assert [%{value: 1000}] = Snapshot.find(Snapshot.open([ledger]), id: 1000)
 
       Ledger.close(ctx.name)
     end
@@ -64,8 +64,8 @@ defmodule LazyRiver.MemoryTest do
       write(ledger, 1..1000)
 
       # Long since evicted from memory.
-      assert [%{answer: 1}] = Snapshot.find(Snapshot.open([ledger]), id: 1)
-      assert [%{answer: 500}] = Snapshot.find(Snapshot.open([ledger]), id: 500)
+      assert [%{value: 1}] = Snapshot.find(Snapshot.open([ledger]), id: 1)
+      assert [%{value: 500}] = Snapshot.find(Snapshot.open([ledger]), id: 500)
 
       Ledger.close(ctx.name)
     end

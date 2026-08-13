@@ -24,7 +24,7 @@ defmodule LazyRiver.SubscriptionTest do
       {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
 
       assert_receive {:lazy_river, ^ref, answer}
-      assert [%{attribute: "height", answer: 180}] = answer.facts
+      assert [%{attribute: "height", value: 180}] = answer.facts
     end
 
     test "the answer carries the name it was answered at", %{ledger: ledger} do
@@ -95,7 +95,7 @@ defmodule LazyRiver.SubscriptionTest do
       doubled =
         Formula.new("doubled", fn snapshot ->
           for fact <- Snapshot.find(snapshot, attribute: "height") do
-            {fact.id, "doubled", fact.answer * 2}
+            {fact.id, "doubled", fact.value * 2}
           end
         end)
 
@@ -110,7 +110,7 @@ defmodule LazyRiver.SubscriptionTest do
       doubled =
         Formula.new("doubled", fn snapshot ->
           for fact <- Snapshot.find(snapshot, attribute: "height") do
-            {fact.id, "doubled", fact.answer * 2}
+            {fact.id, "doubled", fact.value * 2}
           end
         end)
 

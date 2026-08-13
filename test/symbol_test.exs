@@ -23,15 +23,15 @@ defmodule LazyRiver.SymbolTest do
       symbol = Symbol.new("potion_256", [1.0, 0.0])
       {:ok, tx} = Ledger.append(ledger, [{42, "embedding", symbol, :potion}])
 
-      assert [%Fact{attribute: "embedding", answer: ^symbol, by: :potion}] =
+      assert [%Fact{attribute: "embedding", value: ^symbol, by: :potion}] =
                Ledger.facts_at(ledger, tx) |> Enum.filter(&(&1.tx == tx))
     end
 
     test "an attribute declares its space", %{ledger: ledger} do
       snapshot = Snapshot.open([ledger])
 
-      assert Snapshot.answer(snapshot, "embedding", "space") == "potion_256"
-      assert Snapshot.answer(snapshot, "embedding", "answers") == "symbol"
+      assert Snapshot.value(snapshot, "embedding", "space") == "potion_256"
+      assert Snapshot.value(snapshot, "embedding", "answers") == "symbol"
     end
   end
 
@@ -50,7 +50,7 @@ defmodule LazyRiver.SymbolTest do
       embed =
         Formula.new(:potion, fn snapshot ->
           for fact <- Snapshot.find(snapshot, attribute: "height") do
-            {fact.id, "embedding", Symbol.new("potion_256", [fact.answer / 100, 1.0])}
+            {fact.id, "embedding", Symbol.new("potion_256", [fact.value / 100, 1.0])}
           end
         end)
 

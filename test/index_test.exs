@@ -38,16 +38,16 @@ defmodule LazyRiver.IndexTest do
     end
 
     test "by id and attribute", %{snapshot: snapshot} do
-      assert [%{answer: 180}] = Snapshot.find(snapshot, id: 1, attribute: "height")
+      assert [%{value: 180}] = Snapshot.find(snapshot, id: 1, attribute: "height")
     end
 
     test "by answer — the value order", %{snapshot: snapshot} do
-      assert [%{id: 2}] = Snapshot.find(snapshot, attribute: "height", answer: 190)
+      assert [%{id: 2}] = Snapshot.find(snapshot, attribute: "height", value: 190)
     end
 
     test "by answer alone — edges backwards", %{snapshot: snapshot} do
       # Everything pointing at entity 1.
-      found = Snapshot.find(snapshot, answer: 1)
+      found = Snapshot.find(snapshot, value: 1)
       assert Enum.map(found, & &1.id) |> Enum.sort() == [2, 3]
     end
 

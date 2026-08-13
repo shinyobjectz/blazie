@@ -29,7 +29,7 @@ defmodule LazyRiver.RunningJobsTest do
     formula =
       LazyRiver.Formula.new("running-#{System.unique_integer([:positive])}", fn snapshot ->
         Agent.update(agent, &(&1 + 1))
-        for f <- Snapshot.find(snapshot, attribute: "height"), do: {f.id, "doubled", f.answer * 2}
+        for f <- Snapshot.find(snapshot, attribute: "height"), do: {f.id, "doubled", f.value * 2}
       end)
 
     :ok = LazyRiver.Formula.Engine.register(LazyRiver.Formula.Engine, formula)
@@ -61,8 +61,8 @@ defmodule LazyRiver.RunningJobsTest do
     {:ok, ledger} = Ledger.open(Vitals.ledger())
     snapshot = Snapshot.open([ledger])
 
-    assert Snapshot.answer(snapshot, "vitals", "is") == "job"
-    assert is_integer(Snapshot.answer(snapshot, "vitals", "every"))
+    assert Snapshot.value(snapshot, "vitals", "is") == "job"
+    assert is_integer(Snapshot.value(snapshot, "vitals", "every"))
   end
 
   test "ticking the running runner actually writes a reading" do

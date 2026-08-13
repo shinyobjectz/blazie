@@ -6,8 +6,8 @@ defmodule LazyRiver.Attribute do
   why schema and vocabulary need no words of their own. Defining `:height` is
   writing facts about `:height`, in the same ledger, in the same row shape.
 
-  There is no attribute-versus-relation distinction: an answer that is a
-  literal reads as an attribute, an answer that is another id reads as a
+  There is no attribute-versus-relation distinction: a value that is a
+  literal reads as an attribute, a value that is another id reads as a
   relation, and the row is identical.
 
   ## Bootstrapping
@@ -80,7 +80,7 @@ defmodule LazyRiver.Attribute do
     # been written to still has to accept the writes that seed it — otherwise
     # nothing could ever be defined anywhere.
     snapshot
-    |> Snapshot.find(attribute: @is, answer: "attribute")
+    |> Snapshot.find(attribute: @is, value: "attribute")
     |> MapSet.new(& &1.id)
     |> MapSet.union(MapSet.new(@root))
   end
@@ -115,13 +115,13 @@ defmodule LazyRiver.Attribute do
   """
   @spec cardinality(Snapshot.t(), String.t()) :: String.t()
   def cardinality(%Snapshot{} = snapshot, name) do
-    Snapshot.answer(snapshot, name, @cardinality) || "one"
+    Snapshot.value(snapshot, name, @cardinality) || "one"
   end
 
   @doc "The shape an attribute's answers take, defaulting to `:any`."
   @spec answers(Snapshot.t(), String.t()) :: String.t()
   def answers(%Snapshot{} = snapshot, name) do
-    Snapshot.answer(snapshot, name, @answers) || "any"
+    Snapshot.value(snapshot, name, @answers) || "any"
   end
 
   defp attribute_of({_id, attribute, _answer}), do: attribute

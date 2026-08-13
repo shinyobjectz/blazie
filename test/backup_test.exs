@@ -55,7 +55,7 @@ defmodule LazyRiver.BackupTest do
       assert restored.ledgers == 1
 
       {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
-      assert Snapshot.answer(Snapshot.open([again]), "ada", "height") == 180
+      assert Snapshot.value(Snapshot.open([again]), "ada", "height") == 180
     end
 
     test "a restore brings back every ledger, not the one you thought of", ctx do
@@ -78,8 +78,8 @@ defmodule LazyRiver.BackupTest do
       {:ok, a} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
       {:ok, b} = Ledger.open(second, store: {Store.File, dir: ctx.ledgers})
 
-      assert Snapshot.answer(Snapshot.open([a]), "ada", "height") == 180
-      assert Snapshot.answer(Snapshot.open([b]), "trench", "depth") == 10_994
+      assert Snapshot.value(Snapshot.open([a]), "ada", "height") == 180
+      assert Snapshot.value(Snapshot.open([b]), "trench", "depth") == 10_994
     end
 
     test "a restore refuses to overwrite facts that are already there", ctx do
@@ -148,14 +148,14 @@ defmodule LazyRiver.BackupTest do
 
       # The local log is already unreadable past the tear — a scan stops there.
       # So the restored copy answers exactly what the original answers.
-      before = Snapshot.answer(Snapshot.open([ctx.ledger]), "ada", "height")
+      before = Snapshot.value(Snapshot.open([ctx.ledger]), "ada", "height")
 
       :ok = Ledger.close(ctx.name)
       File.rm_rf!(ctx.ledgers)
       {:ok, _} = Backup.restore(ctx.opts)
 
       {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
-      assert Snapshot.answer(Snapshot.open([again]), "ada", "height") == before
+      assert Snapshot.value(Snapshot.open([again]), "ada", "height") == before
     end
   end
 
@@ -177,7 +177,7 @@ defmodule LazyRiver.BackupTest do
       {:ok, _} = Backup.restore(ctx.opts)
 
       {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
-      assert Snapshot.answer(Snapshot.open([again]), "ada", "height") == 180
+      assert Snapshot.value(Snapshot.open([again]), "ada", "height") == 180
     end
   end
 
@@ -245,8 +245,8 @@ defmodule LazyRiver.BackupTest do
       assert Enum.all?(written, &(&1.by == "backup"))
 
       snapshot = Snapshot.open([ctx.journal])
-      assert Snapshot.answer(snapshot, "backup", "copied_bytes") > 0
-      assert Snapshot.answer(snapshot, "backup", "held_ledgers") == 1
+      assert Snapshot.value(snapshot, "backup", "copied_bytes") > 0
+      assert Snapshot.value(snapshot, "backup", "held_ledgers") == 1
     end
 
     test "it has a cadence and the runner picks it up", ctx do
@@ -330,7 +330,7 @@ defmodule LazyRiver.BackupTest do
       after_ = Snapshot.find(Snapshot.open([again]), id: "ada", attribute: "height")
 
       assert length(after_) == length(before)
-      assert Enum.map(after_, & &1.answer) == Enum.map(before, & &1.answer)
+      assert Enum.map(after_, & &1.value) == Enum.map(before, & &1.value)
     end
 
     test "no segment ever starts anywhere but where the last one stopped", ctx do
@@ -420,7 +420,7 @@ defmodule LazyRiver.BackupTest do
       assert restored.incomplete != []
       # What did come back is whole records, so it still opens and answers.
       {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
-      assert Snapshot.answer(Snapshot.open([again]), "ada", "height") == 180
+      assert Snapshot.value(Snapshot.open([again]), "ada", "height") == 180
     end
 
     test "and a whole restore says nothing was incomplete", ctx do
@@ -432,7 +432,7 @@ defmodule LazyRiver.BackupTest do
 
       assert restored.incomplete == []
       {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
-      assert Snapshot.answer(Snapshot.open([again]), "ada", "height") == 182
+      assert Snapshot.value(Snapshot.open([again]), "ada", "height") == 182
     end
   end
 

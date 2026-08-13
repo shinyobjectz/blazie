@@ -24,7 +24,7 @@ defmodule LazyRiver.Symbol.Text do
   built from the imports the host hands in and which is handed none.
 
       formula =
-        Symbol.Text.embedding(:caption_symbols,
+        Symbol.Text.mapping(:caption_symbols,
           over: "caption",
           into: "caption_symbol",
           space: "sketch_256",
@@ -57,8 +57,12 @@ defmodule LazyRiver.Symbol.Text do
   @doc """
   A formula turning every text answer under `over` into a symbol under `into`.
 
-  Named for what it does rather than what it returns — `formula` is a word, and
-  a function named after one had better be it.
+  Named `mapping` for its SHAPE, the way `Sandbox.mapping/3` is: both build a
+  formula that applies one function to every answer matching a pattern. The
+  two names it is not are both words — `formula` is what it returns and
+  `embedding` is what the caller's function makes, and a function named after
+  a word had better BE that word rather than merely produce one. This one is
+  neither, so it is named after neither.
 
   Options:
 
@@ -67,8 +71,8 @@ defmodule LazyRiver.Symbol.Text do
     * `:space` — the space the symbol belongs to
     * `:embed` — text -> [float]; deterministic, or this is not a formula
   """
-  @spec embedding(term(), keyword()) :: LazyRiver.Formula.t()
-  def embedding(id, opts) do
+  @spec mapping(term(), keyword()) :: LazyRiver.Formula.t()
+  def mapping(id, opts) do
     over = Keyword.fetch!(opts, :over)
     into = Keyword.fetch!(opts, :into)
     space = Keyword.fetch!(opts, :space)
@@ -78,7 +82,7 @@ defmodule LazyRiver.Symbol.Text do
       snapshot
       |> Snapshot.find(attribute: over)
       |> Enum.flat_map(fn fact ->
-        case fact.answer do
+        case fact.value do
           text when is_binary(text) ->
             trimmed = String.trim(text)
 

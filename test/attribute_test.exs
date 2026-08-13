@@ -23,8 +23,8 @@ defmodule LazyRiver.AttributeTest do
       snapshot = Snapshot.open([ledger])
 
       assert Attribute.defined?(snapshot, "height")
-      assert Snapshot.answer(snapshot, "height", "is") == "attribute"
-      assert Snapshot.answer(snapshot, "height", "answers") == "integer"
+      assert Snapshot.value(snapshot, "height", "is") == "attribute"
+      assert Snapshot.value(snapshot, "height", "answers") == "integer"
     end
 
     test "definitions are ordinary facts in the same row shape", %{ledger: ledger} do

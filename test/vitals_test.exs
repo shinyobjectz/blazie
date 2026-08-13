@@ -32,9 +32,9 @@ defmodule LazyRiver.VitalsTest do
       {:ok, _} = Job.run(Vitals.job(), ledger, Snapshot.open([ledger]), 1000)
       snapshot = Snapshot.open([ledger])
 
-      assert is_integer(Snapshot.answer(snapshot, "vitals", "open_ledgers"))
-      assert is_integer(Snapshot.answer(snapshot, "vitals", "memory_bytes"))
-      assert is_binary(Snapshot.answer(snapshot, "vitals", "node"))
+      assert is_integer(Snapshot.value(snapshot, "vitals", "open_ledgers"))
+      assert is_integer(Snapshot.value(snapshot, "vitals", "memory_bytes"))
+      assert is_binary(Snapshot.value(snapshot, "vitals", "node"))
     end
 
     test "taking them twice keeps both, so a trend is a query", %{ledger: ledger} do
@@ -88,7 +88,7 @@ defmodule LazyRiver.VitalsTest do
 
       assert length(readings) == 2
       assert Enum.map(readings, & &1.tx) == [first, second]
-      assert Snapshot.answer(snapshot, "vitals", "open_ledgers") == List.last(readings).answer
+      assert Snapshot.value(snapshot, "vitals", "open_ledgers") == List.last(readings).value
     end
 
     test "a reading reflects a live system", %{ledger: ledger} do
@@ -96,9 +96,9 @@ defmodule LazyRiver.VitalsTest do
       snapshot = Snapshot.open([ledger])
 
       # Our own ledger is open, so this cannot be zero however busy the suite is.
-      assert Snapshot.answer(snapshot, "vitals", "open_ledgers") >= 1
-      assert Snapshot.answer(snapshot, "vitals", "processes") > 0
-      assert Snapshot.answer(snapshot, "vitals", "memory_bytes") > 0
+      assert Snapshot.value(snapshot, "vitals", "open_ledgers") >= 1
+      assert Snapshot.value(snapshot, "vitals", "processes") > 0
+      assert Snapshot.value(snapshot, "vitals", "memory_bytes") > 0
     end
   end
 end

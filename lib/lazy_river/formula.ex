@@ -18,7 +18,7 @@ defmodule LazyRiver.Formula do
 
       doubled = Formula.new(:doubled, fn snapshot ->
         for fact <- Snapshot.find(snapshot, attribute: :height) do
-          {fact.id, :double_height, fact.answer * 2}
+          {fact.id, :double_height, fact.value * 2}
         end
       end)
 

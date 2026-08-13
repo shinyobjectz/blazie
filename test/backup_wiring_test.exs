@@ -36,8 +36,8 @@ defmodule LazyRiver.BackupWiringTest do
       {:ok, ledger} = Ledger.open(Backup.ledger())
       snapshot = Snapshot.open([ledger])
 
-      assert Snapshot.answer(snapshot, "backup", "is") == "job"
-      assert Snapshot.answer(snapshot, "backup", "every") == 900
+      assert Snapshot.value(snapshot, "backup", "is") == "job"
+      assert Snapshot.value(snapshot, "backup", "every") == 900
       assert Job.due?(snapshot, "backup", 0)
     end
 
@@ -79,7 +79,7 @@ defmodule LazyRiver.BackupWiringTest do
 
       # The tick starts a task; wait for the fact that says it finished.
       assert eventually(fn ->
-               Snapshot.answer(
+               Snapshot.value(
                  Snapshot.open([Ledger.via(Backup.ledger())]),
                  "backup",
                  "copied_bytes"

@@ -18,7 +18,7 @@ defmodule LazyRiver.Symbol.TextTest do
   end
 
   defp formula do
-    Symbol.Text.embedding("captions",
+    Symbol.Text.mapping("captions",
       over: "caption",
       into: "caption_symbol",
       space: "sketch_64",
@@ -105,7 +105,7 @@ defmodule LazyRiver.Symbol.TextTest do
 
     test "the attribute declares its space, so search cannot cross one",
          %{ledger: ledger} do
-      assert Snapshot.answer(Snapshot.open([ledger]), "caption_symbol", "space") == "sketch_64"
+      assert Snapshot.value(Snapshot.open([ledger]), "caption_symbol", "space") == "sketch_64"
     end
 
     test "search finds the nearest caption", %{ledger: ledger} do

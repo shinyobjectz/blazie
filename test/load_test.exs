@@ -70,7 +70,7 @@ defmodule LazyRiver.LoadTest do
 
       assert resident < 8_000
       # And it still answers from the store for what it evicted.
-      assert [%{answer: 1}] = Snapshot.find(Snapshot.open([ledger]), id: 1)
+      assert [%{value: 1}] = Snapshot.find(Snapshot.open([ledger]), id: 1)
 
       Ledger.close(name)
     end

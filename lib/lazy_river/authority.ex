@@ -69,7 +69,7 @@ defmodule LazyRiver.Authority do
 
     snapshot()
     |> Snapshot.find(id: who)
-    |> Enum.map(& &1.answer)
+    |> Enum.map(& &1.value)
     |> Enum.uniq()
     |> Enum.filter(&(&1 != @ledger))
     |> Enum.filter(fn ledger -> match?(%{attribute: @may_name}, latest(who, ledger)) end)
@@ -108,7 +108,7 @@ defmodule LazyRiver.Authority do
   def history(token, ledger) do
     snapshot()
     |> Snapshot.find(id: caller(token))
-    |> Enum.filter(&(&1.answer == ledger))
+    |> Enum.filter(&(&1.value == ledger))
   end
 
   @doc "The attributes the authority describes itself with."
@@ -123,7 +123,7 @@ defmodule LazyRiver.Authority do
   defp latest(who, ledger) do
     snapshot()
     |> Snapshot.find(id: who)
-    |> Enum.filter(&(&1.answer == ledger and &1.attribute in [@may_name, @revoked]))
+    |> Enum.filter(&(&1.value == ledger and &1.attribute in [@may_name, @revoked]))
     |> Enum.max_by(& &1.tx, fn -> nil end)
   end
 

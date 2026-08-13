@@ -43,7 +43,7 @@ defmodule LazyRiver.SurfaceTest do
       conn =
         post(conn, "/write", %{
           "ledger" => ledger,
-          "facts" => [%{"id" => 42, "attribute" => "height", "answer" => 180}]
+          "facts" => [%{"id" => 42, "attribute" => "height", "value" => 180}]
         })
 
       assert %{"name" => %{^ledger => _tx} = name} = json_response(conn, 200)
@@ -51,7 +51,7 @@ defmodule LazyRiver.SurfaceTest do
       # The property, not the number: the name handed back is the snapshot the
       # facts are in, so a caller reads its own write without polling.
       asked = post(conn, "/ask", %{"name" => name, "pattern" => %{"id" => 42}})
-      assert [%{"answer" => 180}] = json_response(asked, 200)["facts"]
+      assert [%{"value" => 180}] = json_response(asked, 200)["facts"]
     end
 
     test "a caller cannot claim a fact was derived", %{conn: conn, ledger: ledger} do
@@ -59,7 +59,7 @@ defmodule LazyRiver.SurfaceTest do
         post(conn, "/write", %{
           "ledger" => ledger,
           "facts" => [
-            %{"id" => 42, "attribute" => "height", "answer" => 180, "by" => "potion"}
+            %{"id" => 42, "attribute" => "height", "value" => 180, "by" => "potion"}
           ]
         })
 
@@ -73,7 +73,7 @@ defmodule LazyRiver.SurfaceTest do
       conn =
         post(conn, "/write", %{
           "ledger" => ledger,
-          "facts" => [%{"id" => 1, "attribute" => "not_defined_here", "answer" => 1}]
+          "facts" => [%{"id" => 1, "attribute" => "not_defined_here", "value" => 1}]
         })
 
       assert %{"error" => error} = json_response(conn, 422)
@@ -84,7 +84,7 @@ defmodule LazyRiver.SurfaceTest do
     test "defining it first is itself an ordinary write", %{conn: conn, ledger: ledger} do
       defining =
         Enum.map(LazyRiver.Attribute.define("colour", answers: "name"), fn {id, att, ans} ->
-          %{"id" => id, "attribute" => att, "answer" => ans}
+          %{"id" => id, "attribute" => att, "value" => ans}
         end)
 
       assert %{"name" => _} =
@@ -97,7 +97,7 @@ defmodule LazyRiver.SurfaceTest do
                json_response(
                  post(conn, "/write", %{
                    "ledger" => ledger,
-                   "facts" => [%{"id" => 1, "attribute" => "colour", "answer" => "blue"}]
+                   "facts" => [%{"id" => 1, "attribute" => "colour", "value" => "blue"}]
                  }),
                  200
                )
@@ -106,7 +106,7 @@ defmodule LazyRiver.SurfaceTest do
     test "no attribute name from a request ever becomes an atom", %{conn: conn, ledger: ledger} do
       post(conn, "/write", %{
         "ledger" => ledger,
-        "facts" => [%{"id" => 1, "attribute" => "an_attribute_only_ever_sent", "answer" => 1}]
+        "facts" => [%{"id" => 1, "attribute" => "an_attribute_only_ever_sent", "value" => 1}]
       })
 
       assert_raise ArgumentError, fn -> String.to_existing_atom("an_attribute_only_ever_sent") end
@@ -118,8 +118,8 @@ defmodule LazyRiver.SurfaceTest do
       post(conn, "/write", %{
         "ledger" => ledger,
         "facts" => [
-          %{"id" => 42, "attribute" => "height", "answer" => 180},
-          %{"id" => 43, "attribute" => "height", "answer" => 190}
+          %{"id" => 42, "attribute" => "height", "value" => 180},
+          %{"id" => 43, "attribute" => "height", "value" => 190}
         ]
       })
 
@@ -142,7 +142,7 @@ defmodule LazyRiver.SurfaceTest do
 
       post(conn, "/write", %{
         "ledger" => ledger,
-        "facts" => [%{"id" => 44, "attribute" => "height", "answer" => 200}]
+        "facts" => [%{"id" => 44, "attribute" => "height", "value" => 200}]
       })
 
       asked = post(conn, "/ask", %{"name" => name, "pattern" => %{"attribute" => "height"}})
@@ -159,7 +159,7 @@ defmodule LazyRiver.SurfaceTest do
 
       post(conn, "/write", %{
         "ledger" => b,
-        "facts" => [%{"id" => 99, "attribute" => "height", "answer" => 1}]
+        "facts" => [%{"id" => 99, "attribute" => "height", "value" => 1}]
       })
 
       %{"name" => name} = json_response(post(conn, "/open", %{"ledgers" => [a]}), 200)

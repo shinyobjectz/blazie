@@ -128,7 +128,7 @@ defmodule LazyRiver.BackupS3Test do
       assert restored.keys == 1
 
       {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
-      assert Snapshot.answer(Snapshot.open([again]), "ada", "height") == 181
+      assert Snapshot.value(Snapshot.open([again]), "ada", "height") == 181
       assert File.read!(Path.join(ctx.keys, "master.wrapped")) == "wrapped-master-bytes"
     end
   end

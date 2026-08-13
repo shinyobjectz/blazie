@@ -89,7 +89,7 @@ defmodule LazyRiver.SurfaceAuthorizationTest do
         |> as(token)
         |> post("/write", %{
           "ledger" => granted,
-          "facts" => [%{"id" => 1, "attribute" => "height", "answer" => 180}]
+          "facts" => [%{"id" => 1, "attribute" => "height", "value" => 180}]
         })
 
       assert %{"name" => _} = json_response(conn, 200)
@@ -102,7 +102,7 @@ defmodule LazyRiver.SurfaceAuthorizationTest do
         |> as(token)
         |> post("/write", %{
           "ledger" => ungranted,
-          "facts" => [%{"id" => 1, "attribute" => "height", "answer" => 180}]
+          "facts" => [%{"id" => 1, "attribute" => "height", "value" => 180}]
         })
 
       assert %{"error" => error} = json_response(conn, 403)

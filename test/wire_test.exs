@@ -40,11 +40,11 @@ defmodule LazyRiver.WireTest do
   describe "a caller cannot claim a fact was derived" do
     test "an assertion is always three wide, whatever was sent" do
       assert {:ok, {42, "height", 180}} =
-               Wire.assertion(%{"id" => 42, "attribute" => "height", "answer" => 180})
+               Wire.assertion(%{"id" => 42, "attribute" => "height", "value" => 180})
     end
 
     test "a by field is refused rather than ignored" do
-      sent = %{"id" => 42, "attribute" => "height", "answer" => 180, "by" => "potion"}
+      sent = %{"id" => 42, "attribute" => "height", "value" => 180, "by" => "potion"}
 
       assert {:error, refusal} = Wire.assertion(sent)
       assert refusal.problem == :cannot_claim_derivation
@@ -67,19 +67,19 @@ defmodule LazyRiver.WireTest do
 
   describe "a fact travels" do
     test "its attribute goes out as a string" do
-      fact = %Fact{id: 42, attribute: "height", answer: 180, tx: 3}
+      fact = %Fact{id: 42, attribute: "height", value: 180, tx: 3}
 
       assert Wire.fact(fact) == %{
                "id" => 42,
                "attribute" => "height",
-               "answer" => 180,
+               "value" => 180,
                "tx" => 3,
                "by" => nil
              }
     end
 
     test "what produced it goes out named" do
-      fact = %Fact{id: 42, attribute: "height", answer: 180, tx: 3, by: :doubled}
+      fact = %Fact{id: 42, attribute: "height", value: 180, tx: 3, by: :doubled}
       assert Wire.fact(fact)["by"] == "doubled"
     end
 
@@ -87,13 +87,13 @@ defmodule LazyRiver.WireTest do
       fact = %Fact{
         id: 42,
         attribute: "height",
-        answer: Symbol.new("potion_256", [0.1, 0.2]),
+        value: Symbol.new("potion_256", [0.1, 0.2]),
         tx: 3,
         by: :potion
       }
 
       assert %{"$symbol" => %{"space" => "potion_256", "values" => [0.1, 0.2]}} =
-               Wire.fact(fact)["answer"]
+               Wire.fact(fact)["value"]
     end
   end
 
@@ -101,13 +101,13 @@ defmodule LazyRiver.WireTest do
     test "numbers and strings both survive" do
       for id <- [42, "a-string-id", -1] do
         assert {:ok, {^id, "height", 1}} =
-                 Wire.assertion(%{"id" => id, "attribute" => "height", "answer" => 1})
+                 Wire.assertion(%{"id" => id, "attribute" => "height", "value" => 1})
       end
     end
 
     test "an id that is not a number or a string is refused" do
       assert {:error, refusal} =
-               Wire.assertion(%{"id" => %{"nested" => 1}, "attribute" => "height", "answer" => 1})
+               Wire.assertion(%{"id" => %{"nested" => 1}, "attribute" => "height", "value" => 1})
 
       assert refusal.problem == :bad_id
     end

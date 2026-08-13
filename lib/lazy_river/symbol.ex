@@ -1,10 +1,10 @@
 defmodule LazyRiver.Symbol do
   @moduledoc """
-  A derived stand-in for content, sitting where a fact's answer goes (`sym`):
+  A derived stand-in for content, sitting where a fact's value goes (`sym`):
   a vector, a hash, a sketch, a signature.
 
-  You do not read a symbol, you compare it. A fact whose answer is a literal
-  asserts something; a fact whose answer is a symbol represents something.
+  You do not read a symbol, you compare it. A fact whose value is a literal
+  asserts something; a fact whose value is a symbol represents something.
   Different in kind, same row — which is why search, traversal and query never
   became three systems here.
 
@@ -85,7 +85,7 @@ defmodule LazyRiver.Symbol do
   The `k` nearest facts to a query symbol, nearest first.
 
   One pass over the snapshot — exact, so there is no recall to tune. Facts
-  whose answer is not a symbol, or is in another space, are skipped rather than
+  whose value is not a symbol, or is in another space, are skipped rather than
   refused: a search should not fail because unrelated data exists.
   """
   @spec nearest(Snapshot.t(), String.t(), t(), pos_integer()) :: [{Fact.t(), float()}]
@@ -93,7 +93,7 @@ defmodule LazyRiver.Symbol do
     snapshot
     |> Snapshot.find(attribute: attribute)
     |> Enum.flat_map(fn fact ->
-      case fact.answer do
+      case fact.value do
         %__MODULE__{} = candidate ->
           case near(query, candidate) do
             {:ok, score} -> [{fact, score}]
@@ -124,7 +124,7 @@ defmodule LazyRiver.Symbol do
 
       loose ->
         {:error,
-         Enum.map(loose, fn {id, attribute, _answer} ->
+         Enum.map(loose, fn {id, attribute, _value} ->
            %{
              problem: :symbol_from_outside,
              repair:

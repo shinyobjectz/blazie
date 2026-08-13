@@ -22,7 +22,7 @@ defmodule LazyRiver.Formula.Sandbox do
 
   ## What this shape is, and is not
 
-  A mapping applies an exported `apply` to every answer matching a pattern.
+  A mapping applies an exported `apply` to every value matching a pattern.
   That covers the transform case honestly and nothing more: no strings, no
   structures, no access to the snapshot from inside the guest. Widening it
   means designing what the guest may ask for, and every widening is a hole in
@@ -67,9 +67,9 @@ defmodule LazyRiver.Formula.Sandbox do
          {:ok, guest} =
            Wasmex.start_link(%{store: run_store, module: run_module, links: imports()})
 
-         for fact <- Snapshot.find(snapshot, over), is_integer(fact.answer) do
-           {:ok, [answer]} = Wasmex.call_function(guest, "apply", [fact.answer])
-           {fact.id, into, answer}
+         for fact <- Snapshot.find(snapshot, over), is_integer(fact.value) do
+           {:ok, [value]} = Wasmex.call_function(guest, "apply", [fact.value])
+           {fact.id, into, value}
          end
        end)}
     end

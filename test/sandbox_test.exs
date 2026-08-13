@@ -70,7 +70,7 @@ defmodule LazyRiver.Formula.SandboxTest do
 
       assert reads == [[attribute: "height"]]
 
-      refute Formula.stale?(reads, [%LazyRiver.Fact{id: 9, attribute: "colour", answer: 1, tx: 9}])
+      refute Formula.stale?(reads, [%LazyRiver.Fact{id: 9, attribute: "colour", value: 1, tx: 9}])
     end
   end
 

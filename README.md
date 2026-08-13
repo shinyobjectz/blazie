@@ -1,8 +1,17 @@
 # Lazy River
 
-An immutable fact-log database. Seven words:
+An immutable fact-log database. Seven things it is made of:
 
 **fact** · **attribute** · **ledger** · **snapshot** · **formula** · **symbol** · **job**
+
+Four things you do to them:
+
+**open** · **ask** · **write** · **watch**
+
+And three words those need: a fact's **value**, a snapshot's **name**, and the
+**question** an ask puts to one. Fourteen in total, and nothing else — the
+authoring language is Lua, so grammar is Lua's twenty-two keywords and none of
+it is ours to teach.
 
 Facts accumulate in ledgers. A snapshot is one or more ledgers read at a
 transaction, and it is a value — the answer at a named snapshot is the same
@@ -26,8 +35,8 @@ code. A document describing the system is a second source that drifts.
 ## The four operations
 
     open      which ledgers  -> a snapshot name
-    ask       name, question -> an answer
-    watch     name, question -> answers as the name advances   (websocket)
+    ask       name, question -> facts
+    watch     name, question -> facts again as the name advances   (websocket)
     write     name, facts    -> a new name
 
 A caller holds the snapshot's *name*, never its bytes. Because an answer at a
@@ -65,7 +74,7 @@ has to be irreversible.
 
 ## Erasure
 
-A fact's answer is sealed under a key belonging to whoever its entity belongs
+A fact's value is sealed under a key belonging to whoever its entity belongs
 to. Erasing destroys that key: the bytes stay and become noise, no segment is
 rewritten, and an old name still answers — it answers `:erased`.
 

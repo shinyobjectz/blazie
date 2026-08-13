@@ -2,7 +2,7 @@ defmodule LazyRiver.Fact do
   @moduledoc """
   The row, and the only row shape (`fac`).
 
-  An id, an attribute said about it, the answer, and the transaction that
+  An id, an attribute said about it, the value, and the transaction that
   recorded it. Optionally, the formula or job that produced it.
 
   An attribute is a binary, not an atom. Doctrine 10 has tenants and agents
@@ -12,18 +12,18 @@ defmodule LazyRiver.Fact do
   An id is a slot, not a word: it is opaque, carrying no type, no name and no
   contents, and everything known about it is other facts pointing at it.
 
-  An edge is a fact whose answer is another id, so a property graph is what
+  An edge is a fact whose value is another id, so a property graph is what
   facts already are — there is no node type and no edge type here because
   there is nothing left to add.
   """
 
-  @enforce_keys [:id, :attribute, :answer, :tx]
-  defstruct [:id, :attribute, :answer, :tx, by: nil]
+  @enforce_keys [:id, :attribute, :value, :tx]
+  defstruct [:id, :attribute, :value, :tx, by: nil]
 
   @type t :: %__MODULE__{
           id: term(),
           attribute: String.t(),
-          answer: term(),
+          value: term(),
           tx: pos_integer(),
           by: term() | nil
         }

@@ -29,7 +29,7 @@ defmodule LazyRiver.Wire do
   @doc "A wire pattern becomes a keyword pattern, or a refusal."
   @spec pattern(map()) :: {:ok, keyword()} | {:error, refusal()}
   def pattern(sent) when is_map(sent) do
-    Enum.reduce_while(["id", "attribute", "answer", "by"], {:ok, []}, fn key, {:ok, acc} ->
+    Enum.reduce_while(["id", "attribute", "value", "by"], {:ok, []}, fn key, {:ok, acc} ->
       case {Map.fetch(sent, key), key} do
         {:error, _} -> {:cont, {:ok, acc}}
         {{:ok, value}, "attribute"} -> resolve_attribute(value, acc)
@@ -51,7 +51,7 @@ defmodule LazyRiver.Wire do
        %{
          problem: :not_a_pattern,
          repair:
-           "A pattern is an object of id, attribute, answer or by — any of them, all of them, " <>
+           "A pattern is an object of id, attribute, value or by — any of them, all of them, " <>
              "or none. #{inspect(sent)} is not one."
        }}
 
@@ -72,11 +72,11 @@ defmodule LazyRiver.Wire do
              "was derived, declare the formula that derives it and let it produce the fact."
        }}
 
-  def assertion(%{"id" => id, "attribute" => attribute, "answer" => answer}) do
+  def assertion(%{"id" => id, "attribute" => attribute, "value" => value}) do
     with {:ok, id} <- check_id(id),
          {:ok, attribute} <- existing_attribute(attribute),
-         {:ok, answer} <- decode_answer(answer) do
-      {:ok, {id, attribute, answer}}
+         {:ok, value} <- decode_value(value) do
+      {:ok, {id, attribute, value}}
     end
   end
 
@@ -85,7 +85,7 @@ defmodule LazyRiver.Wire do
       {:error,
        %{
          problem: :incomplete_assertion,
-         repair: "A fact is an id, an attribute and an answer. Send all three."
+         repair: "A fact is an id, an attribute and a value. Send all three."
        }}
 
   @doc "A wire snapshot name becomes an internal one, or a refusal."
@@ -130,7 +130,7 @@ defmodule LazyRiver.Wire do
     %{
       "id" => fact.id,
       "attribute" => fact.attribute,
-      "answer" => encode_answer(fact.answer),
+      "value" => encode_value(fact.value),
       "tx" => fact.tx,
       "by" => if(fact.by, do: to_string(fact.by))
     }
@@ -167,14 +167,14 @@ defmodule LazyRiver.Wire do
          repair: "An id travels as a number or a string. #{inspect(id)} is neither."
        }}
 
-  # ── answers ────────────────────────────────────────────────────────────────
+  # ── values ─────────────────────────────────────────────────────────────────
 
-  defp encode_answer(%Symbol{} = symbol),
+  defp encode_value(%Symbol{} = symbol),
     do: %{"$symbol" => %{"space" => symbol.space, "values" => symbol.values}}
 
-  defp encode_answer(answer), do: answer
+  defp encode_value(value), do: value
 
-  defp decode_answer(%{"$symbol" => _}),
+  defp decode_value(%{"$symbol" => _}),
     do:
       {:error,
        %{
@@ -184,5 +184,5 @@ defmodule LazyRiver.Wire do
              "Write the content it stands for and let a formula derive the symbol."
        }}
 
-  defp decode_answer(answer), do: {:ok, answer}
+  defp decode_value(value), do: {:ok, value}
 end

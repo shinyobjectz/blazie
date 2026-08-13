@@ -26,8 +26,8 @@ defmodule LazyRiver.Ledger do
   @type name :: term()
   @type ref :: GenServer.server()
   @type assertion ::
-          {id :: term(), attribute :: String.t(), answer :: term()}
-          | {id :: term(), attribute :: String.t(), answer :: term(), by :: term()}
+          {id :: term(), attribute :: String.t(), value :: term()}
+          | {id :: term(), attribute :: String.t(), value :: term(), by :: term()}
 
   # ── opening ────────────────────────────────────────────────────────────────
   #
@@ -252,7 +252,7 @@ defmodule LazyRiver.Ledger do
   @spec find_at(ref(), non_neg_integer(), keyword()) :: [Fact.t()]
   def find_at(ledger, tx, pattern), do: GenServer.call(ledger, {:find_at, tx, pattern})
 
-  @doc "Facts exactly as stored, sealed answers and all."
+  @doc "Facts exactly as stored, sealed values and all."
   @spec raw_at(ref(), non_neg_integer()) :: [Fact.t()]
   def raw_at(ledger, tx), do: GenServer.call(ledger, {:raw_at, tx})
 
@@ -283,7 +283,7 @@ defmodule LazyRiver.Ledger do
          facts: Enum.reverse(replayed),
          by_id: %{},
          by_attribute: %{},
-         by_answer: %{},
+         by_value: %{},
          oldest: oldest_of(replayed),
          resident: Keyword.get(opts, :resident, :unbounded),
          store: store,
@@ -346,8 +346,8 @@ defmodule LazyRiver.Ledger do
   # ── the sort orders ────────────────────────────────────────────────────────
   #
   # The same facts, reachable three ways: by the entity they are about, by the
-  # attribute they assert, and by the answer they hold — which is how an edge
-  # is read backwards, since an edge is a fact whose answer is another id.
+  # attribute they assert, and by the value they hold — which is how an edge
+  # is read backwards, since an edge is a fact whose value is another id.
   # Every list is newest first, like `facts`, so a read drops what is too new
   # and stops.
   #
@@ -358,16 +358,16 @@ defmodule LazyRiver.Ledger do
       acc
       |> update_in([:by_id, fact.id], &[fact | &1 || []])
       |> update_in([:by_attribute, fact.attribute], &[fact | &1 || []])
-      |> update_in([:by_answer, answer_key(fact.answer)], &[fact | &1 || []])
+      |> update_in([:by_value, value_key(fact.value)], &[fact | &1 || []])
     end)
   end
 
-  # Only answers that can be looked up cheaply get an entry. A vector is not
+  # Only values that can be looked up cheaply get an entry. A vector is not
   # one of them, and nobody asks for a fact by its embedding.
-  defp answer_key(answer) when is_integer(answer) or is_binary(answer) or is_atom(answer),
-    do: answer
+  defp value_key(value) when is_integer(value) or is_binary(value) or is_atom(value),
+    do: value
 
-  defp answer_key(_answer), do: :unindexed
+  defp value_key(_value), do: :unindexed
 
   defp matching(state, tx, pattern) do
     resident =
@@ -398,8 +398,8 @@ defmodule LazyRiver.Ledger do
       id = pattern[:id] ->
         Map.get(state.by_id, id, [])
 
-      (answer = pattern[:answer]) && answer_key(answer) != :unindexed ->
-        Map.get(state.by_answer, answer_key(answer), [])
+      (value = pattern[:value]) && value_key(value) != :unindexed ->
+        Map.get(state.by_value, value_key(value), [])
 
       attribute = pattern[:attribute] ->
         Map.get(state.by_attribute, attribute, [])
@@ -426,7 +426,7 @@ defmodule LazyRiver.Ledger do
         | facts: kept,
           by_id: %{},
           by_attribute: %{},
-          by_answer: %{},
+          by_value: %{},
           oldest: oldest_of(kept)
       }
       |> index(Enum.reverse(kept))
@@ -455,7 +455,7 @@ defmodule LazyRiver.Ledger do
   defp seal(fact, state) do
     case owner_of(state, fact.id) do
       nil -> fact
-      subject -> %{fact | answer: Erasure.protect(fact.answer, subject)}
+      subject -> %{fact | value: Erasure.protect(fact.value, subject)}
     end
   end
 
@@ -466,7 +466,7 @@ defmodule LazyRiver.Ledger do
     |> Enum.find(&(&1.attribute == @subject))
     |> case do
       nil -> nil
-      fact -> fact.answer
+      fact -> fact.value
     end
   end
 
@@ -482,8 +482,8 @@ defmodule LazyRiver.Ledger do
   end
 
   defp to_fact({id, attribute, answer}, tx),
-    do: %Fact{id: id, attribute: attribute, answer: answer, tx: tx}
+    do: %Fact{id: id, attribute: attribute, value: answer, tx: tx}
 
   defp to_fact({id, attribute, answer, by}, tx),
-    do: %Fact{id: id, attribute: attribute, answer: answer, tx: tx, by: by}
+    do: %Fact{id: id, attribute: attribute, value: answer, tx: tx, by: by}
 end

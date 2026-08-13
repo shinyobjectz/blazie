@@ -15,7 +15,7 @@ defmodule LazyRiver.FormulaTest do
   defp doubled do
     Formula.new(:doubled, fn snapshot ->
       for fact <- Snapshot.find(snapshot, attribute: "height") do
-        {fact.id, "double_height", fact.answer * 2}
+        {fact.id, "double_height", fact.value * 2}
       end
     end)
   end
@@ -34,7 +34,7 @@ defmodule LazyRiver.FormulaTest do
 
       {:ok, tx, _reads} = Formula.materialize(doubled(), snapshot, ledger)
 
-      assert [%Fact{attribute: "double_height", answer: 360, by: :doubled} = fact] =
+      assert [%Fact{attribute: "double_height", value: 360, by: :doubled} = fact] =
                Ledger.facts_at(ledger, tx) |> Enum.filter(&(&1.tx == tx))
 
       refute Fact.from_outside?(fact)

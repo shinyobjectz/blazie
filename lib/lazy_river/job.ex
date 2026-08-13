@@ -108,7 +108,7 @@ defmodule LazyRiver.Job do
   def last_run(%Snapshot{} = snapshot, id) do
     snapshot
     |> Snapshot.find(id: id, attribute: "ran_at")
-    |> Enum.map(& &1.answer)
+    |> Enum.map(& &1.value)
     |> Enum.max(fn -> nil end)
   end
 
@@ -120,7 +120,7 @@ defmodule LazyRiver.Job do
   """
   @spec due?(Snapshot.t(), term(), integer()) :: boolean()
   def due?(%Snapshot{} = snapshot, id, now) do
-    case Snapshot.answer(snapshot, id, "every") do
+    case Snapshot.value(snapshot, id, "every") do
       nil -> false
       every -> due_by?(last_run(snapshot, id), every, now)
     end
@@ -135,7 +135,7 @@ defmodule LazyRiver.Job do
   @spec due(Snapshot.t(), integer()) :: [term()]
   def due(%Snapshot{} = snapshot, now) do
     snapshot
-    |> Snapshot.find(attribute: "is", answer: "job")
+    |> Snapshot.find(attribute: "is", value: "job")
     |> Enum.map(& &1.id)
     |> Enum.uniq()
     |> Enum.filter(&due?(snapshot, &1, now))
@@ -144,12 +144,12 @@ defmodule LazyRiver.Job do
   @doc "Everything this job has failed with, oldest first."
   @spec failures(Snapshot.t(), term()) :: [term()]
   def failures(%Snapshot{} = snapshot, id) do
-    snapshot |> Snapshot.find(id: id, attribute: "failed") |> Enum.map(& &1.answer)
+    snapshot |> Snapshot.find(id: id, attribute: "failed") |> Enum.map(& &1.value)
   end
 
   defp due_by?(nil, _every, _now), do: true
   defp due_by?(last, every, now), do: now - last >= every
 
-  defp stamp({id, attribute, answer}, by), do: {id, attribute, answer, by}
-  defp stamp({id, attribute, answer, _by}, by), do: {id, attribute, answer, by}
+  defp stamp({id, attribute, value}, by), do: {id, attribute, value, by}
+  defp stamp({id, attribute, value, _by}, by), do: {id, attribute, value, by}
 end

@@ -47,7 +47,7 @@ defmodule LazyRiver.Surface.WatchChannel do
   @impl true
   # An answer from the subscription, on its way to the client.
   def handle_info({:lazy_river, ref, answer}, %{assigns: %{ref: ref}} = socket) do
-    push(socket, "answer", %{
+    push(socket, "value", %{
       "name" => named(answer.name, socket.assigns.names),
       "facts" => Enum.map(answer.facts, &encode/1)
     })

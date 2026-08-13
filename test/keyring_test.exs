@@ -92,13 +92,13 @@ defmodule LazyRiver.KeyringTest do
       {:ok, _} = Ledger.append(ledger, [{42, "subject", ctx.subject}])
       {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
 
-      assert Snapshot.answer(Snapshot.open([ledger]), 42, "height") == 180
+      assert Snapshot.value(Snapshot.open([ledger]), 42, "height") == 180
 
       # The old keyring held the only copy of every key in memory. Restarting
       # it used to erase everyone by accident.
       :ok = Keyring.restart()
 
-      assert Snapshot.answer(Snapshot.open([ledger]), 42, "height") == 180
+      assert Snapshot.value(Snapshot.open([ledger]), 42, "height") == 180
 
       Keyring.destroy(ctx.subject)
     end
@@ -113,7 +113,7 @@ defmodule LazyRiver.KeyringTest do
       :ok = Keyring.restart()
       :ok = Erasure.erase(ctx.subject)
 
-      assert Snapshot.answer(Snapshot.open([ledger]), 42, "height") == :erased
+      assert Snapshot.value(Snapshot.open([ledger]), 42, "height") == :erased
     end
   end
 
@@ -128,7 +128,7 @@ defmodule LazyRiver.KeyringTest do
       # Read the raw row rather than the revealed one.
       raw = Ledger.raw_at(ledger, tx) |> Enum.find(&(&1.attribute == "height"))
 
-      assert {:sealed, subject, wrapped, _iv, _tag, _cipher} = raw.answer
+      assert {:sealed, subject, wrapped, _iv, _tag, _cipher} = raw.value
       assert subject == ctx.subject
       assert byte_size(wrapped) > 0
 

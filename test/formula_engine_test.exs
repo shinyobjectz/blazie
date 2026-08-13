@@ -25,7 +25,7 @@ defmodule LazyRiver.Formula.EngineTest do
       Agent.update(agent, &(&1 + 1))
 
       for fact <- Snapshot.find(snapshot, attribute: "height") do
-        {fact.id, "doubled", fact.answer * 2}
+        {fact.id, "doubled", fact.value * 2}
       end
     end)
   end

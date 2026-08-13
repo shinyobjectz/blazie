@@ -10,10 +10,40 @@ design = "block"   # rogue values vs tokens — only fires when tokens exist
 [scan]
 # which word kinds a code declaration may NOT be named after
 enforced_kinds = ["core", "inner"]
-# symbols allowed to share a word's name (each entry is a recorded decision)
+
+# ── how a collision is judged here ─────────────────────────────────────────────
+#
+# Not every symbol sharing a word's name is drift, and treating them alike
+# produces a list nobody reads. Four cases, and only two of them are defects:
+#
+#   A basic verb below the surface is fine. `Store.open`, `Keyring.open` and
+#   `Ledger.open` all do ordinary work at a layer nobody authors against, and
+#   English has one word for it. Renaming them buys nothing and costs clarity.
+#
+#   A primary verb — one of the four operations, at the surface — should be
+#   literal, and is: `Controller.open` IS `open`, and means it.
+#
+#   A NOUN colliding is the real defect, because a noun names a thing and two
+#   things with one name is the failure the vocabulary exists to prevent.
+#
+#   A VALUE TYPE should be consistent on purpose. The same value wears the same
+#   name everywhere it appears — that is not a collision, it is the point. The
+#   test is whether the two are interchangeable: if you could pass one where the
+#   other is expected, one name is right; if you could not, two things are
+#   wearing one noun and that is a defect wherever it appears.
+#
+# ── symbols allowed to share a word's name (each entry is a recorded decision) ─
 #
 # job — `Backup.job/1` and `Vitals.job/0` each return a `%Job{}`. They do not
 # take the word to mean something else; they denote exactly the thing the word
 # denotes, which is the case this list exists for. A function that hands back a
 # job and is called anything but `job` would be the drift, not the fix.
-allow = ["job"]
+#
+# open, write, watch, ask — basic verbs. At the surface they ARE the operation
+# and mean it; below it (`Store.open`, `Keyring.Local.write`) they are ordinary
+# English doing ordinary work. Neither is a second meaning of the word.
+#
+# name, value — value type and noun, both used for exactly what they denote:
+# `Snapshot.name/1` returns the name, `Snapshot.value/3` returns a fact's
+# value. Kept deliberately consistent rather than renamed for distinctness.
+allow = ["job", "open", "write", "watch", "ask", "name", "value"]

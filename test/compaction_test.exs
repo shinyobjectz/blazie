@@ -54,7 +54,7 @@ defmodule LazyRiver.CompactionTest do
       snapshot = Snapshot.open([reopened])
 
       assert length(Snapshot.find(snapshot, id: 42, attribute: "height")) == 3
-      assert Snapshot.answer(snapshot, 42, "height") == 3
+      assert Snapshot.value(snapshot, 42, "height") == 3
 
       Ledger.close(ctx.name)
     end

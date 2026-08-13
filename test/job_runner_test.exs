@@ -48,7 +48,7 @@ defmodule LazyRiver.Job.RunnerTest do
       settle(runner)
 
       assert Agent.get(agent, & &1) == 1
-      assert Snapshot.answer(Snapshot.open([ledger]), "fetch", "headline") == "ran"
+      assert Snapshot.value(Snapshot.open([ledger]), "fetch", "headline") == "ran"
     end
 
     test "a job that is not due does not run", %{ledger: ledger} do
@@ -119,7 +119,7 @@ defmodule LazyRiver.Job.RunnerTest do
       settle(runner)
 
       assert Runner.in_flight(runner) == []
-      assert Snapshot.answer(Snapshot.open([ledger]), "slow", "headline") == "done"
+      assert Snapshot.value(Snapshot.open([ledger]), "slow", "headline") == "done"
     end
   end
 

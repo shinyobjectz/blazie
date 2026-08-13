@@ -151,7 +151,7 @@ defmodule LazyRiver.ConcurrencyTest do
       doubling =
         Formula.new("doubling", fn snapshot ->
           for fact <- Snapshot.find(snapshot, attribute: "height") do
-            {fact.id, "doubled", fact.answer * 2}
+            {fact.id, "doubled", fact.value * 2}
           end
         end)
 

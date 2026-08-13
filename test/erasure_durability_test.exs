@@ -55,7 +55,7 @@ defmodule LazyRiver.ErasureDurabilityTest do
   describe "a restored key store does not resurrect anybody" do
     test "reconciling on open re-destroys what was erased", ctx do
       :ok = Erasure.erase(ctx.subject)
-      assert Snapshot.answer(Snapshot.open([ctx.ledger]), 42, "height") == :erased
+      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == :erased
 
       # Stand in for a backup restore: the key is back, as it would be if the
       # key store were rolled back to before the erasure.
@@ -65,13 +65,13 @@ defmodule LazyRiver.ErasureDurabilityTest do
       :ok = Keyring.reconcile()
 
       assert Keyring.unwrap(<<0::96, 0::128, 0>>, ctx.subject) == :forgotten
-      assert Snapshot.answer(Snapshot.open([ctx.ledger]), 42, "height") == :erased
+      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == :erased
     end
 
     test "a subject nobody erased is untouched by reconciling", ctx do
       :ok = Keyring.reconcile()
 
-      assert Snapshot.answer(Snapshot.open([ctx.ledger]), 42, "height") == 180
+      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == 180
     end
 
     test "reconciling is idempotent", ctx do
@@ -79,7 +79,7 @@ defmodule LazyRiver.ErasureDurabilityTest do
 
       assert :ok = Keyring.reconcile()
       assert :ok = Keyring.reconcile()
-      assert Snapshot.answer(Snapshot.open([ctx.ledger]), 42, "height") == :erased
+      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == :erased
     end
   end
 
@@ -91,14 +91,14 @@ defmodule LazyRiver.ErasureDurabilityTest do
 
       # Erased before, erased after — and for the right reason: the tombstone
       # said so, not because a restart loses everything.
-      assert Snapshot.answer(Snapshot.open([ctx.ledger]), 42, "height") == :erased
+      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == :erased
       assert Erasure.erased?(ctx.subject)
     end
 
     test "and an unerased subject still reads after a restart", ctx do
       :ok = Keyring.restart()
 
-      assert Snapshot.answer(Snapshot.open([ctx.ledger]), 42, "height") == 180
+      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == 180
     end
   end
 end

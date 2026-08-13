@@ -56,7 +56,7 @@ defmodule LazyRiver.LedgerTest do
       # Persistence goes behind this seam. Until it does, closing is erasure by
       # accident — which doctrine 16 says should only ever happen on purpose.
       assert Ledger.tx(reopened) == 0
-      assert Snapshot.answer(Snapshot.open([reopened]), 42, "height") == nil
+      assert Snapshot.value(Snapshot.open([reopened]), 42, "height") == nil
 
       Ledger.close(name)
     end

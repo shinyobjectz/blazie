@@ -97,7 +97,7 @@ defmodule LazyRiver.AuthorityTest do
       facts = LazyRiver.Snapshot.open([ledger]) |> LazyRiver.Snapshot.facts()
 
       refute Enum.any?(facts, fn fact ->
-               token in [fact.id, fact.answer]
+               token in [fact.id, fact.value]
              end)
     end
 

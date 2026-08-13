@@ -27,7 +27,7 @@ defmodule LazyRiver.StoreTest do
       reopened = on_disk(ctx.name, ctx.dir)
       snapshot = Snapshot.open([reopened])
 
-      assert Snapshot.answer(snapshot, 42, "height") == 181
+      assert Snapshot.value(snapshot, 42, "height") == 181
       assert length(Snapshot.find(snapshot, id: 42, attribute: "height")) == 2
 
       Ledger.close(ctx.name)
@@ -124,7 +124,7 @@ defmodule LazyRiver.StoreTest do
       :ok = Ledger.close(ctx.name)
 
       reopened = on_disk(ctx.name, ctx.dir, sync: true)
-      assert Snapshot.answer(Snapshot.open([reopened]), 42, "height") == 180
+      assert Snapshot.value(Snapshot.open([reopened]), 42, "height") == 180
 
       Ledger.close(ctx.name)
     end
