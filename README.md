@@ -19,25 +19,30 @@ world.
 - **A graph you did not have to model.** An edge is a fact whose value is
   another id. No node type, no edge type, no second store to keep in step.
 - **Code runs where it cannot reach.** Agent code runs in Lua (Luerl, inside
-  the BEAM) or WebAssembly with no clock, no network and no filesystem.
+  the BEAM) with no clock, no network and no filesystem.
   Isolation is the absence of anything to reach, so there is no rule to
   misconfigure.
 - **One line touches the outside world.** A job is the only thing handed the
   network and the only thing a schedule attaches to, so what an agent did is a
   list you can read, with its failures on it.
 - **It tells you when something changed.** `watch` is the same question asked
-  again as facts land, not a second mechanism.
+  again as things land, not a second mechanism.
 
-Fourteen words, and nothing else:
+## What using it looks like
 
-**fact** · **attribute** · **ledger** · **snapshot** · **formula** · **symbol**
-· **job** — seven things it is made of.
+    ada.height = 180
+    ada.friend = grace          -- an edge is a field holding another entity
 
-**open** · **ask** · **write** · **watch** — four things you do to them.
+    print(ada.friend.height)
 
-A fact's **value**, a snapshot's **name**, and the **question** an ask puts to
-one. The authoring language is Lua, so the grammar is Lua's twenty-two keywords
-and none of it is ours to teach.
+    for p in each { height = 180 } do print(p.id) end
+
+    ada.height = nil            -- unsaid; at(42).ada.height still answers 180
+
+That is the whole surface. An entity is a table, a field is a field, and Lua is
+the query language — so counting, grouping and joining need no vocabulary of
+their own. Fact, attribute, snapshot and pattern are how this is built; none of
+them is something you have to learn to use it.
 
 ## Design
 
@@ -47,13 +52,11 @@ things we got wrong badly enough to leave a test behind.
 
 The vocabulary and the reasoning live in `.monty/ontology.db`: fourteen words
 and twenty-four numbered doctrines, linted against the code by `just check`.
-There are no other design documents in the tree, because a document describing
-the system is a second source that drifts.
-
-The vocabulary lives in `.monty/ontology.db` and is enforced by `just check`.
-There are no design documents: claims are doctrine in that database, choices
-are in the commit that made them, and mechanism is in the moduledoc beside the
-code. A document describing the system is a second source that drifts.
+Those words name what this is made of, which is a different question from what
+you type — the surface above is Lua and nothing else. There are no other design
+documents: claims are doctrine in that database, choices are in the commit that
+made them, and mechanism is in the moduledoc beside the code. A document
+describing the system is a second source that drifts.
 
 ## Running it
 
@@ -63,17 +66,21 @@ code. A document describing the system is a second source that drifts.
     mix test --include load     # what it costs at size
     mix test --include gcp      # talks to Cloud KMS
 
-## The four operations
+## The operation
 
-    open      which ledgers  -> a snapshot name
-    ask       name, question -> facts
-    watch     name, question -> facts again as the name advances   (websocket)
-    write     name, facts    -> a new name
+    run       ledger, lua  -> what it returned, and the name it read at
+    watch     ledger, what -> answered again as things land          (websocket)
+
+There is one door. `run` opens a snapshot, evaluates the chunk against it, and
+appends whatever the chunk wrote — three steps that used to be three operations
+a caller had to know the vocabulary for.
 
 A caller holds the snapshot's *name*, never its bytes. Because an answer at a
-name never changes, a client caches on `{name, question}` and never
-invalidates — there is no cache-coherence protocol because there is nothing to
-cohere.
+name never changes, a client caches on `{name, source}` and never invalidates —
+there is no cache-coherence protocol because there is nothing to cohere.
+
+`claim` takes a ledger name and grants it to whoever claimed it; that is the
+only other thing the wire does.
 
 Authorization is which ledgers a caller may name. Not row rules, not
 predicates. Every operation that names a ledger is checked, because a snapshot

@@ -189,12 +189,10 @@ data" is a fair question, and a deterministic sampler is a usable one.
 sequenceDiagram
     participant C as caller
     participant B as blazie
-    C->>B: open ["tenant-7"]
-    B-->>C: name { tenant-7: 42 }
-    C->>B: ask(name, question)
-    B-->>C: facts
-    Note over C: caches on {name, question}<br/>and never invalidates
-    C->>B: write(name, facts)
+    C->>B: run("tenant-7", "return ada.height")
+    B-->>C: 180, name { tenant-7: 42 }
+    Note over C: caches on {name, source}<br/>and never invalidates
+    C->>B: run("tenant-7", "ada.height = 181")
     B-->>C: name { tenant-7: 43 }
     Note over C: reads its own write<br/>without polling
 ```
@@ -223,7 +221,7 @@ flowchart LR
     W --> E
 ```
 
-`watch` is not a second mechanism. It is `ask`, kept.
+`watch` is not a second mechanism. It is a run, kept.
 
 ---
 
@@ -262,8 +260,13 @@ if code declares a name that collides with a word.
 | | |
 |---|---|
 | **fact** · **attribute** · **ledger** · **snapshot** · **formula** · **symbol** · **job** | seven things it is made of |
-| **open** · **ask** · **write** · **watch** | four things you do to them |
+| **open** · **ask** · **write** · **watch** | four things it does to them |
 | a fact's **value** · a snapshot's **name** · a question's **question** | three those need |
+
+Those are the words this is *made of*, and they stayed. What changed is that
+none of them reaches a user any more: the wire takes Lua and gives back what it
+returned, so `open`, `ask` and `write` are steps inside `run` rather than three
+operations somebody has to learn the vocabulary for.
 
 The authoring language is Lua, which adds **zero** words: its twenty-two
 keywords are grammar, and grammar is not ours to teach. Lua and the ontology
