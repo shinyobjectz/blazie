@@ -182,23 +182,29 @@ function Holding({
   chosen: boolean
   onChoose: () => void
 }) {
-  const [census, setCensus] = useState<Census | null>(null)
-  const [error, setError] = useState<unknown>(null)
+  const [attempt, setAttempt] = useState(0)
+  const asking = `${world} ${attempt}`
+  const [answered, setAnswered] = useState<{ to: string; census: Census | null; error: unknown } | null>(null)
 
-  const read = useCallback(() => {
+  useEffect(() => {
     let live = true
-    setError(null)
 
     run(world, CENSUS)
-      .then((result) => live && setCensus(result.value as Census))
-      .catch((thrown) => live && setError(thrown))
+      .then((result) => live && setAnswered({ to: asking, census: result.value as Census, error: null }))
+      .catch((thrown) => live && setAnswered({ to: asking, census: null, error: thrown }))
 
     return () => {
       live = false
     }
-  }, [world])
+  }, [world, asking])
 
-  useEffect(read, [read])
+  const read = useCallback(() => setAttempt((n) => n + 1), [])
+
+  // Only an answer about THIS world. Clearing the error by hand meant a card
+  // could briefly show one world's refusal while counting another's.
+  const current = answered?.to === asking ? answered : null
+  const census = current?.census ?? null
+  const error = current?.error ?? null
 
   return (
     <button

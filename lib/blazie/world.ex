@@ -310,6 +310,25 @@ defmodule Blazie.World do
     GenServer.call(world, {:find_at, tx, pattern})
   end
 
+  @doc """
+  The ids of everything matching a pattern, each one once.
+
+  The same reasoning as `find_at/3` carried one step further. That one keeps the
+  filtering here so only the answer crosses the process boundary; this one
+  notices that *which entities* is a smaller answer than *which facts*, and that
+  a caller walking a world only ever wanted the first. Over 25,000 entities it
+  is the difference between copying every fact into the asker and copying one id
+  each — which is what decided whether a world that size could be looked at.
+
+  Ids are read off the stored facts without revealing them, because erasure
+  seals a fact's value and never its id.
+  """
+  @spec ids_at(ref(), non_neg_integer(), keyword()) :: [term()]
+  def ids_at(world, tx, pattern) do
+    Fact.fields!(pattern)
+    GenServer.call(world, {:ids_at, tx, pattern})
+  end
+
   @doc "Facts exactly as stored, sealed values and all."
   @spec raw_at(ref(), non_neg_integer()) :: [Fact.t()]
   def raw_at(world, tx), do: GenServer.call(world, {:raw_at, tx})
@@ -407,6 +426,18 @@ defmodule Blazie.World do
 
   def handle_call({:find_at, tx, pattern}, _from, state) do
     {:reply, Enum.map(matching(state, tx, pattern), &Erasure.reveal_fact/1), state}
+  end
+
+  # Not revealed: an id is never sealed, and revealing a value here would be
+  # decrypting the whole world to answer a question that discards it.
+  #
+  # Sorted and de-duplicated HERE rather than by whoever asked, because this
+  # process has no heap limit and the asker usually does. Sorting a hundred
+  # thousand ids is the same work either way; doing it here means the guest is
+  # handed the finished answer instead of building it under a cap.
+  def handle_call({:ids_at, tx, pattern}, _from, state) do
+    ids = state |> matching(tx, pattern) |> Enum.map(& &1.id) |> Enum.uniq() |> Enum.sort()
+    {:reply, ids, state}
   end
 
   def handle_call({:facts_at, tx}, _from, state) do

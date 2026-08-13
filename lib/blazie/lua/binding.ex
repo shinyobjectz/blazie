@@ -46,7 +46,7 @@ defmodule Blazie.Lua.Binding do
   on every line is a tax paid by every reader forever to catch a typo once.
   """
 
-  alias Blazie.{Attribute, Blob, Fact, Snapshot, Symbol}
+  alias Blazie.{Attribute, Blob, Snapshot, Symbol}
 
   @typedoc "An assertion a guest staged: id, field, value."
   @type assertion :: {term(), String.t(), term()}
@@ -57,6 +57,13 @@ defmodule Blazie.Lua.Binding do
   # table would be a second thing to clean up on a path whose whole point is
   # that it can be killed at any moment.
   @staged :blazie_lua_staged
+
+  # Where `each` parks the ids it matched, for the same reason and with the same
+  # lifetime: one key per open cursor, in a dictionary that dies with the run.
+  @cursors :blazie_lua_cursor
+
+  # How far each cursor has walked, which is what decides when to sweep.
+  @swept :blazie_lua_swept
 
   @doc """
   Bind a snapshot into a Luerl state as tables.
@@ -117,6 +124,7 @@ defmodule Blazie.Lua.Binding do
       {"__read", &read/2},
       {"__write", &write/2},
       {"__each", &each/2},
+      {"__next", &next_id/2},
       {"__fields", &fields/2}
     ]
     |> Enum.reduce(state, fn {name, fun}, acc ->
@@ -137,28 +145,11 @@ defmodule Blazie.Lua.Binding do
       nil ->
         {[nil, false], state}
 
-      # A blob and a symbol are structs, and a guest has no way to hold one.
-      # Both become plain tables, which is the only shape Lua has — so
-      # `ada.avatar.bytes` works without the guest knowing what a struct is.
       %Blob{} = blob ->
-        {encoded, state} =
-          :luerl.encode(
-            [
-              {"key", blob.key},
-              {"hash", blob.hash},
-              {"bytes", blob.bytes},
-              {"media_type", blob.media_type}
-            ],
-            state
-          )
-
-        {[encoded, false], state}
+        as_table(blob, state)
 
       %Symbol{} = symbol ->
-        {encoded, state} =
-          :luerl.encode([{"space", symbol.space}, {"dimensions", Symbol.dimension(symbol)}], state)
-
-        {[encoded, false], state}
+        as_table(symbol, state)
 
       value ->
         {[value, reference?(snapshot, to_string(field))], state}
@@ -166,6 +157,11 @@ defmodule Blazie.Lua.Binding do
   end
 
   defp read(_args, state), do: {[nil, false], state}
+
+  defp as_table(struct, state) do
+    {encoded, state} = :luerl.encode(shown(struct), state)
+    {[encoded, false], state}
+  end
 
   # Extra arguments are ignored rather than dropping the call. These are plain
   # globals a guest can call directly, so arity is something a guest chooses —
@@ -195,25 +191,84 @@ defmodule Blazie.Lua.Binding do
 
   defp write(_args, state), do: {[], state}
 
+  # The matching ids stay here, in Erlang, and the guest is handed a number to
+  # pull them through one at a time.
+  #
+  # They used to be encoded into a Lua table, which is the obvious thing to do
+  # and put a hard ceiling on how big a world could be looked at: a table of
+  # 12,400 ids exceeded the heap limit, so counting a world was refused for
+  # being too large to count. An Erlang list of the same ids is a fraction of
+  # the size and is never copied — the guest process owns it already.
+  #
+  # A cursor nobody drains to the end is left behind, and that is fine for the
+  # same reason staged writes are: this dictionary belongs to one guest process
+  # which is killed on deadline or heap limit, so it cannot outlive the run.
   defp each([spec | rest], state) do
     snapshot = at_snapshot(List.first(rest))
     wanted = :luerl.decode(spec, state)
 
+    # Ids, then filter — rather than facts, filter, then ids. Three things
+    # follow. The world hands back one id per entity instead of every fact it
+    # holds; the remaining constraints are checked once per entity rather than
+    # once per fact about it, which for an entity holding twenty fields was
+    # nineteen repetitions of the same answer; and the order arrives already
+    # decided, so nothing here sorts.
     ids =
       snapshot
-      |> Snapshot.find(narrowest(wanted))
+      |> Snapshot.ids(narrowest(wanted))
       |> Enum.filter(&matches_all?(&1, wanted, snapshot))
-      |> Enum.map(& &1.id)
-      |> Enum.uniq()
-      |> Enum.sort_by(&inspect/1)
 
-    # Luerl builds its own tables; an Erlang list is encoded as one here so the
-    # prelude can index it.
-    {encoded, state} = :luerl.encode(ids, state)
-    {[encoded], state}
+    cursor = System.unique_integer([:positive])
+    Process.put({@cursors, cursor}, ids)
+    {[cursor], state}
   end
 
   defp each(_args, state), do: {[nil], state}
+
+  # One id, or nil at the end. Ids are strings and numbers, never nil, so nil is
+  # unambiguously "no more" and the loop needs no separate done flag.
+  #
+  # Every `@sweep` ids this collects the Lua heap, and that is what removes the
+  # ceiling rather than merely raising it. Luerl has no automatic collector: a
+  # table lives in the interpreter state until something sweeps, so a loop that
+  # touches an entity per iteration grows by the size of the world even when it
+  # keeps nothing. Measured plainly — fifty thousand tables built and discarded,
+  # holding none of them, still exhausted the heap.
+  #
+  # Walking a world is exactly the operation that makes tables in proportion to
+  # the data, and this is the one point inside that walk where the host holds
+  # the state, so it is the only place a sweep can go. It is a real mark and
+  # sweep from the globals, the stack and the call stack, which is why entities
+  # a chunk is still holding survive it: `collectgarbage` in Luerl's own basic
+  # library is this call from this position.
+  defp next_id([cursor | _rest], state) when is_number(cursor) do
+    key = {@cursors, trunc(cursor)}
+
+    case Process.get(key) do
+      [id | rest] ->
+        Process.put(key, rest)
+        {[id], sweep(key, state)}
+
+      _ ->
+        Process.delete(key)
+        Process.delete({@swept, key})
+        {[nil], state}
+    end
+  end
+
+  defp next_id(_args, state), do: {[nil], state}
+
+  # Often enough that memory stays flat over a large world, rarely enough that
+  # the cost is not paid by a chunk reading ten entities. A sweep is proportional
+  # to what is LIVE, so a loop holding nothing sweeps almost nothing.
+  @sweep 1_000
+
+  defp sweep(key, state) do
+    seen = Process.get({@swept, key}, 0) + 1
+    Process.put({@swept, key}, seen)
+
+    if rem(seen, @sweep) == 0, do: :luerl.gc(state), else: state
+  end
 
   # Everything currently said about one entity, which is what `pairs(ada)`
   # iterates. A retracted field is absent rather than present-and-nil: it was
@@ -232,7 +287,7 @@ defmodule Blazie.Lua.Binding do
       |> Enum.reduce([], fn field, acc ->
         case Snapshot.value(snapshot, id, field) do
           nil -> acc
-          value -> [{field, value} | acc]
+          value -> [{field, shown(value)} | acc]
         end
       end)
       |> Enum.reverse()
@@ -242,6 +297,35 @@ defmodule Blazie.Lua.Binding do
   end
 
   defp fields(_args, state), do: {[nil], state}
+
+  # A blob and a symbol are structs, and a guest has no way to hold one. Both
+  # become plain tables, which is the only shape Lua has — so `ada.avatar.bytes`
+  # works without the guest knowing what a struct is.
+  #
+  # One function, because there are two ways a value reaches a guest — reading a
+  # field, and listing an entity's fields — and only the first knew about
+  # structs. So `ada.vec` gave you a space and a dimension while `pairs(ada)`
+  # gave you a symbol's packed float64s, which are not text and not JSON. A world
+  # holding embeddings answered a page that only wanted to list its rows with
+  # `Jason.EncodeError: invalid byte 0xE0`, surfacing as a bare 500.
+  #
+  # A symbol's numbers are deliberately not among what comes back. You do not
+  # read a symbol, you compare it; handing 768 floats to a guest that cannot do
+  # anything with them is a megabyte spent to display noise.
+  defp shown(%Blob{} = blob) do
+    [
+      {"key", blob.key},
+      {"hash", blob.hash},
+      {"bytes", blob.bytes},
+      {"media_type", blob.media_type}
+    ]
+  end
+
+  defp shown(%Symbol{} = symbol) do
+    [{"space", symbol.space}, {"dimensions", Symbol.dimension(symbol)}]
+  end
+
+  defp shown(value), do: value
 
   # ── deciding what a value is ───────────────────────────────────────────────
 
@@ -270,9 +354,9 @@ defmodule Blazie.Lua.Binding do
 
   # `true` in a spec means "has this field at all", which is the difference
   # between asking who is 18 and asking who has an age.
-  defp matches_all?(%Fact{} = fact, wanted, snapshot) do
+  defp matches_all?(id, wanted, snapshot) do
     Enum.all?(wanted, fn {field, want} ->
-      held = Snapshot.value(snapshot, fact.id, to_string(field))
+      held = Snapshot.value(snapshot, id, to_string(field))
 
       case want do
         true -> held != nil
@@ -338,35 +422,59 @@ defmodule Blazie.Lua.Binding do
   # metatables and two loops. Building it through `set_table_keys` would be the
   # same code with every line turned inside out.
   @prelude """
-  __held = {}
+  -- One metatable per transaction, shared by every entity read at it — so the
+  -- usual run has exactly one and `at(42)` adds a second.
+  --
+  -- Every entity used to carry its own, holding four closures over its id. That
+  -- is the natural way to write it and it costs the size of the world: looking
+  -- at 12,400 entities built 12,400 metatables and 49,600 closures, which is
+  -- what put a ceiling on how large a world could be looked at. The id comes off
+  -- the table with `rawget` instead, and the only thing left worth closing over
+  -- is the transaction — which is shared, because that is what the key is.
+  __metas = {}
 
-  function __entity(id, tx)
-    local key = tostring(id) .. ':' .. tostring(tx or '')
-    if __held[key] then return __held[key] end
+  function __meta(tx)
+    local key = tostring(tx or '')
+    if __metas[key] then return __metas[key] end
 
-    local e = { id = id, __entity = true }
-    setmetatable(e, {
-      __index = function(_, field)
-        local value, is_ref = __read(id, field, tx)
+    local m = {
+      __index = function(e, field)
+        local value, is_ref = __read(rawget(e, 'id'), field, tx)
         if is_ref then return __entity(value, tx) end
         return value
       end,
-      __newindex = function(_, field, value)
+      __newindex = function(e, field, value)
         if type(value) == 'table' and rawget(value, '__entity') then
-          __write(id, field, value.id, true)
+          __write(rawget(e, 'id'), field, value.id, true)
         else
-          __write(id, field, value, false)
+          __write(rawget(e, 'id'), field, value, false)
         end
       end,
-      __tostring = function() return tostring(id) end,
+      __tostring = function(e) return tostring(rawget(e, 'id')) end,
       -- `pairs(ada)` walks what is currently said about it. Lua 5.2's
       -- __pairs, which Luerl honours, so listing an entity's fields needs no
       -- vocabulary of its own.
-      __pairs = function() return next, __fields(id, tx), nil end,
-    })
+      __pairs = function(e) return next, __fields(rawget(e, 'id'), tx), nil end,
+      -- Two entity tables are the same entity when they name the same one at the
+      -- same transaction, and the metatable IS the transaction — so comparing
+      -- metatables is what keeps `ada == at(5).ada` false.
+      --
+      -- This used to be true by construction: every entity was cached and handed
+      -- back, so `ada` was always literally the same table. That cache is what
+      -- made a walk over a large world hold a table per entity alive to the end
+      -- of the run. Saying what equality means directly costs one metamethod and
+      -- lets every entity be collected the moment the loop moves on.
+      __eq = function(a, b)
+        return getmetatable(a) == getmetatable(b) and rawget(a, 'id') == rawget(b, 'id')
+      end,
+    }
 
-    __held[key] = e
-    return e
+    __metas[key] = m
+    return m
+  end
+
+  function __entity(id, tx)
+    return setmetatable({ id = id, __entity = true }, __meta(tx))
   end
 
   -- Any name that is not already a global is an entity. This is the whole of
@@ -384,12 +492,14 @@ defmodule Blazie.Lua.Binding do
     end
   })
 
+  -- A cursor, not a list. The ids stay in the host and arrive one at a time, so
+  -- iterating a world costs what one entity costs rather than what the world
+  -- does.
   function each(spec, tx)
-    local ids = __each(spec or {}, tx)
-    local i = 0
+    local cursor = __each(spec or {}, tx)
     return function()
-      i = i + 1
-      if ids[i] ~= nil then return __entity(ids[i], tx) end
+      local id = __next(cursor)
+      if id ~= nil then return __entity(id, tx) end
     end
   end
 

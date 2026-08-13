@@ -92,13 +92,18 @@ export default function Activity() {
 }
 
 function PanelView({ panel, granted }: { panel: Panel; granted: boolean }) {
-  const [held, setHeld] = useState<Record<string, Value> | null>(null)
-  const [error, setError] = useState<unknown>(null)
+  const [attempt, setAttempt] = useState(0)
+  const asking = `${panel.world} ${panel.entity} ${attempt}`
 
-  const read = useCallback(() => {
+  const [answered, setAnswered] = useState<{
+    to: string
+    held: Record<string, Value> | null
+    error: unknown
+  } | null>(null)
+
+  useEffect(() => {
     if (!granted) return
     let live = true
-    setError(null)
 
     // Whatever the job last wrote about itself, as a plain table.
     const source = `local out = {}
@@ -106,15 +111,27 @@ for field, value in pairs(${panel.entity}) do out[field] = value end
 return out`
 
     run(panel.world, source)
-      .then((result) => live && setHeld((result.value ?? {}) as Record<string, Value>))
-      .catch((thrown) => live && setError(thrown))
+      .then(
+        (result) =>
+          live &&
+          setAnswered({ to: asking, held: (result.value ?? {}) as Record<string, Value>, error: null }),
+      )
+      .catch((thrown) => live && setAnswered({ to: asking, held: null, error: thrown }))
 
     return () => {
       live = false
     }
-  }, [panel, granted])
+  }, [panel, granted, asking])
 
-  useEffect(read, [read])
+  const read = useCallback(() => setAttempt((n) => n + 1), [])
+
+  // Only an answer to what is being asked now. Clearing the error by hand at the
+  // top of the effect was a synchronous setState inside one, and this says the
+  // same thing by construction: a refusal from the previous panel cannot be
+  // shown against this one, because it is not addressed to it.
+  const current = answered?.to === asking ? answered : null
+  const held = current?.held ?? null
+  const error = current?.error ?? null
 
   return (
     <div className="border-l-2 border-flame/50 pl-5">

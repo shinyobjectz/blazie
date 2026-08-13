@@ -1,11 +1,12 @@
 "use client"
 
 import { Play } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 
 import { PageHead } from "@/components/dashboard/page-shell"
 import { CopyButton } from "@/components/ui/copy-button"
 import { RefusalNote } from "@/components/ui/refusal-note"
+import { useRemembered } from "@/hooks/use-remembered"
 import type { RunResult } from "@/lib/blazie"
 import { cn } from "@/lib/utils"
 
@@ -39,18 +40,20 @@ const HELD = "blazie.editor"
 
 export default function Editor() {
   const { world, ask } = useCluster()
-  const [source, setSource] = useState(EXAMPLES[0].source)
   const [result, setResult] = useState<RunResult | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [running, setRunning] = useState(false)
   const box = useRef<HTMLTextAreaElement>(null)
 
-  // Read after mount: this page is prerendered by the static export, and a
-  // server render that guessed the held draft would not match this browser.
-  useEffect(() => {
-    const held = window.localStorage.getItem(HELD)
-    if (held) setSource(held)
-  }, [])
+  // The draft this browser held, read rather than copied into state after
+  // mount. This page is prerendered by the static export, so the held draft
+  // cannot exist at render time — and correcting it in an effect meant the
+  // editor showed the first example for one frame before replacing it with what
+  // you were actually writing.
+  const held = useRemembered(HELD)
+  const [typed, setTyped] = useState<string | null>(null)
+  const source = typed ?? held ?? EXAMPLES[0].source
+  const setSource = setTyped
 
   const go = useCallback(async () => {
     if (!world || running) return

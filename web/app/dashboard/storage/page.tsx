@@ -53,24 +53,30 @@ export default function Storage() {
   const { who } = useCluster()
   const granted = who.worlds.includes("$storage")
 
-  const [rows, setRows] = useState<Row[] | null>(null)
-  const [error, setError] = useState<unknown>(null)
+  const [attempt, setAttempt] = useState(0)
+  const asking = String(attempt)
+  const [answered, setAnswered] = useState<{ to: string; rows: Row[] | null; error: unknown } | null>(null)
 
-  const read = useCallback(() => {
+  useEffect(() => {
     if (!granted) return
     let live = true
-    setError(null)
 
     run("$storage", CHUNK)
-      .then((result) => live && setRows((result.value ?? []) as Row[]))
-      .catch((thrown) => live && setError(thrown))
+      .then((result) => live && setAnswered({ to: asking, rows: (result.value ?? []) as Row[], error: null }))
+      .catch((thrown) => live && setAnswered({ to: asking, rows: null, error: thrown }))
 
     return () => {
       live = false
     }
-  }, [granted])
+  }, [granted, asking])
 
-  useEffect(read, [read])
+  const read = useCallback(() => setAttempt((n) => n + 1), [])
+
+  // Only an answer to the reading being taken now, so a refusal from the last
+  // attempt cannot be shown beside the results of this one.
+  const current = answered?.to === asking ? answered : null
+  const rows = current?.rows ?? null
+  const error = current?.error ?? null
 
   const total = (rows ?? []).reduce((sum, row) => sum + (row.bytes ?? 0), 0)
 

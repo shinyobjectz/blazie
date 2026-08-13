@@ -606,10 +606,21 @@ function SidebarMenuSkeleton({
 }: React.ComponentProps<"div"> & {
   showIcon?: boolean
 }) {
-  // Random width between 50 to 90%.
+  // A width between 50% and 90%, varied so a column of skeletons reads as text
+  // rather than as bars — taken from this element's own id rather than from
+  // `Math.random()`.
+  //
+  // Random is impure during render, and the consequence is not only that the
+  // compiler says so: this page is prerendered by the static export, so the
+  // server picked one width and the browser picked another for the same
+  // skeleton, which is a hydration mismatch. `useId` is stable across both.
+  const id = React.useId()
+
   const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
-  }, [])
+    let spread = 0
+    for (let i = 0; i < id.length; i++) spread = (spread * 31 + id.charCodeAt(i)) % 40
+    return `${spread + 50}%`
+  }, [id])
 
   return (
     <div

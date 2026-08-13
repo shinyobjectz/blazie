@@ -42,12 +42,14 @@ defmodule Blazie.Surface.Controller do
   def run(conn, %{"world" => name, "source" => source} = params) when is_binary(source) do
     with {:ok, snapshot} <- world_for(name, params),
          {:ok, value, staged} <- evaluate(source, snapshot, params),
-         {:ok, at} <- append(name, staged) do
-      json(conn, %{
-        "value" => value,
-        "name" => Map.merge(Snapshot.name(snapshot), at),
-        "wrote" => length(staged)
-      })
+         {:ok, at} <- append(name, staged),
+         {:ok, body} <-
+           encodable(%{
+             "value" => value,
+             "name" => Map.merge(Snapshot.name(snapshot), at),
+             "wrote" => length(staged)
+           }) do
+      conn |> put_resp_content_type("application/json") |> send_resp(200, body)
     else
       {:error, [refusal | _]} -> refuse(conn, refusal)
       {:error, refusal} -> refuse(conn, refusal)
@@ -129,6 +131,36 @@ defmodule Blazie.Surface.Controller do
     with {:ok, ref} <- World.open(world),
          {:ok, tx} <- World.append(ref, staged, check: &Attribute.check/2) do
       {:ok, %{world => tx}}
+    end
+  end
+
+  # Encoded here, where a failure is still something this function can answer.
+  #
+  # `json/2` encodes on the way out, so a value JSON cannot carry raised inside
+  # the framework and came back as a bare 500 with no body — the one shape a
+  # boundary here is not allowed to have, because a caller told only that
+  # something went wrong has nothing to do next. It was reachable: a symbol's
+  # packed float64s are not text, and listing the rows of a world holding
+  # embeddings hit it.
+  #
+  # That specific leak is closed where it belongs, in what a guest is handed.
+  # This stays because the class is not: anything a chunk can return travels
+  # through here, and a boundary that depends on nothing upstream ever being
+  # wrong is a boundary that reports the next mistake as a crash.
+  defp encodable(body) do
+    case Jason.encode(body) do
+      {:ok, encoded} ->
+        {:ok, encoded}
+
+      {:error, _} ->
+        {:error,
+         %{
+           problem: :cannot_be_sent,
+           repair:
+             "This answered with something JSON cannot carry — raw bytes, most likely. Return " <>
+               "what you want to see rather than the value itself: a length, a field off it, or " <>
+               "a string you built from it."
+         }}
     end
   end
 

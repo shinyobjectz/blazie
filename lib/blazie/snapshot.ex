@@ -90,6 +90,39 @@ defmodule Blazie.Snapshot do
   end
 
   @doc """
+  The ids matching a pattern, sorted, each one once.
+
+  `find/2` with everything but the id thrown away, except that the throwing away
+  happens in the world rather than here — so walking a large world costs one id
+  per entity instead of every fact it holds. It records the same read, because
+  it read the same thing: what came back is smaller, not narrower.
+
+  Sorted so that a caller iterating it does not have to be, which matters more
+  than it sounds: the caller is usually a guest under a heap limit, and sorting
+  a hundred thousand ids there was itself enough to exceed one.
+  """
+  @spec ids(t(), keyword()) :: [term()]
+  def ids(%__MODULE__{at: at}, pattern) do
+    Fact.fields!(pattern)
+    record_read(pattern)
+
+    case Map.to_list(at) do
+      # One world has already answered with each id once, in order. Merging that
+      # with nothing costs a second copy of the whole answer and a map to prove
+      # what was already true, which over a large world is the single largest
+      # thing the asker allocates.
+      [{world, tx}] ->
+        World.ids_at(World.via(world), tx, pattern)
+
+      several ->
+        several
+        |> Enum.flat_map(fn {world, tx} -> World.ids_at(World.via(world), tx, pattern) end)
+        |> Enum.uniq()
+        |> Enum.sort()
+    end
+  end
+
+  @doc """
   The current value for an id's attribute, or nil.
 
   Current means latest: nothing is rewritten, so a later fact corrects an
@@ -114,19 +147,33 @@ defmodule Blazie.Snapshot do
 
   @reads :blazie_reads
 
+  # Past this many distinct reads, the set stops naming facts and starts naming
+  # attributes. See `widen/1` — the number only decides where that happens, and
+  # is small because a read set larger than this was never going to be read by a
+  # person or checked cheaply by a runner.
+  @many 256
+
   @doc """
   Run `fun`, and return what it returned alongside every pattern it read.
 
   This is the whole of re-execution: record the read set, and when a later fact
   falls inside it, answer again.
+
+  A set, and a bounded one. It used to be a list appended to on every read,
+  which made it as large as the data: a walk over 12,000 entities reading one
+  field produced 12,005 patterns saying "I read `n` of e1", "I read `n` of
+  e2" — 216,000 words to say `n`. That was two problems wearing one coat. It
+  was enough by itself to exhaust a guest's heap, and it was a read set nothing
+  could use, because `Job.touched?/2` asks the world once per pattern and would
+  have run 12,005 queries on every tick to decide whether to do anything.
   """
   @spec track_reads((-> result)) :: {result, [keyword()]} when result: term()
   def track_reads(fun) when is_function(fun, 0) do
-    outer = Process.put(@reads, [])
+    outer = Process.put(@reads, MapSet.new())
 
     try do
       result = fun.()
-      {result, Process.get(@reads) |> Enum.reverse() |> Enum.uniq()}
+      {result, @reads |> Process.get() |> Enum.sort()}
     after
       if outer, do: Process.put(@reads, outer), else: Process.delete(@reads)
     end
@@ -147,7 +194,7 @@ defmodule Blazie.Snapshot do
   @spec record_reads([keyword()]) :: :ok
   def record_reads(patterns) when is_list(patterns) do
     if held = Process.get(@reads) do
-      Process.put(@reads, Enum.reverse(patterns) ++ held)
+      Process.put(@reads, Enum.reduce(patterns, held, &remember(&2, Enum.sort(&1))))
     end
 
     :ok
@@ -156,7 +203,42 @@ defmodule Blazie.Snapshot do
   defp record_read(pattern) do
     case Process.get(@reads) do
       nil -> :ok
-      reads -> Process.put(@reads, [Enum.sort(pattern) | reads])
+      seen -> Process.put(@reads, remember(seen, Enum.sort(pattern)))
+    end
+  end
+
+  defp remember(seen, pattern) do
+    cond do
+      # Already covered. `[]` is the pattern `each {}` records — no constraint,
+      # every fact — so once it is in the set nothing can be added that it does
+      # not already match. A walk over every entity genuinely does depend on
+      # everything, and saying so in one pattern is both smaller and truer than
+      # saying it in twelve thousand.
+      MapSet.member?(seen, []) -> seen
+      MapSet.member?(seen, widest(pattern)) -> seen
+      MapSet.size(seen) < @many -> MapSet.put(seen, pattern)
+      true -> widen(MapSet.put(seen, pattern))
+    end
+  end
+
+  # Remember WHICH ATTRIBUTES were read rather than which facts.
+  #
+  # Strictly broader, and that is the direction it has to err in: a wider read
+  # set means answering again more often than strictly necessary, where a
+  # narrower one would mean missing a change. So the bound costs re-runs at
+  # worst, never a stale answer — and it makes the set the size of the
+  # vocabulary instead of the size of the data.
+  defp widen(seen) do
+    widened = MapSet.new(seen, &widest/1)
+    if MapSet.member?(widened, []), do: MapSet.new([[]]), else: widened
+  end
+
+  # A pattern with no attribute cannot be generalised to one, so it generalises
+  # to everything — which is what reading a whole entity actually did.
+  defp widest(pattern) do
+    case Keyword.get(pattern, :attribute) do
+      nil -> []
+      attribute -> [attribute: attribute]
     end
   end
 end

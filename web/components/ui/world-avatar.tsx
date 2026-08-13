@@ -2,7 +2,7 @@
 
 import { Warp } from "@paper-design/shaders-react"
 import { useInView, useReducedMotion } from "motion/react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useRef, useSyncExternalStore } from "react"
 
 import { cn } from "@/lib/utils"
 import { type Avatar, avatarOf, paletteOf } from "@/lib/world-avatar"
@@ -50,7 +50,40 @@ const SIZES = {
  * page degrades in fidelity rather than in correctness.
  */
 const LIVE = 6
-let lit = 0
+
+/**
+ * Who currently holds one, as a store rather than a bare counter.
+ *
+ * It was a module-level number incremented inside an effect, which then had to
+ * report the outcome back with `setColors` — a synchronous setState inside an
+ * effect, and so two renders for every avatar on a page that draws thirty of
+ * them. A count also cannot answer the question each avatar actually has, which
+ * is not "how many are lit" but "am I one of them".
+ *
+ * Holding the claimants makes it answerable, and makes claiming and releasing
+ * the same operation React already pairs for a subscription: a slot is taken
+ * when an avatar subscribes and given back when it unsubscribes, so a slot
+ * cannot outlive the element holding it.
+ */
+const slots = {
+  held: new Set<object>(),
+  watching: new Set<() => void>(),
+
+  take(who: object) {
+    if (!this.held.has(who) && this.held.size < LIVE) {
+      this.held.add(who)
+      this.told()
+    }
+  },
+
+  drop(who: object) {
+    if (this.held.delete(who)) this.told()
+  },
+
+  told() {
+    for (const watcher of this.watching) watcher()
+  },
+}
 
 /**
  * The tokens, as the browser actually painted them.
@@ -73,22 +106,35 @@ function resolve(tokens: string[]): string[] {
  * and the shader is what arrives afterwards if there is room for it.
  */
 function useLit(tokens: string[] | null): string[] | null {
-  const [colors, setColors] = useState<string[] | null>(null)
   const wanted = tokens?.join(" ") ?? ""
 
-  useEffect(() => {
-    if (!wanted || lit >= LIVE) return
+  // This element's identity, and nothing else. A slot belongs to an element, so
+  // what holds it has to be something that lives and dies with one.
+  const who = useRef({}).current
 
-    lit += 1
-    setColors(resolve(wanted.split(" ")))
+  const subscribe = useCallback(
+    (told: () => void) => {
+      slots.watching.add(told)
+      if (wanted) slots.take(who)
 
-    return () => {
-      lit -= 1
-      setColors(null)
-    }
-  }, [wanted])
+      return () => {
+        slots.watching.delete(told)
+        slots.drop(who)
+      }
+    },
+    [wanted, who],
+  )
 
-  return colors
+  const held = useSyncExternalStore(
+    subscribe,
+    () => slots.held.has(who),
+    // The prerender has no WebGL context to spend, so nobody holds one yet.
+    () => false,
+  )
+
+  // Read only once a slot is held, which cannot be true before mount — so this
+  // never reaches for the document during a render that has none.
+  return useMemo(() => (held && wanted ? resolve(wanted.split(" ")) : null), [held, wanted])
 }
 
 /**

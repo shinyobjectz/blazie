@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { useSidebar } from "@/components/ui/sidebar"
+import { useRemembered } from "@/hooks/use-remembered"
 import { cn } from "@/lib/utils"
 
 /**
@@ -27,21 +28,23 @@ const MAX = 384
 const REMEMBERED = "blazie.sidebar-width"
 
 export function useSidebarWidth() {
-  const [width, setWidth] = useState(DEFAULT_WIDTH)
+  // Read rather than copied into state. This layout is prerendered by the
+  // static export, so a server render that guessed a remembered width would not
+  // match the one in this browser — which is why it used to be an effect that
+  // corrected the width after mount, and why the sidebar visibly jumped.
+  const held = Number(useRemembered(REMEMBERED))
+  const remembered = held >= MIN && held <= MAX ? held : DEFAULT_WIDTH
 
-  // Read after mount rather than in the initial state: this layout is
-  // pre-rendered by the static export, and a server render that guessed a
-  // remembered width would not match the one in this browser.
-  useEffect(() => {
-    const held = Number(window.localStorage.getItem(REMEMBERED))
-    if (held >= MIN && held <= MAX) setWidth(held)
-  }, [])
+  // What this drag has made it, if there has been one. Layered over the
+  // remembered width rather than replacing it, so there is one source for each:
+  // the browser remembers, the hand overrides.
+  const [dragged, setDragged] = useState<number | null>(null)
 
   const remember = useCallback((next: number) => {
     window.localStorage.setItem(REMEMBERED, String(next))
   }, [])
 
-  return { width, setWidth, remember }
+  return { width: dragged ?? remembered, setWidth: setDragged, remember }
 }
 
 export function SidebarResizer({

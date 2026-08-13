@@ -31,6 +31,33 @@ defmodule Blazie.SurfaceTest do
     |> put_req_header("authorization", "Bearer #{token}")
   end
 
+  describe "a value that cannot be sent" do
+    # A boundary that rejects without saying how to comply produces loops rather
+    # than compliance, and a bare 500 is the extreme of that: it does not even
+    # say what was rejected. This was reachable — a world holding embeddings
+    # returned one from the page that lists rows, because a symbol's packed
+    # float64s are not text and the encoding happened after this controller had
+    # stopped being able to answer.
+    test "is refused with a repair, never a bare 500", %{conn: conn, world: world} do
+      # Not valid UTF-8, and nothing exotic: one call in the standard library
+      # every Lua author has.
+      body = json_response(run(conn, world, "return string.char(224)"), 422)
+
+      assert body["error"]["problem"] == "cannot_be_sent"
+      assert body["error"]["repair"] =~ "JSON cannot carry"
+    end
+
+    test "and the world is not left holding half a write", %{conn: conn, world: world} do
+      run(conn, world, "ada.height = 180\nreturn string.char(224)")
+
+      # The write happened — it was staged and appended before the answer was
+      # encoded, and refusing to SEND something is not a reason to unsay it.
+      # What matters is that the next request works rather than inheriting a
+      # broken world.
+      assert %{"value" => 180} = json_response(run(conn, world, "return ada.height"), 200)
+    end
+  end
+
   describe "what comes back" do
     test "the value the chunk returned", %{conn: conn, world: world} do
       assert %{"value" => 4} = json_response(run(conn, world, "return 2 + 2"), 200)
