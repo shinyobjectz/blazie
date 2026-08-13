@@ -13,9 +13,12 @@ import { cn } from "@/lib/utils"
  * provider, which is the same variable the sidebar and its spacer already read,
  * so nothing has to be told the width changed.
  *
- * It is invisible until you are near it. A console is a thing you look at for a
- * long time and a permanent vertical line down the left is one more edge to
- * read past; the handle only exists while the pointer is on it or dragging.
+ * It sits exactly on top of the sidebar's own edge and draws nothing of its own
+ * at rest, so the hairline you see there is the border every other panel uses.
+ * That line IS the affordance: something permanently visible marks where the
+ * handle is, and hovering brightens the line already there rather than
+ * revealing one that was not. A handle discoverable only by hovering over the
+ * right two pixels is a handle nobody finds.
  */
 
 export const DEFAULT_WIDTH = 208
@@ -79,8 +82,10 @@ export function SidebarResizer({
       aria-label="resize the sidebar"
       className={cn(
         "fixed inset-y-0 z-20 hidden w-2 -translate-x-1/2 cursor-col-resize md:block",
+        // Transparent at rest: the sidebar's own border is under here and is
+        // what should show. Hover and drag brighten that same line in place.
         "after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:transition-colors",
-        dragging ? "after:bg-flame" : "hover:after:bg-white/20",
+        dragging ? "after:bg-flame" : "after:bg-transparent hover:after:bg-white/25",
       )}
       style={{ left: `${width}px` }}
       onPointerDown={(event) => {
