@@ -97,13 +97,13 @@ defmodule Blazie.Wire do
       nil ->
         {:ok, sent}
 
-      {ledger, _} ->
+      {world, _} ->
         {:error,
          %{
            problem: :bad_transaction,
            repair:
-             "A snapshot name maps each ledger to the transaction it was read at. " <>
-               "#{inspect(ledger)} was given something that is not a transaction number."
+             "A snapshot name maps each world to the transaction it was read at. " <>
+               "#{inspect(world)} was given something that is not a transaction number."
          }}
     end
   end
@@ -114,7 +114,7 @@ defmodule Blazie.Wire do
        %{
          problem: :bad_transaction,
          repair:
-           "A snapshot name maps each ledger to the transaction it was read at. " <>
+           "A snapshot name maps each world to the transaction it was read at. " <>
              "#{inspect(sent)} is not a name."
        }}
 
@@ -154,7 +154,7 @@ defmodule Blazie.Wire do
          problem: :unknown_attribute,
          repair:
            "An attribute is a non-empty name. #{inspect(value)} is not one. Whether it has " <>
-             "been defined is the ledger\'s question, answered by the vocabulary check on write."
+             "been defined is the world\'s question, answered by the vocabulary check on write."
        }}
 
   defp check_id(id) when is_integer(id) or is_binary(id), do: {:ok, id}

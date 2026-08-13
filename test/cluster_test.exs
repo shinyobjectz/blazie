@@ -1,12 +1,12 @@
 defmodule Blazie.ClusterTest do
   @moduledoc """
-  One ledger, one owner.
+  One world, one owner.
 
   Full distribution is not here and is deliberately not here — a substrate on
   one node is the right shape for now. What is here is the failure that would
   make adding nodes catastrophic rather than merely incomplete: two nodes both
-  opening the same ledger, each appending, each certain it has the history.
-  That forks a ledger silently, and "an answer at a name never changes" is the
+  opening the same world, each appending, each certain it has the history.
+  That forks a world silently, and "an answer at a name never changes" is the
   guarantee everything else rests on.
 
   So opening claims the name across the cluster, and a claim someone else holds
@@ -14,52 +14,52 @@ defmodule Blazie.ClusterTest do
   """
   use ExUnit.Case, async: false
 
-  alias Blazie.{Cluster, Ledger}
+  alias Blazie.{Cluster, World}
 
   setup do
-    %{name: "cluster-ledger-#{System.unique_integer([:positive])}"}
+    %{name: "cluster-world-#{System.unique_integer([:positive])}"}
   end
 
-  describe "opening claims the ledger" do
+  describe "opening claims the world" do
     test "the owner is this node", ctx do
-      {:ok, _} = Ledger.open(ctx.name)
+      {:ok, _} = World.open(ctx.name)
 
       assert Cluster.owner(ctx.name) == node()
       assert Cluster.owned_here?(ctx.name)
 
-      Ledger.close(ctx.name)
+      World.close(ctx.name)
     end
 
-    test "an unopened ledger has no owner", ctx do
+    test "an unopened world has no owner", ctx do
       assert Cluster.owner(ctx.name) == nil
       refute Cluster.owned_here?(ctx.name)
     end
 
     test "closing releases the claim", ctx do
-      {:ok, _} = Ledger.open(ctx.name)
-      :ok = Ledger.close(ctx.name)
+      {:ok, _} = World.open(ctx.name)
+      :ok = World.close(ctx.name)
 
       assert Cluster.owner(ctx.name) == nil
     end
 
     test "reopening on the owning node is fine, not a conflict", ctx do
-      {:ok, first} = Ledger.open(ctx.name)
-      {:ok, _} = Ledger.append(first, [{1, "x", 1}])
+      {:ok, first} = World.open(ctx.name)
+      {:ok, _} = World.append(first, [{1, "x", 1}])
 
-      assert {:ok, again} = Ledger.open(ctx.name)
-      assert Ledger.tx(again) == 1
+      assert {:ok, again} = World.open(ctx.name)
+      assert World.tx(again) == 1
 
-      Ledger.close(ctx.name)
+      World.close(ctx.name)
     end
   end
 
-  describe "a ledger somebody else holds is refused" do
+  describe "a world somebody else holds is refused" do
     test "opening it does not fork the history", ctx do
-      # Stand in for another node's ledger process by claiming the name.
+      # Stand in for another node's world process by claiming the name.
       elsewhere = spawn(fn -> receive do: (:release -> :ok) end)
       :yes = Cluster.claim_as(ctx.name, elsewhere)
 
-      assert {:error, refusal} = Ledger.open(ctx.name)
+      assert {:error, refusal} = World.open(ctx.name)
       assert refusal.problem == :owned_elsewhere
       assert refusal.repair =~ "one owner"
 
@@ -70,9 +70,9 @@ defmodule Blazie.ClusterTest do
       elsewhere = spawn(fn -> receive do: (:release -> :ok) end)
       :yes = Cluster.claim_as(ctx.name, elsewhere)
 
-      {:error, _} = Ledger.open(ctx.name)
+      {:error, _} = World.open(ctx.name)
 
-      refute ctx.name in Ledger.open_ledgers()
+      refute ctx.name in World.open_worlds()
 
       send(elsewhere, :release)
     end
@@ -90,8 +90,8 @@ defmodule Blazie.ClusterTest do
         if Cluster.owner(ctx.name) == nil, do: {:halt, :ok}, else: {:cont, Process.sleep(10)}
       end)
 
-      assert {:ok, _} = Ledger.open(ctx.name)
-      Ledger.close(ctx.name)
+      assert {:ok, _} = World.open(ctx.name)
+      World.close(ctx.name)
     end
   end
 

@@ -8,20 +8,20 @@ defmodule Blazie.ConcurrencyTest do
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Attribute, Formula, Ledger, Snapshot, Subscription, TestLedger}
+  alias Blazie.{Attribute, Formula, World, Snapshot, Subscription, TestLedger}
 
   setup do
-    ledger = TestLedger.open()
-    {:ok, _} = Ledger.append(ledger, Attribute.seed())
-    {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
-    %{ledger: ledger}
+    world = TestLedger.open()
+    {:ok, _} = World.append(world, Attribute.seed())
+    {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+    %{world: world}
   end
 
   describe "concurrent writers" do
-    test "every transaction is unique", %{ledger: ledger} do
+    test "every transaction is unique", %{world: world} do
       txs =
         1..200
-        |> Task.async_stream(fn n -> Ledger.append(ledger, [{n, "height", n}]) end,
+        |> Task.async_stream(fn n -> World.append(world, [{n, "height", n}]) end,
           max_concurrency: 50,
           timeout: 30_000
         )
@@ -30,28 +30,28 @@ defmodule Blazie.ConcurrencyTest do
       assert length(Enum.uniq(txs)) == 200
     end
 
-    test "transactions are contiguous — none skipped, none reused", %{ledger: ledger} do
-      before = Ledger.tx(ledger)
+    test "transactions are contiguous — none skipped, none reused", %{world: world} do
+      before = World.tx(world)
 
       1..200
-      |> Task.async_stream(fn n -> Ledger.append(ledger, [{n, "height", n}]) end,
+      |> Task.async_stream(fn n -> World.append(world, [{n, "height", n}]) end,
         max_concurrency: 50,
         timeout: 30_000
       )
       |> Stream.run()
 
-      assert Ledger.tx(ledger) == before + 200
+      assert World.tx(world) == before + 200
     end
 
-    test "nothing written is lost", %{ledger: ledger} do
+    test "nothing written is lost", %{world: world} do
       1..300
-      |> Task.async_stream(fn n -> Ledger.append(ledger, [{n, "height", n}]) end,
+      |> Task.async_stream(fn n -> World.append(world, [{n, "height", n}]) end,
         max_concurrency: 50,
         timeout: 30_000
       )
       |> Stream.run()
 
-      found = Snapshot.find(Snapshot.open([ledger]), attribute: "height")
+      found = Snapshot.find(Snapshot.open([world]), attribute: "height")
 
       assert length(found) == 300
       assert found |> Enum.map(& &1.id) |> Enum.sort() == Enum.to_list(1..300)
@@ -59,26 +59,26 @@ defmodule Blazie.ConcurrencyTest do
   end
 
   describe "reading while writing" do
-    test "a name taken mid-storm still answers the same forever", %{ledger: ledger} do
+    test "a name taken mid-storm still answers the same forever", %{world: world} do
       writers =
         Task.async(fn ->
-          Enum.each(1..300, fn n -> Ledger.append(ledger, [{n, "height", n}]) end)
+          Enum.each(1..300, fn n -> World.append(world, [{n, "height", n}]) end)
         end)
 
       Process.sleep(5)
-      snapshot = Snapshot.open([ledger])
+      snapshot = Snapshot.open([world])
       first = Snapshot.find(snapshot, attribute: "height")
 
       Task.await(writers, 30_000)
 
       # The storm finished. The name answers exactly what it did mid-storm.
       assert Snapshot.find(snapshot, attribute: "height") == first
-      assert length(Snapshot.find(Snapshot.open([ledger]), attribute: "height")) == 300
+      assert length(Snapshot.find(Snapshot.open([world]), attribute: "height")) == 300
     end
 
-    test "concurrent readers all agree", %{ledger: ledger} do
-      Enum.each(1..100, fn n -> Ledger.append(ledger, [{n, "height", n}]) end)
-      snapshot = Snapshot.open([ledger])
+    test "concurrent readers all agree", %{world: world} do
+      Enum.each(1..100, fn n -> World.append(world, [{n, "height", n}]) end)
+      snapshot = Snapshot.open([world])
 
       answers =
         1..40
@@ -92,28 +92,28 @@ defmodule Blazie.ConcurrencyTest do
   end
 
   describe "concurrent opens" do
-    test "many processes opening one ledger get one ledger" do
+    test "many processes opening one world get one world" do
       name = "raced-#{System.unique_integer([:positive])}"
-      on_exit(fn -> Ledger.close(name) end)
+      on_exit(fn -> World.close(name) end)
 
       refs =
         1..40
-        |> Task.async_stream(fn _ -> Ledger.open(name) end, max_concurrency: 40)
+        |> Task.async_stream(fn _ -> World.open(name) end, max_concurrency: 40)
         |> Enum.map(fn {:ok, {:ok, ref}} -> ref end)
 
       assert Enum.uniq(refs) |> length() == 1
-      assert length(Ledger.open_ledgers() |> Enum.filter(&(&1 == name))) == 1
+      assert length(World.open_worlds() |> Enum.filter(&(&1 == name))) == 1
     end
   end
 
   describe "many subscriptions" do
-    test "a hundred watchers all get the answer", %{ledger: ledger} do
+    test "a hundred watchers all get the answer", %{world: world} do
       test_process = self()
 
       watchers =
         for n <- 1..100 do
           spawn_link(fn ->
-            {:ok, ref} = Subscription.watch([ledger], attribute: "height")
+            {:ok, ref} = Subscription.watch([world], attribute: "height")
             send(test_process, {:ready, n})
 
             receive do
@@ -127,7 +127,7 @@ defmodule Blazie.ConcurrencyTest do
 
       for _ <- 1..100, do: assert_receive({:ready, _}, 5_000)
 
-      {:ok, _} = Ledger.append(ledger, [{1, "height", 1}])
+      {:ok, _} = World.append(world, [{1, "height", 1}])
 
       counts =
         for _ <- 1..100 do
@@ -145,8 +145,8 @@ defmodule Blazie.ConcurrencyTest do
   end
 
   describe "formulas under load" do
-    test "the same snapshot gives the same answer to everyone", %{ledger: ledger} do
-      Enum.each(1..100, fn n -> Ledger.append(ledger, [{n, "height", n}]) end)
+    test "the same snapshot gives the same answer to everyone", %{world: world} do
+      Enum.each(1..100, fn n -> World.append(world, [{n, "height", n}]) end)
 
       doubling =
         Formula.new("doubling", fn snapshot ->
@@ -155,7 +155,7 @@ defmodule Blazie.ConcurrencyTest do
           end
         end)
 
-      snapshot = Snapshot.open([ledger])
+      snapshot = Snapshot.open([world])
 
       answers =
         1..30

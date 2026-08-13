@@ -151,21 +151,21 @@ func plural(n int, one, many string) string {
 	return fmt.Sprintf("%d %s", n, many)
 }
 
-// nameString renders a snapshot name the way it is held: ledger at transaction.
+// nameString renders a snapshot name the way it is held: world at transaction.
 func nameString(name SnapshotName) string {
 	if len(name) == 0 {
-		return "(no ledgers)"
+		return "(no worlds)"
 	}
 
-	ledgers := make([]string, 0, len(name))
-	for ledger := range name {
-		ledgers = append(ledgers, ledger)
+	worlds := make([]string, 0, len(name))
+	for world := range name {
+		worlds = append(worlds, world)
 	}
-	slices.Sort(ledgers)
+	slices.Sort(worlds)
 
-	parts := make([]string, 0, len(ledgers))
-	for _, ledger := range ledgers {
-		parts = append(parts, fmt.Sprintf("%s@%d", ledger, name[ledger]))
+	parts := make([]string, 0, len(worlds))
+	for _, world := range worlds {
+		parts = append(parts, fmt.Sprintf("%s@%d", world, name[world]))
 	}
 	return strings.Join(parts, " ")
 }

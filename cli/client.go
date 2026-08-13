@@ -190,7 +190,7 @@ func refusalFrom(status int, raw []byte) *Refusal {
 type Me struct {
 	Login   string   `json:"login"`
 	Caller  string   `json:"caller"`
-	Ledgers []string `json:"ledgers"`
+	Worlds []string `json:"worlds"`
 }
 
 func (c *Client) Me(ctx context.Context) (*Me, error) {
@@ -201,7 +201,7 @@ func (c *Client) Me(ctx context.Context) (*Me, error) {
 
 // ── the two operations ──────────────────────────────────────────────────────
 
-// SnapshotName is which ledger, at which transaction. A caller holds this and
+// SnapshotName is which world, at which transaction. A caller holds this and
 // never the bytes, which is why an answer can be cached against it forever.
 type SnapshotName map[string]int64
 
@@ -220,7 +220,7 @@ type RunResult struct {
 // RunOptions are the ways to change what a chunk sees.
 //
 // Name pins the snapshot to read, so the same source at the same name answers
-// the same forever. Also widens the world to read; writes land in the ledger
+// the same forever. Also widens the world to read; writes land in the world
 // given to Run and nowhere else. As is "formula" (the default, no clock and no
 // network) or "job".
 type RunOptions struct {
@@ -229,9 +229,9 @@ type RunOptions struct {
 	As   string       `json:"as,omitempty"`
 }
 
-// Run sends Lua to a ledger and is given back what it returned.
-func (c *Client) Run(ctx context.Context, ledger, source string, opts RunOptions) (*RunResult, error) {
-	body := map[string]any{"ledger": ledger, "source": source}
+// Run sends Lua to a world and is given back what it returned.
+func (c *Client) Run(ctx context.Context, world, source string, opts RunOptions) (*RunResult, error) {
+	body := map[string]any{"world": world, "source": source}
 	if opts.Name != nil {
 		body["name"] = opts.Name
 	}
@@ -247,12 +247,12 @@ func (c *Client) Run(ctx context.Context, ledger, source string, opts RunOptions
 	return &out, err
 }
 
-// Claim takes a ledger name, which is granted to whoever claimed it.
-func (c *Client) Claim(ctx context.Context, ledger string) (SnapshotName, error) {
+// Claim takes a world name, which is granted to whoever claimed it.
+func (c *Client) Claim(ctx context.Context, world string) (SnapshotName, error) {
 	var out struct {
 		Name SnapshotName `json:"name"`
 	}
-	_, err := c.call(ctx, http.MethodPost, "/ledgers",
-		map[string]any{"ledger": ledger}, &out)
+	_, err := c.call(ctx, http.MethodPost, "/worlds",
+		map[string]any{"world": world}, &out)
 	return out.Name, err
 }

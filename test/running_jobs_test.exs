@@ -4,12 +4,12 @@ defmodule Blazie.RunningJobsTest do
 
   This exists because the deployment kept finding the same shape of bug: a
   component written, tested, configured — and absent from the supervision tree,
-  so production had none of it. A ledger with no store, a job runner nobody
+  so production had none of it. A world with no store, a job runner nobody
   started. The test is whether the thing is *running*, not whether it exists.
   """
   use ExUnit.Case, async: false
 
-  alias Blazie.{Attribute, Job, Ledger, Snapshot, Vitals}
+  alias Blazie.{Attribute, Job, World, Snapshot, Vitals}
 
   test "the formula engine is running" do
     assert pid = Process.whereis(Blazie.Formula.Engine),
@@ -19,10 +19,10 @@ defmodule Blazie.RunningJobsTest do
   end
 
   test "the running engine answers and caches" do
-    ledger = Blazie.TestLedger.open()
-    {:ok, _} = Ledger.append(ledger, Attribute.seed())
-    {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
-    {:ok, _} = Ledger.append(ledger, [{1, "height", 10}])
+    world = Blazie.TestLedger.open()
+    {:ok, _} = World.append(world, Attribute.seed())
+    {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+    {:ok, _} = World.append(world, [{1, "height", 10}])
 
     {:ok, agent} = Agent.start_link(fn -> 0 end)
 
@@ -33,7 +33,7 @@ defmodule Blazie.RunningJobsTest do
       end)
 
     :ok = Blazie.Formula.Engine.register(Blazie.Formula.Engine, formula)
-    snapshot = Snapshot.open([ledger])
+    snapshot = Snapshot.open([world])
 
     {:ok, first} = Blazie.Formula.Engine.answer(Blazie.Formula.Engine, formula.id, snapshot)
     {:ok, again} = Blazie.Formula.Engine.answer(Blazie.Formula.Engine, formula.id, snapshot)
@@ -49,25 +49,25 @@ defmodule Blazie.RunningJobsTest do
     assert Process.alive?(pid)
   end
 
-  test "its ledger is seeded, so a reading has somewhere to go" do
-    {:ok, ledger} = Ledger.open(Vitals.ledger())
-    snapshot = Snapshot.open([ledger])
+  test "its world is seeded, so a reading has somewhere to go" do
+    {:ok, world} = World.open(Vitals.world())
+    snapshot = Snapshot.open([world])
 
     assert Attribute.defined?(snapshot, "open_ledgers")
     assert Attribute.defined?(snapshot, "every")
   end
 
   test "vitals is declared as a job with a cadence" do
-    {:ok, ledger} = Ledger.open(Vitals.ledger())
-    snapshot = Snapshot.open([ledger])
+    {:ok, world} = World.open(Vitals.world())
+    snapshot = Snapshot.open([world])
 
     assert Snapshot.value(snapshot, "vitals", "is") == "job"
     assert is_integer(Snapshot.value(snapshot, "vitals", "every"))
   end
 
   test "ticking the running runner actually writes a reading" do
-    {:ok, ledger} = Ledger.open(Vitals.ledger())
-    before = length(Snapshot.find(Snapshot.open([ledger]), id: "vitals", attribute: "node"))
+    {:ok, world} = World.open(Vitals.world())
+    before = length(Snapshot.find(Snapshot.open([world]), id: "vitals", attribute: "node"))
 
     # A tick refuses a job already in flight, so a previous run still finishing
     # makes `ran` empty and this test fail for a reason that is not a bug.
@@ -83,7 +83,7 @@ defmodule Blazie.RunningJobsTest do
     # one run in fifteen.
     settle(Blazie.Vitals.Runner)
 
-    assert length(Snapshot.find(Snapshot.open([ledger]), id: "vitals", attribute: "node")) >
+    assert length(Snapshot.find(Snapshot.open([world]), id: "vitals", attribute: "node")) >
              before
   end
 

@@ -22,7 +22,7 @@ defmodule Blazie.BackupS3Test do
 
   @moduletag :object_storage
 
-  alias Blazie.{Attribute, Backup, Ledger, Snapshot, Store}
+  alias Blazie.{Attribute, Backup, World, Snapshot, Store}
 
   setup_all do
     for var <- ~w(BACKUP_ENDPOINT BACKUP_BUCKET BACKUP_ACCESS_KEY_ID BACKUP_SECRET_ACCESS_KEY) do
@@ -56,17 +56,17 @@ defmodule Blazie.BackupS3Test do
     on_exit(fn -> File.rm_rf!(root) end)
 
     name = {:s3_test, System.unique_integer([:positive])}
-    {:ok, ledger} = Ledger.open(name, store: {Store.File, dir: ledgers})
-    on_exit(fn -> Ledger.close(name) end)
+    {:ok, world} = World.open(name, store: {Store.File, dir: ledgers})
+    on_exit(fn -> World.close(name) end)
 
-    {:ok, _} = Ledger.append(ledger, Attribute.seed())
-    {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
-    {:ok, _} = Ledger.append(ledger, [{"ada", "height", 180}])
+    {:ok, _} = World.append(world, Attribute.seed())
+    {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+    {:ok, _} = World.append(world, [{"ada", "height", 180}])
 
     %{
       opts: [ledger_dir: ledgers, key_dir: keys, target: target],
       target: target,
-      ledger: ledger,
+      world: world,
       name: name,
       ledgers: ledgers,
       keys: keys
@@ -113,13 +113,13 @@ defmodule Blazie.BackupS3Test do
       assert first.copied_bytes > 0
       assert first.keys == 1
 
-      {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", 181}])
+      {:ok, _} = World.append(ctx.world, [{"ada", "height", 181}])
       {:ok, second} = Backup.run(ctx.opts)
       assert second.copied_segments == 1
 
       assert {:ok, %{divergent: []}} = Backup.verify(ctx.opts)
 
-      :ok = Ledger.close(ctx.name)
+      :ok = World.close(ctx.name)
       File.rm_rf!(ctx.ledgers)
       File.rm_rf!(ctx.keys)
 
@@ -127,7 +127,7 @@ defmodule Blazie.BackupS3Test do
       assert restored.incomplete == []
       assert restored.keys == 1
 
-      {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
+      {:ok, again} = World.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
       assert Snapshot.value(Snapshot.open([again]), "ada", "height") == 181
       assert File.read!(Path.join(ctx.keys, "master.wrapped")) == "wrapped-master-bytes"
     end

@@ -7,14 +7,14 @@ defmodule Blazie.Symbol.TextTest do
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Attribute, Formula, Ledger, Snapshot, Symbol, TestLedger}
+  alias Blazie.{Attribute, Formula, World, Snapshot, Symbol, TestLedger}
 
   setup do
-    ledger = TestLedger.open()
-    {:ok, _} = Ledger.append(ledger, Attribute.seed())
-    {:ok, _} = Ledger.append(ledger, Attribute.define("caption"))
-    {:ok, _} = Ledger.append(ledger, Symbol.Text.seed("caption_symbol", "sketch_64"))
-    %{ledger: ledger}
+    world = TestLedger.open()
+    {:ok, _} = World.append(world, Attribute.seed())
+    {:ok, _} = World.append(world, Attribute.define("caption"))
+    {:ok, _} = World.append(world, Symbol.Text.seed("caption_symbol", "sketch_64"))
+    %{world: world}
   end
 
   defp formula do
@@ -62,66 +62,66 @@ defmodule Blazie.Symbol.TextTest do
   end
 
   describe "as a formula" do
-    test "it writes symbols naming itself", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{1, "caption", "a ceramic pan"}])
+    test "it writes symbols naming itself", %{world: world} do
+      {:ok, _} = World.append(world, [{1, "caption", "a ceramic pan"}])
 
-      {assertions, _reads} = Formula.run(formula(), Snapshot.open([ledger]))
+      {assertions, _reads} = Formula.run(formula(), Snapshot.open([world]))
 
       assert [{1, "caption_symbol", %Symbol{space: "sketch_64"}, "captions"}] = assertions
     end
 
-    test "the answer is the same at the same snapshot", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{1, "caption", "a ceramic pan"}])
-      snapshot = Snapshot.open([ledger])
+    test "the answer is the same at the same snapshot", %{world: world} do
+      {:ok, _} = World.append(world, [{1, "caption", "a ceramic pan"}])
+      snapshot = Snapshot.open([world])
 
       assert Formula.run(formula(), snapshot) == Formula.run(formula(), snapshot)
     end
 
     test "what it wrote passes the symbol check, because a formula made it",
-         %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{1, "caption", "a ceramic pan"}])
-      {assertions, _} = Formula.run(formula(), Snapshot.open([ledger]))
+         %{world: world} do
+      {:ok, _} = World.append(world, [{1, "caption", "a ceramic pan"}])
+      {assertions, _} = Formula.run(formula(), Snapshot.open([world]))
 
       assert Symbol.check(assertions) == :ok
-      assert {:ok, _tx} = Ledger.append(ledger, assertions, check: &Symbol.check/1)
+      assert {:ok, _tx} = World.append(world, assertions, check: &Symbol.check/1)
     end
 
     test "empty and blank captions are skipped rather than pointed nowhere",
-         %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{1, "caption", ""}, {2, "caption", "   "}])
+         %{world: world} do
+      {:ok, _} = World.append(world, [{1, "caption", ""}, {2, "caption", "   "}])
 
-      {assertions, _} = Formula.run(formula(), Snapshot.open([ledger]))
+      {assertions, _} = Formula.run(formula(), Snapshot.open([world]))
 
       assert assertions == []
     end
 
-    test "a non-text answer under the same attribute is skipped", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{1, "caption", 42}])
+    test "a non-text answer under the same attribute is skipped", %{world: world} do
+      {:ok, _} = World.append(world, [{1, "caption", 42}])
 
-      {assertions, _} = Formula.run(formula(), Snapshot.open([ledger]))
+      {assertions, _} = Formula.run(formula(), Snapshot.open([world]))
 
       assert assertions == []
     end
 
     test "the attribute declares its space, so search cannot cross one",
-         %{ledger: ledger} do
-      assert Snapshot.value(Snapshot.open([ledger]), "caption_symbol", "space") == "sketch_64"
+         %{world: world} do
+      assert Snapshot.value(Snapshot.open([world]), "caption_symbol", "space") == "sketch_64"
     end
 
-    test "search finds the nearest caption", %{ledger: ledger} do
+    test "search finds the nearest caption", %{world: world} do
       {:ok, _} =
-        Ledger.append(ledger, [
+        World.append(world, [
           {1, "caption", "a ceramic frying pan"},
           {2, "caption", "quarterly revenue report"}
         ])
 
-      {assertions, _} = Formula.run(formula(), Snapshot.open([ledger]))
-      {:ok, _} = Ledger.append(ledger, assertions)
+      {assertions, _} = Formula.run(formula(), Snapshot.open([world]))
+      {:ok, _} = World.append(world, assertions)
 
       query = Symbol.new("sketch_64", Symbol.Text.sketch("ceramic pan", 64))
 
       [{nearest, _score} | _] =
-        Symbol.nearest(Snapshot.open([ledger]), "caption_symbol", query, 2)
+        Symbol.nearest(Snapshot.open([world]), "caption_symbol", query, 2)
 
       assert nearest.id == 1
     end

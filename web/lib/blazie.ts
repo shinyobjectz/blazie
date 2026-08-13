@@ -1,7 +1,7 @@
 /**
  * The blazie client. Everything the console knows how to say to a cluster.
  *
- * There are two operations. You claim a ledger, and you run Lua against one.
+ * There are two operations. You claim a world, and you run Lua against one.
  * There used to be `open`, `ask` and `write`, and between them they made the
  * console speak in facts and patterns — which is why the console read like an
  * internals tour rather than a database.
@@ -24,7 +24,7 @@ const TOKEN_KEY = "blazie.token"
 
 export const clusterUrl = BASE
 
-/** A snapshot's name: which ledger you read, at which transaction. */
+/** A snapshot's name: which world you read, at which transaction. */
 export type SnapshotName = Record<string, number>
 
 /** Whatever the chunk returned, shaped as JSON by the cluster. */
@@ -41,7 +41,7 @@ export type RunResult = {
 export type Me = {
   login: string | null
   caller: string
-  ledgers: string[]
+  worlds: string[]
 }
 
 /**
@@ -161,29 +161,29 @@ export function authGithub(code: string) {
   })
 }
 
-/** Who this token is, and which ledgers it may name. */
+/** Who this token is, and which worlds it may name. */
 export function me() {
   return send<Me>("/me")
 }
 
-/** Take a ledger name. It is granted to whoever claimed it. */
-export function claim(ledger: string) {
-  return send<{ ledger: string; name: SnapshotName }>("/ledgers", {
-    body: { ledger },
+/** Take a world name. It is granted to whoever claimed it. */
+export function claim(world: string) {
+  return send<{ world: string; name: SnapshotName }>("/worlds", {
+    body: { world },
   })
 }
 
 /**
- * Run Lua against a ledger.
+ * Run Lua against a world.
  *
  * `name` pins which snapshot to read, so the same source at the same name is
  * the same answer forever. `also` widens the world to read; writes still land
- * in `ledger` and nowhere else.
+ * in `world` and nowhere else.
  */
 export function run(
-  ledger: string,
+  world: string,
   source: string,
   options: { name?: SnapshotName; also?: string[]; as?: "formula" | "job" } = {},
 ) {
-  return send<RunResult>("/run", { body: { ledger, source, ...options } })
+  return send<RunResult>("/run", { body: { world, source, ...options } })
 }

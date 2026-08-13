@@ -39,7 +39,7 @@ defmodule Blazie.Fact do
 
   This was found by a deployment rather than a test, and could not have been
   found by one: renaming the third slot from `answer` to `value` made every
-  ledger already on the box unreadable, because `term_to_binary` stores a
+  world already on the box unreadable, because `term_to_binary` stores a
   struct's keys and `binary_to_term` gives them straight back. Every test wrote
   its facts with the same code that read them, so every test passed.
 
@@ -107,7 +107,7 @@ defmodule Blazie.Fact do
   @spec matches?(t(), keyword()) :: boolean()
   def matches?(%__MODULE__{} = fact, pattern) do
     # `Map.get` with a sentinel rather than `Map.fetch!`. This runs inside the
-    # ledger, so raising here kills the ledger — and with a memory store that
+    # world, so raising here kills the world — and with a memory store that
     # loses every fact in it. A read must never be able to destroy what a
     # writer put there. A pattern naming a field that does not exist simply
     # matches nothing; it is refused where a pattern arrives, by `fields/1`,
@@ -122,7 +122,7 @@ defmodule Blazie.Fact do
   @doc """
   Check a pattern names only fields a fact has, and say so if not.
 
-  Called before a read crosses into the ledger, so a typo raises in the process
+  Called before a read crosses into the world, so a typo raises in the process
   that made it rather than in the one holding everybody's facts. `subject` is
   the example worth naming: it is a real attribute, and it is not a field.
   """

@@ -20,10 +20,10 @@ defmodule Blazie.Surface.Controller do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias Blazie.{Attribute, Authority, Ledger, Lua, Snapshot, Wire}
+  alias Blazie.{Attribute, Authority, World, Lua, Snapshot, Wire}
 
   @doc """
-  Run Lua against a ledger, and append whatever it wrote.
+  Run Lua against a world, and append whatever it wrote.
 
   This is the whole public surface. `open`, `ask` and `write` were three
   operations that between them required a caller to know what a fact is, what a
@@ -31,15 +31,15 @@ defmodule Blazie.Surface.Controller do
   still here underneath — this opens, runs, and appends — but none of them is
   something anybody has to learn.
 
-      {"ledger": "main", "source": "ada.height = 180  return ada.height"}
+      {"world": "main", "source": "ada.height = 180  return ada.height"}
 
   `name` pins which snapshot to read, so re-running the same source at the same
   name is the same answer forever. Left out, it reads now. `also` adds
-  read-only ledgers to the world; writes always land in `ledger`, because a
+  read-only ledgers to the world; writes always land in `world`, because a
   chunk that could write anywhere would need a syntax for saying where, and
   there is nothing to say it with that is not a fact again.
   """
-  def run(conn, %{"ledger" => name, "source" => source} = params) when is_binary(source) do
+  def run(conn, %{"world" => name, "source" => source} = params) when is_binary(source) do
     with {:ok, snapshot} <- world_for(name, params),
          {:ok, value, staged} <- evaluate(source, snapshot, params),
          {:ok, at} <- append(name, staged) do
@@ -58,32 +58,32 @@ defmodule Blazie.Surface.Controller do
     do:
       refuse(conn, %{
         problem: :incomplete_request,
-        repair: "Running needs `ledger` and `source`: where to run, and the Lua to run."
+        repair: "Running needs `world` and `source`: where to run, and the Lua to run."
       })
 
   @doc """
-  Claim a ledger name, and hold what you claimed.
+  Claim a world name, and hold what you claimed.
 
-  Opening a ledger already creates it, so this adds no storage concept — what it
+  Opening a world already creates it, so this adds no storage concept — what it
   adds is the grant, which is the part a caller could not write for itself. That
   is the whole reason a caller could not previously make one: every operation is
   checked against the ledgers it may name, so naming a new one was refused
-  before anything could be created, and the only way a ledger came to exist was
+  before anything could be created, and the only way a world came to exist was
   somebody with a shell writing a grant by hand.
 
   Names are global on a cluster, so this is first-come. A name already in use is
-  refused rather than joined — quietly handing over somebody else's ledger
+  refused rather than joined — quietly handing over somebody else's world
   because the name matched is the one outcome that must not happen here.
   """
-  def claim(conn, %{"ledger" => name}) when is_binary(name) do
+  def claim(conn, %{"world" => name}) when is_binary(name) do
     token = conn.assigns.caller
 
     with {:ok, name} <- claimable(name),
-         {:ok, _ref} <- Ledger.open(name),
+         {:ok, _ref} <- World.open(name),
          {:ok, _tx} <- Authority.grant_checked(token, name) do
       conn
       |> put_status(:created)
-      |> json(%{"ledger" => name, "name" => %{name => 0}})
+      |> json(%{"world" => name, "name" => %{name => 0}})
     else
       {:error, refusal} -> refuse(conn, refusal)
     end
@@ -93,13 +93,13 @@ defmodule Blazie.Surface.Controller do
     do:
       refuse(conn, %{
         problem: :incomplete_request,
-        repair: "Claiming a ledger needs `ledger`: the name to take."
+        repair: "Claiming a world needs `world`: the name to take."
       })
 
   # ── running ────────────────────────────────────────────────────────────────
 
-  # Every ledger here has already been through the door: `Authorize` reads
-  # `ledger`, `also` and the keys of `name` off the params, so a caller cannot
+  # Every world here has already been through the door: `Authorize` reads
+  # `world`, `also` and the keys of `name` off the params, so a caller cannot
   # widen the world by adding one.
   defp world_for(name, params) do
     ledgers = [name | List.wrap(Map.get(params, "also", []))] |> Enum.uniq()
@@ -118,17 +118,17 @@ defmodule Blazie.Surface.Controller do
     kind = if Map.get(params, "as") == "job", do: :job, else: :formula
     at = snapshot |> Snapshot.name() |> Map.values() |> Enum.max(fn -> 0 end)
 
-    Lua.World.run(source, snapshot, as: kind, at: at)
+    Lua.Binding.run(source, snapshot, as: kind, at: at)
   end
 
   # Nothing written is not an error — plenty of useful chunks only read. The
   # empty map merges cleanly into the name that goes back.
   defp append(_ledger, []), do: {:ok, %{}}
 
-  defp append(ledger, staged) do
-    with {:ok, ref} <- Ledger.open(ledger),
-         {:ok, tx} <- Ledger.append(ref, staged, check: &Attribute.check/2) do
-      {:ok, %{ledger => tx}}
+  defp append(world, staged) do
+    with {:ok, ref} <- World.open(world),
+         {:ok, tx} <- World.append(ref, staged, check: &Attribute.check/2) do
+      {:ok, %{world => tx}}
     end
   end
 
@@ -136,7 +136,7 @@ defmodule Blazie.Surface.Controller do
 
   # `$` is how the node's own ledgers are spelled — `$vitals`, `$authority`,
   # `$identities`. Reserving the prefix rather than listing the names means a
-  # ledger added later is covered without anybody remembering to add it here.
+  # world added later is covered without anybody remembering to add it here.
   defp claimable("$" <> _ = name),
     do:
       {:error,
@@ -150,10 +150,10 @@ defmodule Blazie.Surface.Controller do
   defp claimable(name) when byte_size(name) == 0,
     do:
       {:error,
-       %{problem: :empty_name, repair: "A ledger needs a name. The empty string is not one."}}
+       %{problem: :empty_name, repair: "A world needs a name. The empty string is not one."}}
 
   defp claimable(name) do
-    if Ledger.exists?(name) do
+    if World.exists?(name) do
       {:error,
        %{
          problem: :name_taken,
@@ -168,7 +168,7 @@ defmodule Blazie.Surface.Controller do
 
   defp open_all(names) do
     Enum.reduce_while(names, {:ok, []}, fn name, {:ok, acc} ->
-      case Ledger.open(name) do
+      case World.open(name) do
         {:ok, ref} ->
           {:cont, {:ok, [ref | acc]}}
 

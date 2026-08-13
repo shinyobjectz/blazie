@@ -38,7 +38,7 @@ const EXAMPLES: { label: string; source: string }[] = [
 const HELD = "blazie.editor"
 
 export default function Editor() {
-  const { ledger, ask } = useCluster()
+  const { world, ask } = useCluster()
   const [source, setSource] = useState(EXAMPLES[0].source)
   const [result, setResult] = useState<RunResult | null>(null)
   const [error, setError] = useState<unknown>(null)
@@ -53,7 +53,7 @@ export default function Editor() {
   }, [])
 
   const go = useCallback(async () => {
-    if (!ledger || running) return
+    if (!world || running) return
     setRunning(true)
     setError(null)
     window.localStorage.setItem(HELD, source)
@@ -66,14 +66,14 @@ export default function Editor() {
     } finally {
       setRunning(false)
     }
-  }, [ask, source, ledger, running])
+  }, [ask, source, world, running])
 
   return (
     <>
       <PageHead title="editor">
         the whole api is on this page. everything the console does is a chunk
         like one of these, run against{" "}
-        <span className="font-mono text-white/80">{ledger ?? "no ledger"}</span>.
+        <span className="font-mono text-white/80">{world ?? "no world"}</span>.
       </PageHead>
 
       <div className="mb-4 flex flex-wrap gap-2">
@@ -120,7 +120,7 @@ export default function Editor() {
         <button
           type="button"
           onClick={go}
-          disabled={running || !ledger}
+          disabled={running || !world}
           className="inline-flex items-center gap-2 rounded-md bg-white px-5 py-2 text-sm font-semibold tracking-tight text-black transition-transform hover:scale-[1.02] disabled:opacity-40"
         >
           <Play className="size-3.5" />
@@ -177,6 +177,6 @@ export default function Editor() {
 
 function describe(name: Record<string, number>) {
   return Object.entries(name)
-    .map(([ledger, tx]) => `${ledger}@${tx}`)
+    .map(([world, tx]) => `${world}@${tx}`)
     .join(" ")
 }

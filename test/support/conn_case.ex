@@ -3,7 +3,7 @@ defmodule Blazie.ConnCase do
 
   use ExUnit.CaseTemplate
 
-  alias Blazie.{Attribute, Authority, Ledger}
+  alias Blazie.{Attribute, Authority, World}
 
   using do
     quote do
@@ -12,7 +12,7 @@ defmodule Blazie.ConnCase do
 
       import Blazie.ConnCase
 
-      alias Blazie.{Attribute, Ledger, Snapshot}
+      alias Blazie.{Attribute, World, Snapshot}
 
       @endpoint Blazie.Surface.Endpoint
     end
@@ -36,13 +36,13 @@ defmodule Blazie.ConnCase do
   @doc "A ledger named the way a caller would name one — with a string."
   def open_ledger do
     name = "test-ledger-#{System.unique_integer([:positive])}"
-    {:ok, _} = Ledger.open(name)
+    {:ok, _} = World.open(name)
 
     # Granted to this test's caller, because every operation that names a
     # ledger is checked and a test that skipped this would only ever see 403.
     if token = Process.get(:blazie_test_token), do: Authority.grant(token, name)
 
-    ExUnit.Callbacks.on_exit(fn -> Ledger.close(name) end)
+    ExUnit.Callbacks.on_exit(fn -> World.close(name) end)
     name
   end
 
@@ -52,9 +52,9 @@ defmodule Blazie.ConnCase do
   Every write is checked, so a surface test that writes has to have defined
   what it writes — which is the bootstrap doing its job rather than a chore.
   """
-  def define(ledger, attribute, opts \\ []) do
-    {:ok, ref} = Ledger.open(ledger)
-    {:ok, _tx} = Ledger.append(ref, Attribute.define(attribute, opts))
+  def define(world, attribute, opts \\ []) do
+    {:ok, ref} = World.open(world)
+    {:ok, _tx} = World.append(ref, Attribute.define(attribute, opts))
     :ok
   end
 end

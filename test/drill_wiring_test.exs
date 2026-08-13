@@ -12,12 +12,12 @@ defmodule Blazie.DrillWiringTest do
   """
   use ExUnit.Case, async: false
 
-  alias Blazie.{Attribute, Backup, Drill, Job, Ledger, Snapshot, Store}
+  alias Blazie.{Attribute, Backup, Drill, Job, World, Snapshot, Store}
 
   setup do
     root = Path.join(System.tmp_dir!(), "lr_drill_wiring_#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(root) end)
-    on_exit(fn -> Ledger.close(Drill.ledger()) end)
+    on_exit(fn -> World.close(Drill.world()) end)
 
     %{
       root: root,
@@ -29,13 +29,13 @@ defmodule Blazie.DrillWiringTest do
   end
 
   describe "the runner is a child, not a module somebody must remember" do
-    test "starting it seeds its ledger and declares the job with a cadence", ctx do
+    test "starting it seeds its world and declares the job with a cadence", ctx do
       start_drill(ctx)
 
       assert Process.alive?(Process.whereis(Drill.Runner))
 
-      {:ok, ledger} = Ledger.open(Drill.ledger())
-      snapshot = Snapshot.open([ledger])
+      {:ok, world} = World.open(Drill.world())
+      snapshot = Snapshot.open([world])
 
       assert Snapshot.value(snapshot, "drill", "is") == "job"
       assert Snapshot.value(snapshot, "drill", "every") == 21_600
@@ -54,9 +54,9 @@ defmodule Blazie.DrillWiringTest do
     test "a tick actually restores and proves, which is the only proof that counts", ctx do
       # Something file-backed for the backup to copy and the drill to give back.
       name = {:drill_wiring, System.unique_integer([:positive])}
-      {:ok, ledger} = Ledger.open(name, store: {Store.File, dir: ctx.ledgers})
-      on_exit(fn -> Ledger.close(name) end)
-      {:ok, _} = Ledger.append(ledger, Attribute.seed())
+      {:ok, world} = World.open(name, store: {Store.File, dir: ctx.ledgers})
+      on_exit(fn -> World.close(name) end)
+      {:ok, _} = World.append(world, Attribute.seed())
 
       {:ok, _} =
         Backup.run(
@@ -70,27 +70,27 @@ defmodule Blazie.DrillWiringTest do
 
       # The tick starts a task; wait for the fact that says it finished.
       assert eventually(fn ->
-               Snapshot.value(Snapshot.open([Ledger.via(Drill.ledger())]), "drill", "proven_at")
+               Snapshot.value(Snapshot.open([World.via(Drill.world())]), "drill", "proven_at")
              end) > 0
 
-      snapshot = Snapshot.open([Ledger.via(Drill.ledger())])
+      snapshot = Snapshot.open([World.via(Drill.world())])
       assert Snapshot.value(snapshot, "drill", "drilled") == name
       assert Snapshot.value(snapshot, "drill", "restored_ledgers") == 1
       assert Snapshot.value(snapshot, "drill", "compared_facts") > 0
 
       # And it left nothing behind on the way: no scratch directory, and no
-      # ledger name still held. Asserted here rather than beside the drill's own
+      # world name still held. Asserted here rather than beside the drill's own
       # tests because the registry is VM-wide and this file is the one that runs
       # on its own.
       assert File.ls!(ctx.scratch) == []
-      refute Enum.any?(Ledger.open_ledgers(), &match?({Drill, :restored, _}, &1))
+      refute Enum.any?(World.open_worlds(), &match?({Drill, :restored, _}, &1))
     end
 
     test "a drill that fails still leaves nothing open and nothing behind", ctx do
       name = {:drill_wiring_broken, System.unique_integer([:positive])}
-      {:ok, ledger} = Ledger.open(name, store: {Store.File, dir: ctx.ledgers})
-      on_exit(fn -> Ledger.close(name) end)
-      {:ok, _} = Ledger.append(ledger, Attribute.seed())
+      {:ok, world} = World.open(name, store: {Store.File, dir: ctx.ledgers})
+      on_exit(fn -> World.close(name) end)
+      {:ok, _} = World.append(world, Attribute.seed())
 
       {:ok, _} =
         Backup.run(
@@ -110,7 +110,7 @@ defmodule Blazie.DrillWiringTest do
 
       # The failure is a fact, not a crash and not a silence.
       assert eventually(fn ->
-               case Job.failures(Snapshot.open([Ledger.via(Drill.ledger())]), "drill") do
+               case Job.failures(Snapshot.open([World.via(Drill.world())]), "drill") do
                  [] -> nil
                  failures -> failures
                end
@@ -118,7 +118,7 @@ defmodule Blazie.DrillWiringTest do
 
       assert Process.alive?(Process.whereis(Drill.Runner))
       assert File.ls!(ctx.scratch) == []
-      refute Enum.any?(Ledger.open_ledgers(), &match?({Drill, :restored, _}, &1))
+      refute Enum.any?(World.open_worlds(), &match?({Drill, :restored, _}, &1))
     end
   end
 

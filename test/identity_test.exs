@@ -12,7 +12,7 @@ defmodule Blazie.IdentityTest do
   """
   use ExUnit.Case, async: false
 
-  alias Blazie.{Authority, Identity, Ledger, Snapshot}
+  alias Blazie.{Authority, Identity, World, Snapshot}
 
   # A GitHub that answers however a test needs it to, from the process
   # dictionary so each test sets its own without a global.
@@ -48,7 +48,7 @@ defmodule Blazie.IdentityTest do
   end
 
   setup do
-    on_exit(fn -> Ledger.close(Identity.ledger()) end)
+    on_exit(fn -> World.close(Identity.world()) end)
     FakeHub.script(%{})
     %{opts: [github: FakeHub, github_logins: ["shinyobjectz"]]}
   end
@@ -87,17 +87,17 @@ defmodule Blazie.IdentityTest do
       assert Identity.admitted() == ["shinyobjectz"]
     end
 
-    test "the ledger holds the fingerprint and never the token", ctx do
+    test "the world holds the fingerprint and never the token", ctx do
       {:ok, %{token: token}} = Identity.admit("shinyobjectz", ctx.opts)
 
-      {:ok, ledger} = Ledger.open(Identity.ledger())
-      facts = Snapshot.find(Snapshot.open([ledger]), attribute: "github_login")
+      {:ok, world} = World.open(Identity.world())
+      facts = Snapshot.find(Snapshot.open([world]), attribute: "github_login")
 
       assert Enum.any?(facts, &(&1.id == Authority.caller(token)))
       refute Enum.any?(facts, &(&1.id == token))
 
-      raw = Snapshot.facts(Snapshot.open([ledger])) |> inspect()
-      refute raw =~ token, "the token itself reached the ledger"
+      raw = Snapshot.facts(Snapshot.open([world])) |> inspect()
+      refute raw =~ token, "the token itself reached the world"
     end
   end
 

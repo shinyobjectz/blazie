@@ -8,21 +8,21 @@ defmodule Blazie.LuaWorldTest do
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Ledger, Lua, Snapshot}
+  alias Blazie.{World, Lua, Snapshot}
 
   setup do
     name = "world-#{System.unique_integer([:positive])}"
-    {:ok, ledger} = Ledger.open(name)
-    %{ledger: ledger, snapshot: Snapshot.open([ledger])}
+    {:ok, world} = World.open(name)
+    %{world: world, snapshot: Snapshot.open([world])}
   end
 
-  defp run(source, snapshot), do: Lua.World.run(source, snapshot)
+  defp run(source, snapshot), do: Lua.Binding.run(source, snapshot)
 
   # Writing then reading in one chunk is the common case and has to work, so
   # most tests append what a chunk staged and re-open before asking.
-  defp commit(%{ledger: ledger}, assertions) do
-    {:ok, _tx} = Ledger.append(ledger, assertions)
-    Snapshot.open([ledger])
+  defp commit(%{world: world}, assertions) do
+    {:ok, _tx} = World.append(world, assertions)
+    Snapshot.open([world])
   end
 
   describe "a field is a field" do
@@ -152,7 +152,7 @@ defmodule Blazie.LuaWorldTest do
     end
 
     test "retracting what was never written does nothing at all", context do
-      # Not an error, and not a declaration either: a ledger describing a field
+      # Not an error, and not a declaration either: a world describing a field
       # that never held anything would be worse than the no-op.
       assert {:ok, _, []} = run("ada.nothing = nil", context.snapshot)
     end
@@ -315,12 +315,12 @@ defmodule Blazie.LuaWorldTest do
     end
 
     test "a formula's clock does not move", context do
-      assert {:ok, 0, _} = Lua.World.run("return os.time()", context.snapshot, at: 0)
+      assert {:ok, 0, _} = Lua.Binding.run("return os.time()", context.snapshot, at: 0)
     end
 
     test "a runaway chunk is stopped and writes nothing", context do
       assert {:error, refusal} =
-               Lua.World.run("while true do end", context.snapshot, deadline: 200)
+               Lua.Binding.run("while true do end", context.snapshot, deadline: 200)
 
       assert refusal.problem == :took_too_long
     end
@@ -329,7 +329,7 @@ defmodule Blazie.LuaWorldTest do
       {:ok, _, wrote} = run("ada.height = 180", context.snapshot)
 
       assert wrote != []
-      # The ledger is untouched: staging is the whole contract, and a guest that
+      # The world is untouched: staging is the whole contract, and a guest that
       # could append would be a guest that could write during a formula.
       assert context.snapshot |> Snapshot.find([]) |> Enum.empty?()
     end

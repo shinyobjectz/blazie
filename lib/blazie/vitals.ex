@@ -12,7 +12,7 @@ defmodule Blazie.Vitals do
   trend is a query over old readings rather than a time-series database, and
   "when did this node last report" is `Job.last_run/2` like anything else.
 
-      Ledger.append(ledger, Vitals.declare(every: 60))
+      World.append(world, Vitals.declare(every: 60))
       # ... the runner picks it up like any other job ...
 
   ## What is not here
@@ -23,14 +23,18 @@ defmodule Blazie.Vitals do
   feed would be guessing at its shape.
   """
 
-  alias Blazie.{Attribute, Job, Ledger, Subscription}
+  alias Blazie.{Attribute, Job, World, Subscription}
 
   @id "vitals"
-  @ledger "$vitals"
+  @world "$vitals"
 
   @doc "The attributes a reading is written with."
   @spec seed() :: [{String.t(), String.t(), term()}]
   def seed do
+  # `open_ledgers`, not `open_worlds`. The word moved; this string did not,
+  # because it is data — a thousand readings are already written under it, and
+  # renaming it would orphan every one while the suite stayed green, since tests
+  # write with the same code they read. Storage layout is not vocabulary.
     Attribute.define("open_ledgers", answers: "integer", cardinality: "many") ++
       Attribute.define("subscriptions", answers: "integer", cardinality: "many") ++
       Attribute.define("memory_bytes", answers: "integer", cardinality: "many") ++
@@ -38,12 +42,12 @@ defmodule Blazie.Vitals do
       Attribute.define("node", answers: "name", cardinality: "many")
   end
 
-  @doc "The ledger readings are written to."
-  @spec ledger() :: String.t()
-  def ledger, do: @ledger
+  @doc "The world readings are written to."
+  @spec world() :: String.t()
+  def world, do: @world
 
   @doc """
-  Start the vitals job under a runner, seeding its ledger if it is new.
+  Start the vitals job under a runner, seeding its world if it is new.
 
   Built and never started is the same as not built, which the deployment kept
   proving — so this is what the supervision tree runs rather than a module
@@ -57,14 +61,14 @@ defmodule Blazie.Vitals do
   @doc false
   def start_runner(opts) do
     every = Keyword.get(opts, :every, 60)
-    {:ok, ledger} = Ledger.open(@ledger)
+    {:ok, world} = World.open(@world)
 
-    if Ledger.tx(ledger) == 0 do
-      Ledger.append(ledger, Attribute.seed() ++ Job.seed() ++ seed() ++ declare(every: every))
+    if World.tx(world) == 0 do
+      World.append(world, Attribute.seed() ++ Job.seed() ++ seed() ++ declare(every: every))
     end
 
     Job.Runner.start_link(
-      ledger: ledger,
+      world: world,
       jobs: [job()],
       every: :timer.seconds(every),
       name: __MODULE__.Runner
@@ -80,7 +84,7 @@ defmodule Blazie.Vitals do
   def job do
     Job.new(@id, fn _snapshot ->
       [
-        {@id, "open_ledgers", length(Ledger.open_ledgers())},
+        {@id, "open_ledgers", length(World.open_worlds())},
         {@id, "subscriptions", Subscription.count()},
         {@id, "memory_bytes", :erlang.memory(:total)},
         {@id, "processes", :erlang.system_info(:process_count)},

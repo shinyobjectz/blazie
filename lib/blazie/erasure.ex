@@ -32,19 +32,19 @@ defmodule Blazie.Erasure do
   write time or not at all, and `erasable?/2` answers whether it was.
   """
 
-  alias Blazie.{Attribute, Fact, Keyring, Ledger, Snapshot}
+  alias Blazie.{Attribute, Fact, Keyring, World, Snapshot}
 
   @subject "subject"
   @erased_at "erased_at"
-  @ledger "$erasures"
+  @world "$erasures"
 
   @doc "The attribute an entity declares its owner with."
   @spec seed() :: [{String.t(), String.t(), term()}]
   def seed, do: Attribute.define(@subject, answers: "name")
 
-  @doc "The ledger tombstones are written to."
-  @spec ledger() :: String.t()
-  def ledger, do: @ledger
+  @doc "The world tombstones are written to."
+  @spec world() :: String.t()
+  def world, do: @world
 
   @doc "The attribute name itself, for anyone who needs to write one."
   @spec attribute() :: String.t()
@@ -76,22 +76,22 @@ defmodule Blazie.Erasure do
   """
   @spec erased() :: [term()]
   def erased do
-    {:ok, ledger} = Ledger.open(@ledger)
+    {:ok, world} = World.open(@world)
 
-    Snapshot.open([ledger])
+    Snapshot.open([world])
     |> Snapshot.find(attribute: @erased_at)
     |> Enum.map(& &1.id)
     |> Enum.uniq()
   end
 
   defp record(subject) do
-    {:ok, ledger} = Ledger.open(@ledger)
+    {:ok, world} = World.open(@world)
 
-    if Ledger.tx(ledger) == 0 do
-      Ledger.append(ledger, Attribute.seed() ++ Attribute.define(@erased_at, answers: "integer"))
+    if World.tx(world) == 0 do
+      World.append(world, Attribute.seed() ++ Attribute.define(@erased_at, answers: "integer"))
     end
 
-    Ledger.append(ledger, [{subject, @erased_at, System.system_time(:second)}])
+    World.append(world, [{subject, @erased_at, System.system_time(:second)}])
   end
 
   @doc "Could facts about this entity be erased? True only if a subject was declared."
@@ -99,10 +99,10 @@ defmodule Blazie.Erasure do
   def erasable?(%Snapshot{} = snapshot, id),
     do: Snapshot.value(snapshot, id, @subject) != nil
 
-  # ── what the ledger uses ───────────────────────────────────────────────────
+  # ── what the world uses ───────────────────────────────────────────────────
 
   @doc false
-  # Called on the write path with whatever the ledger already knows about this
+  # Called on the write path with whatever the world already knows about this
   # entity's owner. Nothing is encrypted unless a subject was declared first.
   def protect(answer, nil), do: answer
 

@@ -7,7 +7,7 @@ defmodule Blazie.Symbol.Text do
   embedding model is a `Job` by definition — its answer happened once and
   cannot be reproduced — so a model behind an API can never write a symbol
   here. What can is an embedder that is DETERMINISTIC and runs in process:
-  same text, same numbers, forever, and rebuildable from the ledger alone.
+  same text, same numbers, forever, and rebuildable from the world alone.
 
   That is not a limitation to work around. A symbol is a derived stand-in, and
   a stand-in you cannot re-derive is a number you have to trust. Making the

@@ -2,25 +2,25 @@ defmodule Blazie.Job.RunnerTest do
   @moduledoc """
   The thing that actually calls `Job.run/4`.
 
-  The ledger is the queue, so the runner holds no work list — it asks which
+  The world is the queue, so the runner holds no work list — it asks which
   jobs are due and runs those. What it does hold is which are still in flight,
   because a job that is slow must not be started again just because its cadence
   came round.
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Attribute, Job, Ledger, Snapshot, TestLedger}
+  alias Blazie.{Attribute, Job, World, Snapshot, TestLedger}
   alias Blazie.Job.Runner
 
   setup do
-    ledger = TestLedger.open()
-    {:ok, _} = Ledger.append(ledger, Attribute.seed() ++ Job.seed())
-    %{ledger: ledger}
+    world = TestLedger.open()
+    {:ok, _} = World.append(world, Attribute.seed() ++ Job.seed())
+    %{world: world}
   end
 
-  defp start_runner(ledger, jobs) do
+  defp start_runner(world, jobs) do
     start_supervised!(
-      {Runner, ledger: ledger, jobs: jobs, name: :"runner_#{System.unique_integer([:positive])}"}
+      {Runner, world: world, jobs: jobs, name: :"runner_#{System.unique_integer([:positive])}"}
     )
   end
 
@@ -37,26 +37,26 @@ defmodule Blazie.Job.RunnerTest do
     end)
   end
 
-  describe "the runner runs what the ledger says is due" do
-    test "a due job runs and writes its facts", %{ledger: ledger} do
+  describe "the runner runs what the world says is due" do
+    test "a due job runs and writes its facts", %{world: world} do
       {:ok, agent} = Agent.start_link(fn -> 0 end)
-      {:ok, _} = Ledger.append(ledger, Job.declare("fetch", every: 100))
-      {:ok, _} = Ledger.append(ledger, Attribute.define("headline"))
+      {:ok, _} = World.append(world, Job.declare("fetch", every: 100))
+      {:ok, _} = World.append(world, Attribute.define("headline"))
 
-      runner = start_runner(ledger, [counter_job("fetch", agent)])
+      runner = start_runner(world, [counter_job("fetch", agent)])
       assert {:ok, ["fetch"]} = Runner.tick(runner, 1000)
       settle(runner)
 
       assert Agent.get(agent, & &1) == 1
-      assert Snapshot.value(Snapshot.open([ledger]), "fetch", "headline") == "ran"
+      assert Snapshot.value(Snapshot.open([world]), "fetch", "headline") == "ran"
     end
 
-    test "a job that is not due does not run", %{ledger: ledger} do
+    test "a job that is not due does not run", %{world: world} do
       {:ok, agent} = Agent.start_link(fn -> 0 end)
-      {:ok, _} = Ledger.append(ledger, Job.declare("fetch", every: 100))
-      {:ok, _} = Ledger.append(ledger, Attribute.define("headline"))
+      {:ok, _} = World.append(world, Job.declare("fetch", every: 100))
+      {:ok, _} = World.append(world, Attribute.define("headline"))
 
-      runner = start_runner(ledger, [counter_job("fetch", agent)])
+      runner = start_runner(world, [counter_job("fetch", agent)])
       assert {:ok, ["fetch"]} = Runner.tick(runner, 1000)
       settle(runner)
 
@@ -67,12 +67,12 @@ defmodule Blazie.Job.RunnerTest do
       assert Agent.get(agent, & &1) == 1
     end
 
-    test "it becomes due again once the cadence passes", %{ledger: ledger} do
+    test "it becomes due again once the cadence passes", %{world: world} do
       {:ok, agent} = Agent.start_link(fn -> 0 end)
-      {:ok, _} = Ledger.append(ledger, Job.declare("fetch", every: 100))
-      {:ok, _} = Ledger.append(ledger, Attribute.define("headline"))
+      {:ok, _} = World.append(world, Job.declare("fetch", every: 100))
+      {:ok, _} = World.append(world, Attribute.define("headline"))
 
-      runner = start_runner(ledger, [counter_job("fetch", agent)])
+      runner = start_runner(world, [counter_job("fetch", agent)])
       Runner.tick(runner, 1000)
       settle(runner)
       Runner.tick(runner, 1200)
@@ -81,11 +81,11 @@ defmodule Blazie.Job.RunnerTest do
       assert Agent.get(agent, & &1) == 2
     end
 
-    test "a job with no cadence is never picked up", %{ledger: ledger} do
+    test "a job with no cadence is never picked up", %{world: world} do
       {:ok, agent} = Agent.start_link(fn -> 0 end)
-      {:ok, _} = Ledger.append(ledger, Job.declare("on_demand"))
+      {:ok, _} = World.append(world, Job.declare("on_demand"))
 
-      runner = start_runner(ledger, [counter_job("on_demand", agent)])
+      runner = start_runner(world, [counter_job("on_demand", agent)])
 
       assert {:ok, []} = Runner.tick(runner, 999_999)
       assert Agent.get(agent, & &1) == 0
@@ -93,10 +93,10 @@ defmodule Blazie.Job.RunnerTest do
   end
 
   describe "a slow job is not started twice" do
-    test "a job still in flight is skipped", %{ledger: ledger} do
+    test "a job still in flight is skipped", %{world: world} do
       {:ok, gate} = Agent.start_link(fn -> :closed end)
-      {:ok, _} = Ledger.append(ledger, Job.declare("slow", every: 1))
-      {:ok, _} = Ledger.append(ledger, Attribute.define("headline"))
+      {:ok, _} = World.append(world, Job.declare("slow", every: 1))
+      {:ok, _} = World.append(world, Attribute.define("headline"))
 
       slow =
         Job.new("slow", fn _ ->
@@ -107,7 +107,7 @@ defmodule Blazie.Job.RunnerTest do
           [{"slow", "headline", "done"}]
         end)
 
-      runner = start_runner(ledger, [slow])
+      runner = start_runner(world, [slow])
 
       assert {:ok, ["slow"]} = Runner.tick(runner, 1000)
       assert Runner.in_flight(runner) == ["slow"]
@@ -119,30 +119,30 @@ defmodule Blazie.Job.RunnerTest do
       settle(runner)
 
       assert Runner.in_flight(runner) == []
-      assert Snapshot.value(Snapshot.open([ledger]), "slow", "headline") == "done"
+      assert Snapshot.value(Snapshot.open([world]), "slow", "headline") == "done"
     end
   end
 
   describe "a failing job does not take the runner with it" do
-    test "the failure is recorded and the runner keeps going", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, Job.declare("broken", every: 100))
+    test "the failure is recorded and the runner keeps going", %{world: world} do
+      {:ok, _} = World.append(world, Job.declare("broken", every: 100))
       broken = Job.new("broken", fn _ -> raise "the endpoint is down" end)
 
-      runner = start_runner(ledger, [broken])
+      runner = start_runner(world, [broken])
       assert {:ok, ["broken"]} = Runner.tick(runner, 1000)
       settle(runner)
 
       assert Process.alive?(GenServer.whereis(runner))
-      assert [reason] = Job.failures(Snapshot.open([ledger]), "broken")
+      assert [reason] = Job.failures(Snapshot.open([world]), "broken")
       assert reason =~ "the endpoint is down"
     end
 
     test "and it is due again next time, because failing still counts as running",
-         %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, Job.declare("broken", every: 100))
+         %{world: world} do
+      {:ok, _} = World.append(world, Job.declare("broken", every: 100))
       broken = Job.new("broken", fn _ -> raise "still down" end)
 
-      runner = start_runner(ledger, [broken])
+      runner = start_runner(world, [broken])
       Runner.tick(runner, 1000)
       settle(runner)
 
@@ -150,15 +150,15 @@ defmodule Blazie.Job.RunnerTest do
       assert {:ok, ["broken"]} = Runner.tick(runner, 1200)
       settle(runner)
 
-      assert length(Job.failures(Snapshot.open([ledger]), "broken")) == 2
+      assert length(Job.failures(Snapshot.open([world]), "broken")) == 2
     end
   end
 
-  describe "a job the ledger declares but nobody registered" do
-    test "is skipped and said so, rather than skipped silently", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, Job.declare("nobody_wrote_this", every: 100))
+  describe "a job the world declares but nobody registered" do
+    test "is skipped and said so, rather than skipped silently", %{world: world} do
+      {:ok, _} = World.append(world, Job.declare("nobody_wrote_this", every: 100))
 
-      runner = start_runner(ledger, [])
+      runner = start_runner(world, [])
 
       assert {:ok, []} = Runner.tick(runner, 1000)
       assert Runner.unclaimed(runner) == ["nobody_wrote_this"]

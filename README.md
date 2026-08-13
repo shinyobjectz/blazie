@@ -68,8 +68,8 @@ describing the system is a second source that drifts.
 
 ## The operation
 
-    run       ledger, lua  -> what it returned, and the name it read at
-    watch     ledger, what -> answered again as things land          (websocket)
+    run       world, lua  -> what it returned, and the name it read at
+    watch     world, what -> answered again as things land          (websocket)
 
 There is one door. `run` opens a snapshot, evaluates the chunk against it, and
 appends whatever the chunk wrote — three steps that used to be three operations
@@ -79,11 +79,17 @@ A caller holds the snapshot's *name*, never its bytes. Because an answer at a
 name never changes, a client caches on `{name, source}` and never invalidates —
 there is no cache-coherence protocol because there is nothing to cohere.
 
-`claim` takes a ledger name and grants it to whoever claimed it; that is the
+`claim` takes a world name and grants it to whoever claimed it; that is the
 only other thing the wire does.
 
-Authorization is which ledgers a caller may name. Not row rules, not
-predicates. Every operation that names a ledger is checked, because a snapshot
+A world was called a *ledger* until recently. The storage kept the old spelling
+on purpose — `LEDGER_DIR`, `/data/ledgers`, the `ledgers/` backup prefix — and so
+did the `open_ledgers` reading, because live facts and live objects already sit
+under those names. Renaming them would have orphaned every one while the tests
+stayed green, since a test writes with the same code it reads.
+
+Authorization is which worlds a caller may name. Not row rules, not
+predicates. Every operation that names a world is checked, because a snapshot
 name is a plain map and a caller can write one by hand.
 
 ## Configuration
@@ -105,9 +111,9 @@ artefact runs anywhere and carries no secret.
 | `BACKUP_EVERY` | Seconds between runs. Defaults to 900. |
 | `DRILL_EVERY` | Seconds between restore drills. Defaults to 21600 — six hours. `0` turns the drill off. |
 | `DRILL_DIR` | Where a drill stages what it restores. Defaults to the container's temp space, and must never be `LEDGER_DIR`. |
-| `DRILL_MAX_BYTES` | The largest ledger a drill will pull down. Defaults to 512 MB. |
+| `DRILL_MAX_BYTES` | The largest world a drill will pull down. Defaults to 512 MB. |
 
-Without `LEDGER_DIR` a ledger is in memory, which is right for a test and
+Without `LEDGER_DIR` a world is in memory, which is right for a test and
 wrong for everything else. Without `KMS_KEY` the keyring keeps its keys in a
 file under a master from the environment — right for development, wrong in
 front of real users, because a file can come back from a restore and erasure
@@ -140,7 +146,7 @@ as ordinary facts, writes a failure as an ordinary fact, and answers "when did
 this last succeed" with `Job.last_run/2` like anything else. None of that had
 to be built.
 
-A ledger is append-only, so a run copies the byte range it has not copied yet
+A world is append-only, so a run copies the byte range it has not copied yet
 and names the segment for the range it holds. The cost of a backup is what
 changed rather than what exists, which is what lets the cadence be minutes.
 A copy stops at the last complete record, because the tail of a live log may be
@@ -164,7 +170,7 @@ difference is a backup claiming bytes it cannot give back. Stopping at the hole
 costs a re-copy and heals it.
 
 Restoring refuses rather than overwrites, and names what is in the way. Pass
-`only: :keys` or `only: :ledgers` to restore one half — losing a key store
+`only: :keys` or `only: :worlds` to restore one half — losing a key store
 while the facts are fine is a real thing, and not the same operation as
 restoring a machine.
 
@@ -178,41 +184,41 @@ of a node that has been taken over.
 
 A backup is only ever proven by the last restore, and a restore a human did once
 by hand is a rumour with a timestamp. So the restore is a job too: every six
-hours it pulls one ledger back out of the backup, opens it, asks it for every
-fact it holds, and asks the live ledger the same question. Equal answers, or the
+hours it pulls one world back out of the backup, opens it, asks it for every
+fact it holds, and asks the live world the same question. Equal answers, or the
 run fails and the failure is a fact.
 
-The comparison is made at the *restored* ledger's transaction, never the live
-one's. A backup is always a prefix — a run copies and the live ledger goes on
+The comparison is made at the *restored* world's transaction, never the live
+one's. A backup is always a prefix — a run copies and the live world goes on
 being written to — so the honest question is whether the copy answers at
 transaction *n* exactly what the original answers there. That is a snapshot, and
 an answer at a snapshot is the same answer forever, which is why this can be an
 equality rather than a tolerance. Byte counts are what `verify` compares, and a
 broken restore has plenty of those.
 
-One ledger per run, and the one picked is the one drilled longest ago, read out
+One world per run, and the one picked is the one drilled longest ago, read out
 of the drill's own past facts — so a redeploy resumes the rotation and there is
-no state to reconcile. With *n* ledgers each is proven inside *n* cadences.
+no state to reconcile. With *n* worlds each is proven inside *n* cadences.
 Restoring everything every cadence would cost more than the backup it checks,
 every time, and a check nobody can afford is a check somebody turns off. Only the
-sampled ledger's segments cross the wire: the drill hands `Backup.restore/1` a
+sampled world's segments cross the wire: the drill hands `Backup.restore/1` a
 narrowed view of the target rather than a second restore path of its own.
 
-It stages into a scratch directory, restores `only: :ledgers`, opens the copy
+It stages into a scratch directory, restores `only: :worlds`, opens the copy
 under a name of its own, and removes both the directory and the name on the way
 out whether it proved anything or raised. Opening the copy under the live name
-would hand back the live ledger — `Ledger.open/2` does that by design — and the
+would hand back the live world — `World.open/2` does that by design — and the
 drill would compare it against itself and pass forever.
 
     proven_at          when we last proved we could restore
-    drilled            which ledger this run gave back
+    drilled            which world this run gave back
     proven_tx          the transaction it was proven to
     compared_facts     how many facts had to agree
-    too_big            a ledger over the ceiling, skipped and named
+    too_big            a world over the ceiling, skipped and named
 
-Four limits, stated rather than hidden. Only ledgers that are **open** are
+Four limits, stated rather than hidden. Only worlds that are **open** are
 drilled, because comparing means asking the live one and a drill must never
-start a live ledger. A ledger over `DRILL_MAX_BYTES` is skipped and named rather
+start a live world. A world over `DRILL_MAX_BYTES` is skipped and named rather
 than passed over. **Keys are not restored** — pointing the keyring at a restored
 key store would mean swapping a live global for the length of a drill, and both
 sides of the comparison reveal through the same keyring anyway. And a run with
@@ -223,7 +229,7 @@ advancing, which is the thing to watch.
 
 A two-stage image: build with the toolchain, ship without it. Facts and keys
 live on a mounted volume, never in the image — a container is replaced on
-every deploy and a ledger is not.
+every deploy and a world is not.
 
 CI runs the gate a machine that has never seen the repo can run: formatting,
 warnings-as-errors, the suite, the SIGKILL crash tests, and the vocabulary

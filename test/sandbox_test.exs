@@ -9,7 +9,7 @@ defmodule Blazie.Formula.SandboxTest do
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Attribute, Formula, Ledger, Snapshot, TestLedger}
+  alias Blazie.{Attribute, Formula, World, Snapshot, TestLedger}
   alias Blazie.Formula.Sandbox
 
   @doubling """
@@ -31,20 +31,20 @@ defmodule Blazie.Formula.SandboxTest do
   """
 
   setup do
-    ledger = TestLedger.open()
-    {:ok, _} = Ledger.append(ledger, Attribute.seed())
-    {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
-    {:ok, _} = Ledger.append(ledger, Attribute.define("doubled", answers: "integer"))
-    {:ok, _} = Ledger.append(ledger, [{1, "height", 10}, {2, "height", 21}])
-    %{ledger: ledger}
+    world = TestLedger.open()
+    {:ok, _} = World.append(world, Attribute.seed())
+    {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+    {:ok, _} = World.append(world, Attribute.define("doubled", answers: "integer"))
+    {:ok, _} = World.append(world, [{1, "height", 10}, {2, "height", 21}])
+    %{world: world}
   end
 
   describe "tenant code produces facts like any other formula" do
-    test "it answers", %{ledger: ledger} do
+    test "it answers", %{world: world} do
       {:ok, formula} =
         Sandbox.mapping("doubling", @doubling, over: [attribute: "height"], into: "doubled")
 
-      {assertions, _reads} = Formula.run(formula, Snapshot.open([ledger]))
+      {assertions, _reads} = Formula.run(formula, Snapshot.open([world]))
 
       assert Enum.sort(assertions) == [
                {1, "doubled", 20, "doubling"},
@@ -52,21 +52,21 @@ defmodule Blazie.Formula.SandboxTest do
              ]
     end
 
-    test "what it produced names it, like anything else", %{ledger: ledger} do
+    test "what it produced names it, like anything else", %{world: world} do
       {:ok, formula} =
         Sandbox.mapping("doubling", @doubling, over: [attribute: "height"], into: "doubled")
 
-      {:ok, tx, _} = Formula.materialize(formula, Snapshot.open([ledger]), ledger)
+      {:ok, tx, _} = Formula.materialize(formula, Snapshot.open([world]), world)
 
       assert [%{by: "doubling"} | _] =
-               Ledger.facts_at(ledger, tx) |> Enum.filter(&(&1.tx == tx))
+               World.facts_at(world, tx) |> Enum.filter(&(&1.tx == tx))
     end
 
-    test "it is a formula, so the read set still bounds it", %{ledger: ledger} do
+    test "it is a formula, so the read set still bounds it", %{world: world} do
       {:ok, formula} =
         Sandbox.mapping("doubling", @doubling, over: [attribute: "height"], into: "doubled")
 
-      {_assertions, reads} = Formula.run(formula, Snapshot.open([ledger]))
+      {_assertions, reads} = Formula.run(formula, Snapshot.open([world]))
 
       assert reads == [[attribute: "height"]]
 

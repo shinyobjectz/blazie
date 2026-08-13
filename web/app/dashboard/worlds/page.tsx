@@ -11,16 +11,16 @@ import { cn } from "@/lib/utils"
 import { useCluster } from "../cluster"
 
 /**
- * Your ledgers, and how to make one.
+ * Your worlds, and how to make one.
  *
- * A ledger is where data lives — the thing another backend would call a
+ * A world is where data lives — the thing another backend would call a
  * database. Making one is the operation the console could not perform at all
- * until recently: every request is checked against the ledgers a caller may
+ * until recently: every request is checked against the worlds a caller may
  * name, so naming a new one was refused before it could be created, and a
- * ledger existed only when somebody with shell access wrote a grant by hand.
+ * world existed only when somebody with shell access wrote a grant by hand.
  */
-export default function Ledgers() {
-  const { who, ledger: chosen, choose, refresh } = useCluster()
+export default function Worlds() {
+  const { who, world: chosen, choose, refresh } = useCluster()
   const [name, setName] = useState("")
   const [error, setError] = useState<unknown>(null)
   const [claiming, setClaiming] = useState(false)
@@ -46,8 +46,8 @@ export default function Ledgers() {
 
   return (
     <>
-      <PageHead title="ledgers">
-        a ledger is where data lives. names are global on this cluster, so they
+      <PageHead title="worlds">
+        a world is where data lives. names are global on this cluster, so they
         are first-come — a name somebody already holds is refused rather than
         shared.
       </PageHead>
@@ -55,7 +55,7 @@ export default function Ledgers() {
       <form onSubmit={make} className="mb-10 flex flex-wrap items-end gap-3">
         <label className="block">
           <span className="font-mono mb-1.5 block text-xs text-muted-foreground">
-            new ledger
+            new world
           </span>
           <input
             value={name}
@@ -76,14 +76,14 @@ export default function Ledgers() {
 
       {error ? <RefusalNote error={error} className="mb-10" /> : null}
 
-      {who.ledgers.length === 0 ? (
+      {who.worlds.length === 0 ? (
         <Nothing icon={Database} title="none yet">
           make one above. it is yours as soon as it exists — claiming grants it
           to you, and to nobody else.
         </Nothing>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
-          {who.ledgers.map((one) => (
+          {who.worlds.map((one) => (
             <button
               key={one}
               type="button"

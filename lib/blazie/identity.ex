@@ -32,15 +32,15 @@ defmodule Blazie.Identity do
 
   ## What a token is, and is not
 
-  It is a bearer credential: whoever holds it is the caller. The ledger stores
-  only its fingerprint, so a leaked ledger leaks no tokens — but a leaked token
+  It is a bearer credential: whoever holds it is the caller. The world stores
+  only its fingerprint, so a leaked world leaks no tokens — but a leaked token
   is the caller until it is revoked. That was true before GitHub was involved
   and is no less true now.
   """
 
-  alias Blazie.{Authority, Ledger, Snapshot}
+  alias Blazie.{Authority, World, Snapshot}
 
-  @ledger "$identities"
+  @world "$identities"
   @is "is"
   @login "github_login"
   @issued "issued_at"
@@ -48,9 +48,9 @@ defmodule Blazie.Identity do
   @type refusal :: %{problem: atom(), repair: String.t()}
   @type admitted :: %{token: String.t(), login: String.t()}
 
-  @doc "The ledger identities are recorded in."
-  @spec ledger() :: String.t()
-  def ledger, do: @ledger
+  @doc "The world identities are recorded in."
+  @spec world() :: String.t()
+  def world, do: @world
 
   @doc "The attributes an identity is described with."
   @spec seed() :: [{String.t(), String.t(), term()}]
@@ -150,16 +150,16 @@ defmodule Blazie.Identity do
   @doc "The GitHub login a token belongs to, or nil."
   @spec login_of(String.t()) :: String.t() | nil
   def login_of(token) when is_binary(token) do
-    {:ok, ledger} = Ledger.open(@ledger)
-    Snapshot.value(Snapshot.open([ledger]), Authority.caller(token), @login)
+    {:ok, world} = World.open(@world)
+    Snapshot.value(Snapshot.open([world]), Authority.caller(token), @login)
   end
 
   @doc "Every login that currently holds at least one token."
   @spec admitted() :: [String.t()]
   def admitted do
-    {:ok, ledger} = Ledger.open(@ledger)
+    {:ok, world} = World.open(@world)
 
-    Snapshot.open([ledger])
+    Snapshot.open([world])
     |> Snapshot.find(attribute: @login)
     |> Enum.map(& &1.value)
     |> Enum.uniq()
@@ -172,13 +172,13 @@ defmodule Blazie.Identity do
     token = 32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
     caller = Authority.caller(token)
 
-    {:ok, ledger} = Ledger.open(@ledger)
+    {:ok, world} = World.open(@world)
 
-    if Ledger.tx(ledger) == 0 do
-      Ledger.append(ledger, Blazie.Attribute.seed() ++ seed())
+    if World.tx(world) == 0 do
+      World.append(world, Blazie.Attribute.seed() ++ seed())
     end
 
-    Ledger.append(ledger, [
+    World.append(world, [
       {caller, @is, "identity"},
       {caller, @login, login},
       {caller, @issued, System.system_time(:second)}

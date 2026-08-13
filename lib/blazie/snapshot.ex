@@ -4,7 +4,7 @@ defmodule Blazie.Snapshot do
 
   A snapshot is what you hold and compute over — the argument to a question,
   never the endpoint of one. Composing ledgers is the only operation that
-  crosses a ledger boundary, which is why nothing can leak across one by
+  crosses a world boundary, which is why nothing can leak across one by
   accident: you get what you opened and nothing else.
 
   A caller outside the cluster does not hold the bytes. It holds the
@@ -14,13 +14,13 @@ defmodule Blazie.Snapshot do
   `{name, question}` and never invalidates.
   """
 
-  alias Blazie.{Fact, Ledger}
+  alias Blazie.{Fact, World}
 
   @enforce_keys [:at]
   defstruct [:at]
 
   @typedoc """
-  Which ledgers, at which transaction — keyed by **what each ledger is called**,
+  Which ledgers, at which transaction — keyed by **what each world is called**,
   never by where it currently lives.
 
   Those were different maps until they were not allowed to be. A snapshot named
@@ -30,7 +30,7 @@ defmodule Blazie.Snapshot do
   push because one of them forgot. One meaning, one shape, and the translations
   are gone.
   """
-  @type name :: %{Ledger.name() => non_neg_integer()}
+  @type name :: %{World.name() => non_neg_integer()}
   @type t :: %__MODULE__{at: name()}
 
   @doc """
@@ -39,9 +39,9 @@ defmodule Blazie.Snapshot do
   Authorization belongs here and nowhere else: which ledgers a caller may open
   is the whole of it. Not row rules, not predicates.
   """
-  @spec open([Ledger.ref()]) :: t()
+  @spec open([World.ref()]) :: t()
   def open(ledgers) when is_list(ledgers) do
-    %__MODULE__{at: Map.new(ledgers, &{Ledger.name_of(&1), Ledger.tx(&1)})}
+    %__MODULE__{at: Map.new(ledgers, &{World.name_of(&1), World.tx(&1)})}
   end
 
   @doc "The snapshot's name — small, stable, and safe to hand to a caller."
@@ -57,14 +57,14 @@ defmodule Blazie.Snapshot do
   """
   @spec reopen(name()) :: t()
   def reopen(at) when is_map(at) do
-    %__MODULE__{at: Map.new(at, fn {ledger, tx} -> {Ledger.name_of(ledger), tx} end)}
+    %__MODULE__{at: Map.new(at, fn {world, tx} -> {World.name_of(world), tx} end)}
   end
 
   @doc "Every fact visible in this snapshot, oldest first across all ledgers."
   @spec facts(t()) :: [Fact.t()]
   def facts(%__MODULE__{at: at}) do
     at
-    |> Enum.flat_map(fn {ledger, tx} -> Ledger.facts_at(Ledger.via(ledger), tx) end)
+    |> Enum.flat_map(fn {world, tx} -> World.facts_at(World.via(world), tx) end)
     |> Enum.sort_by(& &1.tx)
   end
 
@@ -85,7 +85,7 @@ defmodule Blazie.Snapshot do
     record_read(pattern)
 
     at
-    |> Enum.flat_map(fn {ledger, tx} -> Ledger.find_at(Ledger.via(ledger), tx, pattern) end)
+    |> Enum.flat_map(fn {world, tx} -> World.find_at(World.via(world), tx, pattern) end)
     |> Enum.sort_by(& &1.tx)
   end
 

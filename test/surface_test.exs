@@ -9,17 +9,17 @@ defmodule Blazie.SurfaceTest do
 
   What is checked below is that replacing them cost none of the properties they
   carried. A caller still holds a name rather than the bytes; the same source at
-  the same name still answers the same forever; a ledger outside the name still
+  the same name still answers the same forever; a world outside the name still
   cannot leak in; and a write still comes back as the name its facts landed in.
   """
   use Blazie.ConnCase, async: true
 
   setup do
-    %{ledger: open_ledger()}
+    %{world: open_ledger()}
   end
 
-  defp run(conn, ledger, source, extra \\ %{}) do
-    post(conn, "/run", Map.merge(%{"ledger" => ledger, "source" => source}, extra))
+  defp run(conn, world, source, extra \\ %{}) do
+    post(conn, "/run", Map.merge(%{"world" => world, "source" => source}, extra))
   end
 
   # A second request on its own connection, carrying this test's caller. Each
@@ -32,67 +32,67 @@ defmodule Blazie.SurfaceTest do
   end
 
   describe "what comes back" do
-    test "the value the chunk returned", %{conn: conn, ledger: ledger} do
-      assert %{"value" => 4} = json_response(run(conn, ledger, "return 2 + 2"), 200)
+    test "the value the chunk returned", %{conn: conn, world: world} do
+      assert %{"value" => 4} = json_response(run(conn, world, "return 2 + 2"), 200)
     end
 
-    test "a name, never the bytes", %{conn: conn, ledger: ledger} do
-      body = json_response(run(conn, ledger, "return 1"), 200)
+    test "a name, never the bytes", %{conn: conn, world: world} do
+      body = json_response(run(conn, world, "return 1"), 200)
 
-      # Which ledger at which transaction, and nothing else. A caller holding
+      # Which world at which transaction, and nothing else. A caller holding
       # this can hand it to somebody else and they get the same answers.
-      assert %{^ledger => tx} = body["name"]
+      assert %{^world => tx} = body["name"]
       assert is_integer(tx)
     end
 
-    test "a write comes back as the name its facts landed in", %{conn: conn, ledger: ledger, token: token} do
-      body = json_response(run(conn, ledger, "ada.height = 180"), 200)
+    test "a write comes back as the name its facts landed in", %{conn: conn, world: world, token: token} do
+      body = json_response(run(conn, world, "ada.height = 180"), 200)
 
       assert body["wrote"] > 0
-      assert %{^ledger => tx} = body["name"]
+      assert %{^world => tx} = body["name"]
 
       # Reading its own write at that name, without polling for it.
-      read = json_response(run(again(token), ledger, "return ada.height", %{"name" => %{ledger => tx}}), 200)
+      read = json_response(run(again(token), world, "return ada.height", %{"name" => %{world => tx}}), 200)
       assert read["value"] == 180
     end
 
-    test "reading nothing writes nothing", %{conn: conn, ledger: ledger} do
-      assert %{"wrote" => 0} = json_response(run(conn, ledger, "return 1"), 200)
+    test "reading nothing writes nothing", %{conn: conn, world: world} do
+      assert %{"wrote" => 0} = json_response(run(conn, world, "return 1"), 200)
     end
   end
 
   describe "a name is a promise" do
     test "the same source at the same name answers the same forever", %{
       conn: conn,
-      ledger: ledger,
+      world: world,
       token: token
     } do
-      first = json_response(run(conn, ledger, "ada.height = 180"), 200)
+      first = json_response(run(conn, world, "ada.height = 180"), 200)
       pinned = first["name"]
 
-      json_response(run(again(token), ledger, "ada.height = 200"), 200)
+      json_response(run(again(token), world, "ada.height = 200"), 200)
 
       # Pinned: still 180, however much landed afterwards.
       assert %{"value" => 180} =
                json_response(
-                 run(again(token), ledger, "return ada.height", %{"name" => pinned}),
+                 run(again(token), world, "return ada.height", %{"name" => pinned}),
                  200
                )
 
       # Unpinned: now.
       assert %{"value" => 200} =
-               json_response(run(again(token), ledger, "return ada.height"), 200)
+               json_response(run(again(token), world, "return ada.height"), 200)
     end
 
-    test "a nonsense transaction in a name is refused", %{conn: conn, ledger: ledger} do
-      body = json_response(run(conn, ledger, "return 1", %{"name" => %{ledger => "three"}}), 422)
+    test "a nonsense transaction in a name is refused", %{conn: conn, world: world} do
+      body = json_response(run(conn, world, "return 1", %{"name" => %{world => "three"}}), 422)
 
       assert body["error"]["problem"] == "bad_transaction"
     end
   end
 
   describe "a world is only the ledgers named" do
-    test "a ledger not in the world cannot leak into an answer", %{conn: conn, ledger: a, token: token} do
+    test "a world not in the world cannot leak into an answer", %{conn: conn, world: a, token: token} do
       b = open_ledger()
       json_response(run(conn, b, "hidden.height = 1"), 200)
 
@@ -100,7 +100,7 @@ defmodule Blazie.SurfaceTest do
       assert %{"value" => nil} = json_response(run(again(token), a, "return hidden.height"), 200)
     end
 
-    test "`also` widens the world to read, but not to write", %{conn: conn, ledger: a, token: token} do
+    test "`also` widens the world to read, but not to write", %{conn: conn, world: a, token: token} do
       b = open_ledger()
       json_response(run(conn, b, "grace.height = 175"), 200)
 
@@ -114,40 +114,40 @@ defmodule Blazie.SurfaceTest do
 
       # Read from `b`…
       assert body["value"] == 175
-      # …and written into `a`, which is the only ledger writes ever land in.
+      # …and written into `a`, which is the only world writes ever land in.
       assert %{^a => _} = body["name"]
       refute Map.has_key?(body["name"], b) and body["wrote"] == 0
     end
   end
 
   describe "the vocabulary still holds, it is just no longer yours to write" do
-    test "a field declares itself on first use", %{conn: conn, ledger: ledger, token: token} do
+    test "a field declares itself on first use", %{conn: conn, world: world, token: token} do
       # No definition step anywhere in this test, which is the point.
-      assert %{"wrote" => wrote} = json_response(run(conn, ledger, "ada.height = 180"), 200)
+      assert %{"wrote" => wrote} = json_response(run(conn, world, "ada.height = 180"), 200)
 
       # The declaration went with it: one assertion for the value, and the
       # facts that say what `height` is.
       assert wrote > 1
-      assert %{"value" => 180} = json_response(run(again(token), ledger, "return ada.height"), 200)
+      assert %{"value" => 180} = json_response(run(again(token), world, "return ada.height"), 200)
     end
 
-    test "a redeclaration the facts contradict is still refused", %{conn: conn, ledger: ledger, token: token} do
-      json_response(run(conn, ledger, "ada.height = 180"), 200)
+    test "a redeclaration the facts contradict is still refused", %{conn: conn, world: world, token: token} do
+      json_response(run(conn, world, "ada.height = 180"), 200)
 
       # Reaching under the surface deliberately: `height` answers integers and
       # there is an integer written under it, so saying it answers names now
       # contradicts what is already there.
       source = "__write('height', 'answers', 'name', false)"
-      body = json_response(run(again(token), ledger, source), 422)
+      body = json_response(run(again(token), world, source), 422)
 
       assert body["error"]["problem"] == "contradicted"
       assert body["error"]["repair"] =~ "narrow in three steps"
     end
 
-    test "no field name from a request ever becomes an atom", %{conn: conn, ledger: ledger} do
+    test "no field name from a request ever becomes an atom", %{conn: conn, world: world} do
       unique = "field_#{System.unique_integer([:positive])}"
 
-      json_response(run(conn, ledger, "ada.#{unique} = 1"), 200)
+      json_response(run(conn, world, "ada.#{unique} = 1"), 200)
 
       # An atom is never collected, so a surface that made one from a request
       # would be a way to exhaust the VM from outside.
@@ -160,29 +160,29 @@ defmodule Blazie.SurfaceTest do
     # it back as neither — a list of {key, value} pairs that JSON cannot encode.
     # Every non-empty table a chunk returned used to fail to serialise, which is
     # everything a console would ever ask for.
-    test "keys 1..n become a list", %{conn: conn, ledger: ledger} do
+    test "keys 1..n become a list", %{conn: conn, world: world} do
       assert %{"value" => [1, 2, 3]} =
-               json_response(run(conn, ledger, "return {1, 2, 3}"), 200)
+               json_response(run(conn, world, "return {1, 2, 3}"), 200)
     end
 
-    test "named keys become an object", %{conn: conn, ledger: ledger} do
+    test "named keys become an object", %{conn: conn, world: world} do
       assert %{"value" => %{"id" => "ada", "height" => 180}} =
-               json_response(run(conn, ledger, "return {id = 'ada', height = 180}"), 200)
+               json_response(run(conn, world, "return {id = 'ada', height = 180}"), 200)
     end
 
-    test "nesting survives", %{conn: conn, ledger: ledger} do
+    test "nesting survives", %{conn: conn, world: world} do
       source = "return { rows = { {id = 'ada'}, {id = 'grace'} } }"
 
       assert %{"value" => %{"rows" => [%{"id" => "ada"}, %{"id" => "grace"}]}} =
-               json_response(run(conn, ledger, source), 200)
+               json_response(run(conn, world, source), 200)
     end
 
     test "a whole table of entities, which is what a data browser asks for", %{
       conn: conn,
-      ledger: ledger,
+      world: world,
       token: token
     } do
-      json_response(run(conn, ledger, "ada.height = 180\nada.name = 'Ada'"), 200)
+      json_response(run(conn, world, "ada.height = 180\nada.name = 'Ada'"), 200)
 
       source = """
       local rows = {}
@@ -194,7 +194,7 @@ defmodule Blazie.SurfaceTest do
       return rows
       """
 
-      body = json_response(run(again(token), ledger, source), 200)
+      body = json_response(run(again(token), world, source), 200)
 
       assert Enum.any?(body["value"], fn row ->
                row["id"] == "ada" and row["height"] == 180 and row["name"] == "Ada"
@@ -204,10 +204,10 @@ defmodule Blazie.SurfaceTest do
   end
 
   describe "provenance" do
-    test "what a caller writes names nothing", %{conn: conn, ledger: ledger} do
-      json_response(run(conn, ledger, "ada.height = 180"), 200)
+    test "what a caller writes names nothing", %{conn: conn, world: world} do
+      json_response(run(conn, world, "ada.height = 180"), 200)
 
-      {:ok, ref} = Ledger.open(ledger)
+      {:ok, ref} = World.open(world)
 
       assert Snapshot.open([ref])
              |> Snapshot.find(id: "ada")

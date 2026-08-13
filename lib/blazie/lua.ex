@@ -110,11 +110,11 @@ defmodule Blazie.Lua do
   end
 
   @doc false
-  # The same run, with what the guest wrote. `Blazie.Lua.World.run/3` is the way
+  # The same run, with what the guest wrote. `Blazie.Lua.Binding.run/3` is the way
   # to reach this; it is here because only this module knows how to spawn a
   # guest with a deadline around it.
   @spec collect(binary(), [option()]) ::
-          {:ok, term(), [Blazie.Lua.World.assertion()], [keyword()]} | {:error, refusal()}
+          {:ok, term(), [Blazie.Lua.Binding.assertion()], [keyword()]} | {:error, refusal()}
   def collect(source, opts \\ []) do
     kind = Keyword.get(opts, :as, :formula)
     deadline = Keyword.get(opts, :deadline, @deadline)
@@ -156,7 +156,7 @@ defmodule Blazie.Lua do
   @doc """
   The globals this host removes, so the world can keep them removed.
 
-  `Blazie.Lua.World` puts a metatable on `_G` that turns any unknown name into
+  `Blazie.Lua.Binding` puts a metatable on `_G` that turns any unknown name into
   an entity — which would quietly turn every one of these from "absent" into
   "an empty entity named io". The fence is the absence of anything to reach, and
   a name that answers with a table is not absent.
@@ -240,14 +240,14 @@ defmodule Blazie.Lua do
   # ── running one ────────────────────────────────────────────────────────────
 
   defp wrote(nil), do: []
-  defp wrote(_snapshot), do: Blazie.Lua.World.staged()
+  defp wrote(_snapshot), do: Blazie.Lua.Binding.staged()
 
   defp evaluate(source, kind, at, snapshot) do
     state = world(kind, at)
     # Bound only when a snapshot was given. Without one this is still the plain
     # host — useful for a chunk that computes rather than reads, and the reason
     # `run/2` did not have to change shape to gain a database.
-    state = if snapshot, do: Blazie.Lua.World.bind(state, snapshot), else: state
+    state = if snapshot, do: Blazie.Lua.Binding.bind(state, snapshot), else: state
 
     # Tracked inside the guest, because `track_reads` records into the process
     # dictionary of whoever is reading and the guest is a process of its own.

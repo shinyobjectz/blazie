@@ -9,7 +9,7 @@ defmodule Blazie.OldShapesTest do
 
   ## Why this file exists
 
-  Renaming the third slot of a fact from `answer` to `value` made every ledger
+  Renaming the third slot of a fact from `answer` to `value` made every world
   already on the production box unreadable. `term_to_binary` stores a struct's
   keys, `binary_to_term` hands them straight back, and the index then asked a
   fact from last week for a key it was never written with.
@@ -23,7 +23,7 @@ defmodule Blazie.OldShapesTest do
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Fact, Ledger, Snapshot, Store}
+  alias Blazie.{Fact, World, Snapshot, Store}
 
   setup do
     dir = Path.join(System.tmp_dir!(), "lr_shapes_#{System.unique_integer([:positive])}")
@@ -89,7 +89,7 @@ defmodule Blazie.OldShapesTest do
       refute Map.has_key?(fact, :answer)
     end
 
-    test "a whole ledger of them opens and can be asked", ctx do
+    test "a whole world of them opens and can be asked", ctx do
       write_older_log(ctx, [
         [older_fact("is", "is", "attribute", 1)],
         [older_fact("height", "is", "attribute", 2)],
@@ -97,10 +97,10 @@ defmodule Blazie.OldShapesTest do
         [older_fact("grace", "height", 175, 4)]
       ])
 
-      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
-      on_exit(fn -> Ledger.close(ctx.name) end)
+      {:ok, world} = World.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> World.close(ctx.name) end)
 
-      snapshot = Snapshot.open([ledger])
+      snapshot = Snapshot.open([world])
       assert Snapshot.value(snapshot, "ada", "height") == 180
       assert length(Snapshot.find(snapshot, attribute: "height")) == 2
     end
@@ -111,12 +111,12 @@ defmodule Blazie.OldShapesTest do
         [older_fact("ada", "height", 180, 2)]
       ])
 
-      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
-      on_exit(fn -> Ledger.close(ctx.name) end)
+      {:ok, world} = World.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> World.close(ctx.name) end)
 
       # The badkey crash that took production down came from the index, which
       # reads the third slot of every fact as it is built.
-      assert [%Fact{id: "ada"}] = Ledger.find_at(ledger, 2, value: 180)
+      assert [%Fact{id: "ada"}] = World.find_at(world, 2, value: 180)
     end
 
     test "and writing to it afterwards works, old and new shapes side by side", ctx do
@@ -125,12 +125,12 @@ defmodule Blazie.OldShapesTest do
         [older_fact("ada", "height", 180, 2)]
       ])
 
-      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
-      on_exit(fn -> Ledger.close(ctx.name) end)
+      {:ok, world} = World.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> World.close(ctx.name) end)
 
-      {:ok, _} = Ledger.append(ledger, [{"grace", "height", 175}])
+      {:ok, _} = World.append(world, [{"grace", "height", 175}])
 
-      snapshot = Snapshot.open([ledger])
+      snapshot = Snapshot.open([world])
       assert Snapshot.value(snapshot, "ada", "height") == 180
       assert Snapshot.value(snapshot, "grace", "height") == 175
     end
@@ -198,7 +198,7 @@ defmodule Blazie.OldShapesTest do
     # while its checkpoint survived, a copy truncated somewhere. Believing it
     # asked for a negative number of bytes and raised from inside `init/1` —
     # after the careful fallback in `read_checkpoint/1` had already returned, so
-    # the ledger simply would not open.
+    # the world simply would not open.
     test "is dropped, and the log is read from the start", ctx do
       write_older_log(ctx, [
         [older_fact("is", "is", "attribute", 1)],
@@ -224,7 +224,7 @@ defmodule Blazie.OldShapesTest do
       assert Enum.map(facts, & &1.id) == ["is", "ada"]
     end
 
-    test "and the ledger opens rather than refusing to start", ctx do
+    test "and the world opens rather than refusing to start", ctx do
       write_older_log(ctx, [[older_fact("ada", "height", 180, 1)]])
       path = Path.join(ctx.dir, Store.File.filename(ctx.name))
       payload = :erlang.term_to_binary({50, 1_000_000, []})
@@ -234,10 +234,10 @@ defmodule Blazie.OldShapesTest do
         <<byte_size(payload)::32, :erlang.crc32(payload)::32, payload::binary>>
       )
 
-      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
-      on_exit(fn -> Ledger.close(ctx.name) end)
+      {:ok, world} = World.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> World.close(ctx.name) end)
 
-      assert Snapshot.value(Snapshot.open([ledger]), "ada", "height") == 180
+      assert Snapshot.value(Snapshot.open([world]), "ada", "height") == 180
     end
 
     test "a checkpoint that does describe the log is still believed", ctx do
@@ -286,10 +286,10 @@ defmodule Blazie.OldShapesTest do
       # Both renames at once: the oldest shape there is.
       write_older_log(ctx, [[renamed_fact("ada", "height", 180, 1, :answer)]])
 
-      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
-      on_exit(fn -> Ledger.close(ctx.name) end)
+      {:ok, world} = World.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> World.close(ctx.name) end)
 
-      assert Snapshot.value(Snapshot.open([ledger]), "ada", "height") == 180
+      assert Snapshot.value(Snapshot.open([world]), "ada", "height") == 180
     end
 
     test "a value of nil or false survives, which a default would have eaten", ctx do
@@ -312,10 +312,10 @@ defmodule Blazie.OldShapesTest do
         [renamed_fact("ada", "height", 180, 2)]
       ])
 
-      {:ok, ledger} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.dir})
-      on_exit(fn -> Ledger.close(ctx.name) end)
+      {:ok, world} = World.open(ctx.name, store: {Store.File, dir: ctx.dir})
+      on_exit(fn -> World.close(ctx.name) end)
 
-      assert [%Fact{id: "ada"}] = Ledger.find_at(ledger, 2, value: 180)
+      assert [%Fact{id: "ada"}] = World.find_at(world, 2, value: 180)
     end
 
     test "translating one directly", _ctx do

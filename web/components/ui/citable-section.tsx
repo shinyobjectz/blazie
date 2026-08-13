@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
  * The section that replaced a table of verbs.
  *
  * The verbs were true and meant nothing to anybody who had not used this
- * already — "which ledgers → a snapshot name" explains a thing in its own
+ * already — "which worlds → a snapshot name" explains a thing in its own
  * vocabulary. Then the four became one: send Lua, get back what it returned.
  * So this is an exchange you could paste into a terminal, and the ideas come
  * out of the code rather than being asserted beside it.
@@ -46,7 +46,7 @@ const features = [
 const TRANSCRIPT = `# the whole api. send lua, get back what it returned.
 curl -X POST https://api.blazie.dev/run \\
   -H "Authorization: Bearer $BLAZIE_TOKEN" \\
-  -d '{"ledger":"main","source":"
+  -d '{"world":"main","source":"
         ada.height = 180
         ada.friend = grace
         return ada.height
@@ -57,7 +57,7 @@ curl -X POST https://api.blazie.dev/run \\
 # that name is the answer's receipt. it does not change again.
 curl -X POST https://api.blazie.dev/run \\
   -H "Authorization: Bearer $BLAZIE_TOKEN" \\
-  -d '{"ledger":"main","name":{"main":42},"source":"
+  -d '{"world":"main","name":{"main":42},"source":"
         return ada.friend.height
       "}'
 
@@ -66,7 +66,7 @@ curl -X POST https://api.blazie.dev/run \\
 # find things. lua is the query language, so counting needs nothing new.
 curl -X POST https://api.blazie.dev/run \\
   -H "Authorization: Bearer $BLAZIE_TOKEN" \\
-  -d '{"ledger":"main","source":"
+  -d '{"world":"main","source":"
         local n = 0
         for p in each { height = 180 } do n = n + 1 end
         return n

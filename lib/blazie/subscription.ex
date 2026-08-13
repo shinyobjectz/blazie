@@ -6,7 +6,7 @@ defmodule Blazie.Subscription do
   a later fact falling inside that read set is what makes the answer stale.
   This holds one of those read sets and pushes when it is touched.
 
-      {:ok, ref} = Subscription.watch([ledger], attribute: "height")
+      {:ok, ref} = Subscription.watch([world], attribute: "height")
       # ... a matching fact lands ...
       receive do: ({:blazie, ^ref, answer} -> answer.facts)
 
@@ -29,13 +29,13 @@ defmodule Blazie.Subscription do
 
   use GenServer
 
-  alias Blazie.{Fact, Formula, Ledger, Snapshot}
+  alias Blazie.{Fact, Formula, World, Snapshot}
 
   @type question :: keyword() | Formula.t()
   @type answer :: %{name: Snapshot.name(), facts: [Fact.t()] | [tuple()]}
 
   @doc "Watch a question over these ledgers. Answers are pushed to the caller."
-  @spec watch([Ledger.name() | Ledger.ref()], question(), keyword()) :: {:ok, reference()}
+  @spec watch([World.name() | World.ref()], question(), keyword()) :: {:ok, reference()}
   def watch(ledgers, question, opts \\ []) do
     to = Keyword.get(opts, :to, self())
     ref = make_ref()
@@ -94,13 +94,13 @@ defmodule Blazie.Subscription do
 
     Process.monitor(to)
 
-    # Watch the ledgers too, not only the subscriber. A ledger that closes
+    # Watch the ledgers too, not only the subscriber. A world that closes
     # while somebody is watching it used to arrive as a crash — the next
     # announcement tried to open a snapshot of something that had gone.
-    for ledger <- ledgers do
-      Registry.register(Blazie.Watchers, watched_name(ledger), ref)
+    for world <- ledgers do
+      Registry.register(Blazie.Watchers, watched_name(world), ref)
 
-      case GenServer.whereis(ledger) do
+      case GenServer.whereis(world) do
         pid when is_pid(pid) -> Process.monitor(pid)
         _ -> :ok
       end
@@ -130,7 +130,7 @@ defmodule Blazie.Subscription do
 
         {:noreply, %{state | reads: reads}}
       catch
-        # A ledger went between the announcement and the answer. The monitor
+        # A world went between the announcement and the answer. The monitor
         # will say so; there is nothing to report in the meantime.
         :exit, _ -> {:stop, :normal, state}
       end
@@ -139,7 +139,7 @@ defmodule Blazie.Subscription do
     end
   end
 
-  # Whoever asked has gone, or a ledger being watched has. Either way there is
+  # Whoever asked has gone, or a world being watched has. Either way there is
   # nothing left to answer — going quietly beats crashing on the next write.
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state), do: {:stop, :normal, state}
 
@@ -153,7 +153,7 @@ defmodule Blazie.Subscription do
   # a subscription re-runs whenever anything it read changes, so a writing
   # subscription would feed itself forever.
   defp answer({:lua, source}, snapshot) do
-    case Blazie.Lua.World.watching(source, snapshot) do
+    case Blazie.Lua.Binding.watching(source, snapshot) do
       {:ok, value, _staged, read} -> {value, read}
       {:error, refusal} -> {%{error: refusal}, []}
     end
@@ -176,7 +176,7 @@ defmodule Blazie.Subscription do
 
   defp reads_of(pattern, _snapshot) when is_list(pattern), do: [Enum.sort(pattern)]
 
-  # A ledger may be given by name or by the reference `open/1` handed back.
+  # A world may be given by name or by the reference `open/1` handed back.
   defp watched_name({:via, Registry, {Blazie.Registry, name}}), do: name
   defp watched_name(name), do: name
 end

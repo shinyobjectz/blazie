@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 
 /**
  * Mono text with a copy affordance. Anything a caller would paste — a snapshot
- * name, a fingerprint, a ledger — is one of these, so "you can cite this" is
+ * name, a fingerprint, a world — is one of these, so "you can cite this" is
  * something the page lets you do rather than something it claims.
  */
 export function Copyable({

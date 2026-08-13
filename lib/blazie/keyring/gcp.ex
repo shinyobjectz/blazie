@@ -32,7 +32,7 @@ defmodule Blazie.Keyring.GCP do
   reconciles against those every time it opens, so a key store rolled back to
   before an erasure is corrected on the next boot rather than trusted.
 
-  The thing that says somebody is gone belongs in the ledger. The thing that
+  The thing that says somebody is gone belongs in the world. The thing that
   must actually go does not.
 
   ## Being somebody

@@ -49,6 +49,9 @@ if config_env() == :prod do
   # Where ledgers keep their facts. The store is the seam, so moving this to
   # object storage later is a different module rather than a different path.
   config :blazie,
+    # LEDGER_DIR, not WORLD_DIR. The running node is configured with it and
+    # every fact it holds is under /data/ledgers; renaming the variable or the
+    # path would point a fresh node at an empty directory and call it healthy.
     ledger_dir: System.get_env("LEDGER_DIR") || "/data/ledgers",
     ledger_sync: System.get_env("LEDGER_SYNC") == "true",
     # Keys must outlive a deployment. Defaulting this inside the release would

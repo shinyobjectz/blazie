@@ -33,7 +33,7 @@ defmodule Blazie.Application do
   # Two conditions, because there are two ways for a drill to be wrong. Without a
   # target it has nothing to restore from and would fail every cadence saying so.
   # Without `:drill_every` nobody asked for one, and a drill nobody asked for is
-  # a process pulling a ledger down onto a node's scratch disk on a timer.
+  # a process pulling a world down onto a node's scratch disk on a timer.
   defp drill do
     case {Application.get_env(:blazie, :backup_target),
           Application.get_env(:blazie, :drill_every)} do
@@ -48,16 +48,16 @@ defmodule Blazie.Application do
     children =
       [
         {Registry, keys: :unique, name: Blazie.Registry},
-        # Who to tell when a ledger appends. Duplicate keys: many watchers per
-        # ledger. A plain Registry rather than Phoenix.PubSub keeps the core free
+        # Who to tell when a world appends. Duplicate keys: many watchers per
+        # world. A plain Registry rather than Phoenix.PubSub keeps the core free
         # of the surface's dependencies.
         {Registry, keys: :duplicate, name: Blazie.Watchers},
-        {DynamicSupervisor, name: Blazie.LedgerSupervisor, strategy: :one_for_one},
+        {DynamicSupervisor, name: Blazie.WorldSupervisor, strategy: :one_for_one},
         {DynamicSupervisor, name: Blazie.SubscriptionSupervisor, strategy: :one_for_one},
         # After the ledgers, because it reconciles against erasure tombstones
         # when it opens and those live in one.
         Blazie.Keyring,
-        # One engine for every ledger: it caches by formula and snapshot name,
+        # One engine for every world: it caches by formula and snapshot name,
         # and a name already says which ledgers it composed.
         {Blazie.Formula.Engine, name: Blazie.Formula.Engine},
         {Phoenix.PubSub, name: Blazie.PubSub},

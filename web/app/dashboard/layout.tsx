@@ -25,7 +25,7 @@ import { Wordmark } from "@/components/ui/wordmark"
 import { ClusterHeld, useClusterState } from "./cluster"
 
 /**
- * The console shell: sidebar, and a bar saying which ledger you are looking at.
+ * The console shell: sidebar, and a bar saying which world you are looking at.
  *
  * Signing in is checked once, here, rather than on each page.
  */
@@ -72,22 +72,22 @@ export default function DashboardLayout({
             <SidebarTrigger />
             <Separator orientation="vertical" className="h-4" />
 
-            {cluster.who.ledgers.length === 0 ? (
+            {cluster.who.worlds.length === 0 ? (
               <span className="font-mono text-xs text-muted-foreground">
-                no ledgers yet
+                no worlds yet
               </span>
             ) : (
               <DropdownMenu>
                 <DropdownMenuTrigger className="font-mono inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-white transition-colors hover:border-white/40 hover:bg-white/5">
-                  {cluster.ledger ?? "choose a ledger"}
+                  {cluster.world ?? "choose a world"}
                   <ChevronDown className="size-3.5 text-muted-foreground" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="font-mono text-xs">
-                  {cluster.who.ledgers.map((one) => (
+                  {cluster.who.worlds.map((one) => (
                     <DropdownMenuItem key={one} onSelect={() => cluster.choose(one)}>
                       <Check
                         className={
-                          one === cluster.ledger
+                          one === cluster.world
                             ? "size-3.5 text-flame"
                             : "size-3.5 opacity-0"
                         }
@@ -104,7 +104,7 @@ export default function DashboardLayout({
             {cluster.at ? (
               <span className="font-mono ml-auto shrink-0 truncate text-xs text-muted-foreground">
                 {Object.entries(cluster.at)
-                  .map(([ledger, tx]) => `${ledger}@${tx}`)
+                  .map(([world, tx]) => `${world}@${tx}`)
                   .join(" ")}
               </span>
             ) : null}

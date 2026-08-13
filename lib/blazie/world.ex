@@ -1,18 +1,18 @@
-defmodule Blazie.Ledger do
+defmodule Blazie.World do
   @moduledoc """
   The append-only sequence facts go into, and the boundary that owns them
   (`led`).
 
-  A ledger is readable, forkable and deletable on its own; a tenant is one or
-  more ledgers. Sovereignty is which ledger a fact was written to, decided once
+  A world is readable, forkable and deletable on its own; a tenant is one or
+  more ledgers. Sovereignty is which world a fact was written to, decided once
   at write time — there is no predicate to remember and no shared table to
   accidentally scan.
 
   Nothing here is rewritten: a later fact corrects an earlier one, and the only
   destruction is erasure, which destroys a key rather than a segment.
 
-  Where the facts actually live is a `Blazie.Store`, chosen when the ledger
-  is opened. The ledger is the seam that hides it, so an LSM on object storage
+  Where the facts actually live is a `Blazie.Store`, chosen when the world
+  is opened. The world is the seam that hides it, so an LSM on object storage
   later changes nothing above this line — and nothing above this line has ever
   needed to ask.
   """
@@ -31,7 +31,7 @@ defmodule Blazie.Ledger do
 
   # ── opening ────────────────────────────────────────────────────────────────
   #
-  # A ledger's name is any term, not an atom. Tenants arrive at runtime, and
+  # A world's name is any term, not an atom. Tenants arrive at runtime, and
   # atoms are never collected — a name taken from a request would leak the atom
   # table until the node fell over.
 
@@ -45,13 +45,13 @@ defmodule Blazie.Ledger do
   end
 
   @doc """
-  Open a ledger under this name, or hand back the one already open.
+  Open a world under this name, or hand back the one already open.
 
   Pass `store:` to say where its facts live. The default keeps them in memory,
-  which is right for a ledger nobody needs to survive a restart and wrong for
+  which is right for a world nobody needs to survive a restart and wrong for
   every other one:
 
-      Ledger.open({:tenant, 7}, store: {Store.File, dir: "priv/ledgers"})
+      World.open({:tenant, 7}, store: {Store.File, dir: "priv/ledgers"})
   """
   @spec open(name(), keyword()) :: {:ok, ref()} | {:error, Cluster.refusal()}
   def open(name, opts \\ []) do
@@ -61,22 +61,22 @@ defmodule Blazie.Ledger do
     end
   end
 
-  # The claim is only ever made *for the ledger process*, never for whoever is
+  # The claim is only ever made *for the world process*, never for whoever is
   # opening. An earlier version claimed as the opener and swapped afterwards,
   # which left a window where a concurrent open could take the name for its own
-  # transient pid — and a later caller then found the ledger owned by something
-  # that was not a ledger. It failed about one run in twelve.
+  # transient pid — and a later caller then found the world owned by something
+  # that was not a world. It failed about one run in twelve.
   defp claim_and_start(name, opts) do
     if Cluster.owner(name) do
       {:error, Cluster.refusal(name)}
     else
       child = {__MODULE__, [name: name] ++ opts}
 
-      case DynamicSupervisor.start_child(Blazie.LedgerSupervisor, child) do
+      case DynamicSupervisor.start_child(Blazie.WorldSupervisor, child) do
         {:ok, pid} ->
           claim_for(name, pid)
 
-        # Another process on this node won the race to start the same ledger.
+        # Another process on this node won the race to start the same world.
         # Its claim is the right one.
         {:error, {:already_started, _pid}} ->
           {:ok, via(name)}
@@ -94,8 +94,8 @@ defmodule Blazie.Ledger do
 
       :no ->
         # Claimed elsewhere between the check and the start. Undo what we
-        # started rather than leave an unclaimed ledger running.
-        DynamicSupervisor.terminate_child(Blazie.LedgerSupervisor, pid)
+        # started rather than leave an unclaimed world running.
+        DynamicSupervisor.terminate_child(Blazie.WorldSupervisor, pid)
         {:error, Cluster.refusal(name)}
     end
   end
@@ -108,7 +108,7 @@ defmodule Blazie.Ledger do
   end
 
   @doc """
-  Close a ledger, and do not return until the name is free.
+  Close a world, and do not return until the name is free.
 
   Terminating a child is synchronous but the registry drops the name on a
   monitor message, which is not — so closing and immediately reopening would
@@ -123,7 +123,7 @@ defmodule Blazie.Ledger do
     case Registry.lookup(Blazie.Registry, name) do
       [{pid, _}] ->
         ref = Process.monitor(pid)
-        DynamicSupervisor.terminate_child(Blazie.LedgerSupervisor, pid)
+        DynamicSupervisor.terminate_child(Blazie.WorldSupervisor, pid)
 
         receive do
           {:DOWN, ^ref, :process, ^pid, _reason} -> await_free(name)
@@ -147,27 +147,27 @@ defmodule Blazie.Ledger do
     end
   end
 
-  @doc "Every ledger currently open."
-  @spec open_ledgers() :: [name()]
-  def open_ledgers do
+  @doc "Every world currently open."
+  @spec open_worlds() :: [name()]
+  def open_worlds do
     Registry.select(Blazie.Registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
   end
 
   @doc """
   Whether anything is already keeping facts under this name.
 
-  Opening a ledger creates it, which is the right default everywhere inside the
+  Opening a world creates it, which is the right default everywhere inside the
   node and the wrong one at the door: a caller claiming a name needs to know
-  whether it is taking somebody's ledger or making its own, and `open/1` cannot
+  whether it is taking somebody's world or making its own, and `open/1` cannot
   tell it apart because both look like success.
 
-  Open covers a ledger in memory; the file covers one that exists but has not
+  Open covers a world in memory; the file covers one that exists but has not
   been opened since the node booted. A memory store has no file, so an unopened
-  ledger is unrecoverable there and correctly reads as absent.
+  world is unrecoverable there and correctly reads as absent.
   """
   @spec exists?(name()) :: boolean()
   def exists?(name) do
-    name in open_ledgers() or
+    name in open_worlds() or
       case Application.get_env(:blazie, :ledger_dir) do
         nil -> false
         dir -> File.exists?(Path.join(dir, Store.File.filename(name)))
@@ -175,12 +175,12 @@ defmodule Blazie.Ledger do
   end
 
   @doc """
-  Where a ledger keeps its facts when nobody said.
+  Where a world keeps its facts when nobody said.
 
   Memory when nothing is configured, which is right for a test and wrong for
   everything else — so a deployment that sets `:ledger_dir` gets the file store
   without anyone having to remember to ask. A deployment found this the hard
-  way: the config existed, nothing read it, and every ledger in production was
+  way: the config existed, nothing read it, and every world in production was
   in memory.
   """
   @spec default_store() :: {module(), keyword()}
@@ -197,14 +197,14 @@ defmodule Blazie.Ledger do
     end
   end
 
-  @doc "The address of a ledger by name, whether or not it is open yet."
+  @doc "The address of a world by name, whether or not it is open yet."
   @spec via(name()) :: ref()
   def via(name), do: {:via, Registry, {Blazie.Registry, name}}
 
   @doc """
-  What a ledger is called, given its address.
+  What a world is called, given its address.
 
-  An address is where a ledger is; a name is what it is called. Everything a
+  An address is where a world is; a name is what it is called. Everything a
   caller holds or stores is the name, because an address is a live thing that
   means nothing after a restart and nothing at all on paper.
   """
@@ -214,8 +214,8 @@ defmodule Blazie.Ledger do
   def name_of(name), do: name
 
   defp pid_has_no_name do
-    "A ledger's name cannot be recovered from a bare pid. Open it by name — " <>
-      "Ledger.open/2 hands back an address that carries one."
+    "A world's name cannot be recovered from a bare pid. Open it by name — " <>
+      "World.open/2 hands back an address that carries one."
   end
 
   # ── writing ────────────────────────────────────────────────────────────────
@@ -223,25 +223,25 @@ defmodule Blazie.Ledger do
   @doc """
   Append facts, and return the transaction they landed in.
 
-  The transaction is the ledger's name for that moment, so a writer can read
+  The transaction is the world's name for that moment, so a writer can read
   its own write without polling — the number it gets back is the point the
   facts are visible at.
 
   Pass `check:` to refuse a write that would leave the vocabulary inconsistent.
-  The ledger holds the one serialized path every write goes through, which is
+  The world holds the one serialized path every write goes through, which is
   the only reason a check belongs here — but that is only true of a check it
   actually runs:
 
-      # Serialized. Run inside the ledger, on the facts the write lands on.
-      Ledger.append(ledger, assertions, check: &Attribute.check/2)
+      # Serialized. Run inside the world, on the facts the write lands on.
+      World.append(world, assertions, check: &Attribute.check/2)
 
       # Advisory. Run in the caller, before the call, against whatever it had.
-      Ledger.append(ledger, assertions, check: &Attribute.check(&1, known))
+      World.append(world, assertions, check: &Attribute.check(&1, known))
 
   The arity is the difference and it is load-bearing. An arity-1 check runs in
   the caller and cannot serialize anything: two writers both pass it, then both
   append, and a uniqueness check admits both. An arity-2 check is handed the
-  ledger's own facts inside the one process that appends, so what it checked is
+  world's own facts inside the one process that appends, so what it checked is
   what it wrote. The arity-1 form is kept because a caller that wants to know
   before it asks is a fair thing to want — it is not a constraint.
 
@@ -250,31 +250,31 @@ defmodule Blazie.Ledger do
   facts live, and nothing running there may take them down.
   """
   @spec append(ref(), [assertion()], keyword()) :: {:ok, pos_integer()} | {:error, term()}
-  def append(ledger, assertions, opts \\ []) when is_list(assertions) do
+  def append(world, assertions, opts \\ []) when is_list(assertions) do
     case Keyword.get(opts, :check) do
-      nil -> GenServer.call(ledger, {:append, assertions})
-      check when is_function(check, 2) -> GenServer.call(ledger, {:append, assertions, check})
-      check when is_function(check, 1) -> advisory_append(ledger, assertions, check)
+      nil -> GenServer.call(world, {:append, assertions})
+      check when is_function(check, 2) -> GenServer.call(world, {:append, assertions, check})
+      check when is_function(check, 1) -> advisory_append(world, assertions, check)
     end
   end
 
   # Checked in the caller, then appended — so anything landing in between is
   # not accounted for. Named for what it is.
-  defp advisory_append(ledger, assertions, check) do
+  defp advisory_append(world, assertions, check) do
     case check.(assertions) do
-      :ok -> GenServer.call(ledger, {:append, assertions})
+      :ok -> GenServer.call(world, {:append, assertions})
       {:error, refusals} -> {:error, refusals}
     end
   end
 
   # ── reading ────────────────────────────────────────────────────────────────
 
-  @doc "The transaction this ledger is currently at."
+  @doc "The transaction this world is currently at."
   @spec tx(ref()) :: non_neg_integer()
-  def tx(ledger), do: GenServer.call(ledger, :tx)
+  def tx(world), do: GenServer.call(world, :tx)
 
   @doc """
-  How many facts this ledger is holding in memory.
+  How many facts this world is holding in memory.
 
   Bounded by `resident:`, with two honest caveats. It is a floor rounded up to
   a transaction boundary, because a transaction is evicted whole or not at all
@@ -283,7 +283,7 @@ defmodule Blazie.Ledger do
   store, the store *is* the memory.
   """
   @spec resident(ref()) :: non_neg_integer()
-  def resident(ledger), do: GenServer.call(ledger, :resident)
+  def resident(world), do: GenServer.call(world, :resident)
 
   @doc """
   Every fact recorded at or before `tx`, oldest first.
@@ -292,7 +292,7 @@ defmodule Blazie.Ledger do
   only on `tx`, so it is the same answer forever.
   """
   @spec facts_at(ref(), non_neg_integer()) :: [Fact.t()]
-  def facts_at(ledger, tx), do: GenServer.call(ledger, {:facts_at, tx})
+  def facts_at(world, tx), do: GenServer.call(world, {:facts_at, tx})
 
   @doc """
   The facts matching a pattern at or before `tx`, oldest first.
@@ -300,23 +300,23 @@ defmodule Blazie.Ledger do
   Answered here rather than by scanning what `facts_at/2` returns, for two
   reasons. The obvious one is that a keyed lookup beats a scan. The quieter one
   is that filtering in this process means only the answer crosses the process
-  boundary — asking a large ledger a small question used to copy all of it.
+  boundary — asking a large world a small question used to copy all of it.
   """
   @spec find_at(ref(), non_neg_integer(), keyword()) :: [Fact.t()]
-  def find_at(ledger, tx, pattern) do
-    # Checked here, in the caller's process, because the ledger is where
+  def find_at(world, tx, pattern) do
+    # Checked here, in the caller's process, because the world is where
     # everybody's facts live and a read must never be able to take it down.
     Fact.fields!(pattern)
-    GenServer.call(ledger, {:find_at, tx, pattern})
+    GenServer.call(world, {:find_at, tx, pattern})
   end
 
   @doc "Facts exactly as stored, sealed values and all."
   @spec raw_at(ref(), non_neg_integer()) :: [Fact.t()]
-  def raw_at(ledger, tx), do: GenServer.call(ledger, {:raw_at, tx})
+  def raw_at(world, tx), do: GenServer.call(world, {:raw_at, tx})
 
   @doc "What the store had to do to open. Observability, not vocabulary."
   @spec store_stats(ref()) :: map()
-  def store_stats(ledger), do: GenServer.call(ledger, :store_stats)
+  def store_stats(world), do: GenServer.call(world, :store_stats)
 
   # ── server ─────────────────────────────────────────────────────────────────
 
@@ -554,7 +554,7 @@ defmodule Blazie.Ledger do
   defp oldest_of(facts), do: facts |> Enum.map(& &1.tx) |> Enum.min()
 
   # Tell whoever is watching. Only sends — a watcher that called back into this
-  # ledger while it was still replying would deadlock, so it never does.
+  # world while it was still replying would deadlock, so it never does.
   defp run_check(check, assertions, facts) do
     check.(assertions, facts)
   rescue

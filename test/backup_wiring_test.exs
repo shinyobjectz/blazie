@@ -4,25 +4,25 @@ defmodule Blazie.BackupWiringTest do
 
   This is the test the deployment taught us to write. Four separate components
   were built, tested, documented and never wired into the supervision tree, and
-  every one of them looked finished — the ledger store, the formula engine, the
+  every one of them looked finished — the world store, the formula engine, the
   job runner, and vitals. A backup is the worst possible member of that set: it
   is invisible when it does nothing, and the day you find out is the day the
   disk is already gone.
   """
   use ExUnit.Case, async: false
 
-  alias Blazie.{Backup, Job, Ledger, Snapshot}
+  alias Blazie.{Backup, Job, World, Snapshot}
 
   describe "the runner is a child, not a module somebody must remember" do
     setup do
       root = Path.join(System.tmp_dir!(), "lr_wiring_#{System.unique_integer([:positive])}")
       on_exit(fn -> File.rm_rf!(root) end)
-      on_exit(fn -> Ledger.close(Backup.ledger()) end)
+      on_exit(fn -> World.close(Backup.world()) end)
 
       %{root: root}
     end
 
-    test "starting it seeds its ledger and declares the job with a cadence", ctx do
+    test "starting it seeds its world and declares the job with a cadence", ctx do
       start_supervised!(
         {Backup,
          every: 900,
@@ -33,8 +33,8 @@ defmodule Blazie.BackupWiringTest do
 
       assert Process.alive?(Process.whereis(Backup.Runner))
 
-      {:ok, ledger} = Ledger.open(Backup.ledger())
-      snapshot = Snapshot.open([ledger])
+      {:ok, world} = World.open(Backup.world())
+      snapshot = Snapshot.open([world])
 
       assert Snapshot.value(snapshot, "backup", "is") == "job"
       assert Snapshot.value(snapshot, "backup", "every") == 900
@@ -68,19 +68,19 @@ defmodule Blazie.BackupWiringTest do
          target: {Backup.Target.Directory, root: remote}}
       )
 
-      # The backup's own ledger is in memory here, so give it a file-backed one
+      # The backup's own world is in memory here, so give it a file-backed one
       # to find.
       name = {:wiring, System.unique_integer([:positive])}
-      {:ok, ledger} = Ledger.open(name, store: {Blazie.Store.File, dir: ledgers})
-      on_exit(fn -> Ledger.close(name) end)
-      {:ok, _} = Ledger.append(ledger, Blazie.Attribute.seed())
+      {:ok, world} = World.open(name, store: {Blazie.Store.File, dir: ledgers})
+      on_exit(fn -> World.close(name) end)
+      {:ok, _} = World.append(world, Blazie.Attribute.seed())
 
       {:ok, _} = Job.Runner.tick(Backup.Runner, 1000)
 
       # The tick starts a task; wait for the fact that says it finished.
       assert eventually(fn ->
                Snapshot.value(
-                 Snapshot.open([Ledger.via(Backup.ledger())]),
+                 Snapshot.open([World.via(Backup.world())]),
                  "backup",
                  "copied_bytes"
                )

@@ -24,13 +24,13 @@ import { EVERY_ROW, type Row, columnsOf, useLua } from "./use-lua"
  * The data, as a table. The first thing anybody wants from a backend.
  *
  * Columns are the union of every field present rather than a schema, because
- * there is no schema to read — two entities in one ledger can hold entirely
+ * there is no schema to read — two entities in one world can hold entirely
  * different fields and both are correct. A blank cell means the entity does not
  * have that field, which is different from holding nothing, and the table says
  * so rather than printing an empty string.
  */
 export default function Data() {
-  const { ledger } = useCluster()
+  const { world } = useCluster()
   const [narrow, setNarrow] = useState("")
   const { value, error, running, retry } = useLua<Row[]>(EVERY_ROW)
 
@@ -45,14 +45,14 @@ export default function Data() {
     )
   }, [rows, narrow])
 
-  if (!ledger) {
+  if (!world) {
     return (
       <>
-        <PageHead title="data">nothing to show until there is a ledger.</PageHead>
-        <Nothing icon={Database} title="no ledger yet">
-          a ledger is where your data lives.{" "}
+        <PageHead title="data">nothing to show until there is a world.</PageHead>
+        <Nothing icon={Database} title="no world yet">
+          a world is where your data lives.{" "}
           <Link
-            href="/dashboard/ledgers"
+            href="/dashboard/worlds"
             className="text-white underline decoration-white/30 underline-offset-4"
           >
             make one
@@ -76,7 +76,7 @@ export default function Data() {
           />
         }
       >
-        everything in <span className="font-mono text-white/80">{ledger}</span>.
+        everything in <span className="font-mono text-white/80">{world}</span>.
         columns are whatever fields are actually present — there is no schema to
         read, and two rows may hold entirely different ones.
       </PageHead>
@@ -130,7 +130,7 @@ export default function Data() {
  * The Lua this page ran, shown at the bottom.
  *
  * Not decoration: it is the answer to "how would I do that myself", and it is
- * the same six lines whether the ledger holds three rows or three million.
+ * the same six lines whether the world holds three rows or three million.
  */
 function Chunk() {
   return (
@@ -168,7 +168,7 @@ function Cell({ value }: { value: Value }) {
 
 function Empty() {
   return (
-    <Nothing icon={Table2} title="this ledger is empty">
+    <Nothing icon={Table2} title="this world is empty">
       write the first thing into it from the{" "}
       <Link
         href="/dashboard/editor"

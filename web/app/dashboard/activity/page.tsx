@@ -15,15 +15,15 @@ import { useCluster } from "../cluster"
  * What the node has been doing.
  *
  * There is no health endpoint and no metrics store. The jobs that watch the
- * node write their readings into ordinary ledgers, so this page is the same Lua
+ * node write their readings into ordinary worlds, so this page is the same Lua
  * as every other page — pointed at `$vitals` instead of at yours.
  *
- * Which is also why each panel runs on its own: they are separate ledgers, and
+ * Which is also why each panel runs on its own: they are separate worlds, and
  * one this caller was not granted must not blank the others.
  */
 
 type Panel = {
-  ledger: string
+  world: string
   entity: string
   title: string
   blurb: string
@@ -32,37 +32,37 @@ type Panel = {
 
 const PANELS: Panel[] = [
   {
-    ledger: "$vitals",
+    world: "$vitals",
     entity: "vitals",
     title: "the node",
     blurb: "one reading per cadence. the older ones never went anywhere.",
     readings: [
       { label: "memory", field: "memory_bytes", as: showBytes },
-      { label: "open ledgers", field: "open_ledgers", as: showCount },
+      { label: "open worlds", field: "open_ledgers", as: showCount },
       { label: "processes", field: "processes", as: showCount },
       { label: "subscriptions", field: "subscriptions", as: showCount },
     ],
   },
   {
-    ledger: "$backup",
+    world: "$backup",
     entity: "backup",
     title: "what is copied",
     blurb: "the last run's report, written by the job that ran it.",
     readings: [
       { label: "copied", field: "copied_bytes", as: showBytes },
       { label: "segments", field: "copied_segments", as: showCount },
-      { label: "held ledgers", field: "held_ledgers", as: showCount },
+      { label: "held worlds", field: "held_ledgers", as: showCount },
     ],
   },
   {
-    ledger: "$drill",
+    world: "$drill",
     entity: "drill",
     title: "last proven restore",
     blurb:
       "a backup nobody restored is a hope. this moves only when one actually did.",
     readings: [
       { label: "proven at", field: "proven_at", as: showWhen },
-      { label: "ledgers restored", field: "restored_ledgers", as: showCount },
+      { label: "worlds restored", field: "restored_ledgers", as: showCount },
     ],
   },
 ]
@@ -74,16 +74,16 @@ export default function Activity() {
     <>
       <PageHead title="activity">
         there is no health endpoint here. the jobs that watch the node write what
-        they saw into ledgers, and this reads them with the same lua as anything
+        they saw into worlds, and this reads them with the same lua as anything
         else.
       </PageHead>
 
       <div className="grid gap-x-10 gap-y-9 sm:grid-cols-2 lg:grid-cols-3">
         {PANELS.map((panel) => (
           <PanelView
-            key={panel.ledger}
+            key={panel.world}
             panel={panel}
-            granted={who.ledgers.includes(panel.ledger)}
+            granted={who.worlds.includes(panel.world)}
           />
         ))}
       </div>
@@ -105,7 +105,7 @@ function PanelView({ panel, granted }: { panel: Panel; granted: boolean }) {
 for field, value in pairs(${panel.entity}) do out[field] = value end
 return out`
 
-    run(panel.ledger, source)
+    run(panel.world, source)
       .then((result) => live && setHeld((result.value ?? {}) as Record<string, Value>))
       .catch((thrown) => live && setError(thrown))
 
@@ -122,13 +122,13 @@ return out`
         {panel.title}
       </h3>
       <p className="font-mono mt-1 text-xs text-muted-foreground">
-        {panel.ledger}
+        {panel.world}
       </p>
 
       {!granted ? (
         <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted-foreground">
           this caller was not granted{" "}
-          <span className="font-mono text-white/70">{panel.ledger}</span>. a
+          <span className="font-mono text-white/70">{panel.world}</span>. a
           reach is a list, so this is a grant nobody wrote.
         </p>
       ) : error ? (

@@ -4,7 +4,7 @@ defmodule Blazie.Attribute do
 
   An attribute is itself a defined thing, with facts describing it — which is
   why schema and vocabulary need no words of their own. Defining `:height` is
-  writing facts about `:height`, in the same ledger, in the same row shape.
+  writing facts about `:height`, in the same world, in the same row shape.
 
   There is no attribute-versus-relation distinction: a value that is a
   literal reads as an attribute, a value that is another id reads as a
@@ -20,16 +20,16 @@ defmodule Blazie.Attribute do
   ## Checking
 
   A write that names an undefined attribute is refused, and the refusal carries
-  what would fix it. The ledger applies the check; it does not know what a
+  what would fix it. The world applies the check; it does not know what a
   vocabulary is.
 
       known = Attribute.known(snapshot)
-      Ledger.append(ledger, assertions, check: &Attribute.check(&1, known))
+      World.append(world, assertions, check: &Attribute.check(&1, known))
 
   Hand it the snapshot rather than the names taken from one, and the same
   check also asks what a redeclaration would do to the facts already written:
 
-      Ledger.append(ledger, assertions, check: &Attribute.check(&1, snapshot))
+      World.append(world, assertions, check: &Attribute.check(&1, snapshot))
 
   ## Redeclaring
 
@@ -106,7 +106,7 @@ defmodule Blazie.Attribute do
   @doc "Every attribute defined in this snapshot."
   @spec known(Snapshot.t()) :: MapSet.t(String.t())
   def known(source) do
-    # The root is always known. It defines itself, so a ledger that has never
+    # The root is always known. It defines itself, so a world that has never
     # been written to still has to accept the writes that seed it — otherwise
     # nothing could ever be defined anywhere.
     source
@@ -137,10 +137,10 @@ defmodule Blazie.Attribute do
     do: check(assertions, Snapshot.facts(snapshot))
 
   def check(assertions, facts) when is_list(facts) do
-    # Given facts rather than a snapshot, this is what the ledger runs inside
+    # Given facts rather than a snapshot, this is what the world runs inside
     # itself, against the state the write is about to land on. Given a snapshot
     # it is the same check one transaction earlier — correct for a caller that
-    # wants to know before it asks, and not a substitute for the one the ledger
+    # wants to know before it asks, and not a substitute for the one the world
     # runs, because only that one is serialised with the append.
     with :ok <- check(assertions, known(facts)) do
       assertions
@@ -211,7 +211,7 @@ defmodule Blazie.Attribute do
   #
   # Everything above works on a list. A snapshot is materialised once on the way
   # in, so the same check runs in the caller — which holds a snapshot — or
-  # inside the ledger, which holds its own facts and cannot ask itself for them
+  # inside the world, which holds its own facts and cannot ask itself for them
   # without calling into the process it is already inside.
 
   defp facts_of(%Snapshot{} = snapshot), do: Snapshot.facts(snapshot)
@@ -362,8 +362,9 @@ defmodule Blazie.Attribute do
       attribute: name,
       problem: :undefined,
       repair:
-        "#{inspect(name)} is not an attribute here. Define it first: " <>
-          "Ledger.append(ledger, Attribute.define(#{inspect(name)}))"
+        "#{inspect(name)} is not a field here, and nothing in this write declares it. " <>
+          "Assigning it declares it — `something.#{name} = <a value>` in a chunk — so " <>
+          "reaching this means the declaration was dropped on the way in."
     }
   end
 end

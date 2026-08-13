@@ -1,21 +1,21 @@
 defmodule Blazie.Store do
   @moduledoc """
-  Where a ledger's facts actually live.
+  Where a world's facts actually live.
 
-  A ledger is an append-only sequence, so a store only has to do three things:
+  A world is an append-only sequence, so a store only has to do three things:
   take a transaction's facts, hand them all back in order, and close. That is a
   small enough surface that a file on disk and an LSM on object storage
   implement the same three functions, which is what keeps the storage decision
   a configuration line rather than a rewrite.
 
-  Nothing above this line knows which one is in use. The ledger is the seam.
+  Nothing above this line knows which one is in use. The world is the seam.
   """
 
   alias Blazie.Fact
 
   @type state :: term()
 
-  @doc "Open storage for a ledger, replaying whatever is already there."
+  @doc "Open storage for a world, replaying whatever is already there."
   @callback open(name :: term(), opts :: keyword()) :: {:ok, state()}
 
   @doc "Record one transaction's facts. Returning means recorded."
@@ -32,7 +32,7 @@ defmodule Blazie.Store.Memory do
   @moduledoc """
   Facts in the process holding them. Fast, isolated, and gone on close.
 
-  Right for tests and for a ledger nobody needs to survive a restart. Wrong for
+  Right for tests and for a world nobody needs to survive a restart. Wrong for
   anything else, which is why closing one is erasure by accident.
   """
 
@@ -43,7 +43,7 @@ defmodule Blazie.Store.Memory do
 
   # Newest first, so appending is O(batch) rather than O(everything). `++`
   # copies its left operand, so the obvious `facts ++ new` re-copies the whole
-  # history on every write and makes a ledger quadratic in its own length.
+  # history on every write and makes a world quadratic in its own length.
   @impl true
   def append(facts, new), do: {:ok, Enum.reverse(new) ++ facts}
 
@@ -56,7 +56,7 @@ end
 
 defmodule Blazie.Store.File do
   @moduledoc """
-  An append-only file, which is what a ledger already is.
+  An append-only file, which is what a world already is.
 
   One record per transaction, so atomicity is real rather than implied:
 
@@ -99,15 +99,15 @@ defmodule Blazie.Store.File do
   rather than a store that reads from disk — and three measured consequences
   follow, none of which the shape above admits to.
 
-  Memory is the binding limit: 241 bytes per fact live, 87% of it the ledger's
-  three sort orders. About a million facts per ledger before stalls bite, six
+  Memory is the binding limit: 241 bytes per fact live, 87% of it the world's
+  three sort orders. About a million facts per world before stalls bite, six
   million before a 4GB box does.
 
-  `resident:` therefore bounds what the *ledger* keeps and not what the store
+  `resident:` therefore bounds what the *world* keeps and not what the store
   keeps, so a bound of a thousand on a hundred thousand facts still holds a
   hundred thousand here — it saves 63% of the bytes rather than 99%.
 
-  And a fact the ledger evicted is answered by re-scanning this list with no
+  And a fact the world evicted is answered by re-scanning this list with no
   index, which measured a thousand times slower than an indexed read. The one
   lever against the memory wall is the lever that breaks reads.
 
@@ -200,10 +200,10 @@ defmodule Blazie.Store.File do
   @impl true
   def close(state), do: :file.close(state.io)
 
-  @doc "Where a ledger's facts are kept, for a name that may be any term."
+  @doc "Where a world's facts are kept, for a name that may be any term."
   @spec filename(term()) :: String.t()
   def filename(name) do
-    name |> :erlang.term_to_binary() |> Base.url_encode64(padding: false) |> Kernel.<>(".ledger")
+    name |> :erlang.term_to_binary() |> Base.url_encode64(padding: false) |> Kernel.<>(".world")
   end
 
   defp scan(<<size::32, crc::32, payload::binary-size(size), rest::binary>>, acc) do
@@ -296,7 +296,7 @@ defmodule Blazie.Store.File do
   # while its checkpoint survived, a copy truncated somewhere. Believing it
   # then asked for a negative number of bytes and raised from inside `init/1`,
   # after `read_checkpoint/1`'s careful fallback had already returned, so the
-  # fallback never fired and the ledger would not open at all.
+  # fallback never fired and the world would not open at all.
   #
   # A checkpoint is only ever an optimisation, and the log is whole either way.
   # So a checkpoint that cannot be about this log is not repaired or trusted

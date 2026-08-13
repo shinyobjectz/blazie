@@ -9,7 +9,7 @@ defmodule Blazie.Keyring do
   fact beside the ciphertext.
 
   That placement is the whole design. A wrapped key is noise without the KEK,
-  so it can live in the ledger with everything else — it persists, checkpoints
+  so it can live in the world with everything else — it persists, checkpoints
   and backs up along with the facts it belongs to, and needs no store of its
   own. Which means **nothing durable is held in memory**, and the defect this
   replaces cannot happen: the previous keyring held the only copy of every key
@@ -79,7 +79,7 @@ defmodule Blazie.Keyring do
 
   Run when the keyring opens. A key store restored from before an erasure has
   keys in it that should not exist, and the tombstones are what say so — the
-  ledger is the thing you back up religiously and never roll back on its own,
+  world is the thing you back up religiously and never roll back on its own,
   so it is the right place to keep the record.
   """
   @spec reconcile() :: :ok
@@ -112,7 +112,7 @@ defmodule Blazie.Keyring do
     {module, ring_opts} = Keyword.get(opts, :keyring, configured())
 
     {:ok, ring} = module.open(ring_opts)
-    # Reconciled after init returns, because opening a ledger needs the rest of
+    # Reconciled after init returns, because opening a world needs the rest of
     # the tree to be up.
     {:ok, %{module: module, ring: ring, cache: %{}}, {:continue, :reconcile}}
   end
@@ -181,7 +181,7 @@ defmodule Blazie.Keyring do
   rescue
     _ -> state
   catch
-    # A dead ledger supervisor exits rather than raising, so both have to be
+    # A dead world supervisor exits rather than raising, so both have to be
     # caught. A keyring that cannot read tombstones must still open — it just
     # has not reconciled, and reconcile/0 can be called again.
     :exit, _ -> state

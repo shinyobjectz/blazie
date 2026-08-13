@@ -5,12 +5,12 @@ defmodule Blazie.Backup do
   Being a job is not a technicality. It means a backup has a cadence, records
   what it copied as ordinary facts, records a failure as an ordinary fact, and
   is asked "when did this last succeed" with `Job.last_run/2` like anything
-  else. None of that had to be built: the ledger already is the scheduler, the
+  else. None of that had to be built: the world already is the scheduler, the
   history, and the alerting surface.
 
   ## Only what changed crosses the wire
 
-  A ledger is append-only, so a copy is a range of bytes and the next copy
+  A world is append-only, so a copy is a range of bytes and the next copy
   starts where the last one stopped. Segments are named for the range they
   hold, so a restore is a sort and a concatenation, and the remote never needs
   to support appending. The cost of a backup is what changed, not what exists —
@@ -37,7 +37,7 @@ defmodule Blazie.Backup do
   reconciles against erasure tombstones every time it opens, and those are
   facts, so they are in the backup too.
 
-  ## The backup's own ledger is always one transaction behind
+  ## The backup's own world is always one transaction behind
 
   A run copies, and then `Job.run/4` writes what it copied — so the facts
   describing a run land after the copy that would have carried them, and
@@ -45,7 +45,7 @@ defmodule Blazie.Backup do
   catches it up and creates the same lag again.
 
   This is stated rather than special-cased. Teaching `verify` to ignore one
-  ledger would be teaching it to ignore the one that says whether backups are
+  world would be teaching it to ignore the one that says whether backups are
   happening, and a check with an exception in it is a check nobody trusts.
   Anything else in that list is real.
 
@@ -61,10 +61,13 @@ defmodule Blazie.Backup do
   cannot reach them.
   """
 
-  alias Blazie.{Attribute, Job, Ledger, Store}
+  alias Blazie.{Attribute, Job, World, Store}
 
   @id "backup"
-  @ledger "$backup"
+  @world "$backup"
+  # Still `ledgers/` after the rename to `world`: every segment already in the
+  # bucket lives under this prefix, so moving it would strand every backup
+  # anybody has taken. A key prefix is storage layout, not vocabulary.
   @ledgers_prefix "ledgers/"
   @keys_prefix "keys/"
 
@@ -86,9 +89,9 @@ defmodule Blazie.Backup do
       Attribute.define("held_bytes", answers: "integer", cardinality: "many")
   end
 
-  @doc "The ledger a backup's own history is written to."
-  @spec ledger() :: String.t()
-  def ledger, do: @ledger
+  @doc "The world a backup's own history is written to."
+  @spec world() :: String.t()
+  def world, do: @world
 
   @doc "Declare the backup as a job, with how often to run."
   @spec declare(keyword()) :: [tuple()]
@@ -99,7 +102,7 @@ defmodule Blazie.Backup do
 
   A refusal from the target is raised rather than returned, because `Job.run/4`
   turns a raise into a `failed` fact — so a target that is unreachable becomes
-  a question the ledger can answer instead of a line in a log.
+  a question the world can answer instead of a line in a log.
   """
   @spec job(keyword()) :: Job.t()
   def job(opts \\ []) do
@@ -192,7 +195,7 @@ defmodule Blazie.Backup do
         files
         |> Enum.map(fn file ->
           at = Map.get(held, file, 0)
-          %{ledger: file, local: at + readable(tail(Path.join(dir, file), at)), held: at}
+          %{world: file, local: at + readable(tail(Path.join(dir, file), at)), held: at}
         end)
         |> Enum.reject(&(&1.local == &1.held))
 
@@ -200,7 +203,7 @@ defmodule Blazie.Backup do
     end
   end
 
-  @doc "How many bytes of this ledger the target holds."
+  @doc "How many bytes of this world the target holds."
   @spec held(keyword(), term()) :: non_neg_integer()
   def held(opts, name) do
     {target, topts} = target(opts)
@@ -214,7 +217,7 @@ defmodule Blazie.Backup do
   # but never started is the same as one that does not exist. So this is what
   # the supervision tree runs, rather than a module somebody has to remember.
 
-  @doc "Start the backup job under a runner, seeding its ledger if it is new."
+  @doc "Start the backup job under a runner, seeding its world if it is new."
   @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
     %{id: __MODULE__, start: {__MODULE__, :start_runner, [opts]}, type: :worker}
@@ -223,14 +226,14 @@ defmodule Blazie.Backup do
   @doc false
   def start_runner(opts) do
     every = Keyword.get(opts, :every, 900)
-    {:ok, ledger} = Ledger.open(@ledger)
+    {:ok, world} = World.open(@world)
 
-    if Ledger.tx(ledger) == 0 do
-      Ledger.append(ledger, Attribute.seed() ++ Job.seed() ++ seed() ++ declare(every: every))
+    if World.tx(world) == 0 do
+      World.append(world, Attribute.seed() ++ Job.seed() ++ seed() ++ declare(every: every))
     end
 
     Job.Runner.start_link(
-      ledger: ledger,
+      world: world,
       jobs: [job(opts)],
       every: :timer.seconds(every),
       name: __MODULE__.Runner
@@ -451,7 +454,7 @@ defmodule Blazie.Backup do
 
   defp ledger_files(dir) do
     case File.ls(dir) do
-      {:ok, entries} -> entries |> Enum.filter(&String.ends_with?(&1, ".ledger")) |> Enum.sort()
+      {:ok, entries} -> entries |> Enum.filter(&String.ends_with?(&1, ".world")) |> Enum.sort()
       {:error, _} -> []
     end
   end
@@ -518,7 +521,7 @@ defmodule Blazie.Backup do
   defp ledger_dir(opts) do
     Keyword.get(opts, :ledger_dir) ||
       Application.get_env(:blazie, :ledger_dir) ||
-      raise "No ledger_dir to back up. A ledger in memory has nothing on disk to copy."
+      raise "No ledger_dir to back up. A world in memory has nothing on disk to copy."
   end
 
   defp key_dir(opts) do

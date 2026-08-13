@@ -83,7 +83,7 @@ it was written into.
 
 ```mermaid
 flowchart TB
-    subgraph ledger["one ledger, append-only"]
+    subgraph world["one world, append-only"]
         direction TB
         t1["tx 1 — ada height 180"]
         t2["tx 2 — ada height 181"]
@@ -197,8 +197,8 @@ sequenceDiagram
     Note over C: reads its own write<br/>without polling
 ```
 
-Nobody outside holds a snapshot — a browser would be holding a whole ledger.
-What travels is *which ledgers, at which transaction*.
+Nobody outside holds a snapshot — a browser would be holding a whole world.
+What travels is *which worlds, at which transaction*.
 
 Because an answer at a name never changes, **there is no cache-coherence
 protocol here, because there is nothing to cohere.** A client caches on the pair
@@ -225,7 +225,7 @@ flowchart LR
 
 ---
 
-## 6. Authorization is which ledgers you may name
+## 6. Authorization is which worlds you may name
 
 Not row rules. Not predicates. A list.
 
@@ -237,16 +237,16 @@ flowchart LR
     CA -.->|refused| L3["someone-else"]
 ```
 
-Sovereignty is decided once, at write time, by which ledger a fact went into —
+Sovereignty is decided once, at write time, by which world a fact went into —
 so there is no predicate to remember and no shared table to accidentally scan.
-A tenant is one or more ledgers.
+A tenant is one or more worlds.
 
 The grants are themselves facts, so "who could read what, in March" is a
 question. And because a snapshot name is a plain map a caller can write by
-hand, **every operation that names a ledger is checked**, not just `open`.
+hand, **every operation that names a world is checked**, not just `open`.
 
 > **What this costs.** No row-level security. If two tenants' data must be
-> separable, they are separate ledgers — decided when the fact is written, not
+> separable, they are separate worlds — decided when the fact is written, not
 > filtered when it is read. That is a real constraint and we prefer it to a
 > filter somebody can forget.
 
@@ -259,7 +259,7 @@ if code declares a name that collides with a word.
 
 | | |
 |---|---|
-| **fact** · **attribute** · **ledger** · **snapshot** · **formula** · **symbol** · **job** | seven things it is made of |
+| **fact** · **attribute** · **world** · **snapshot** · **formula** · **symbol** · **job** | seven things it is made of |
 | **open** · **ask** · **write** · **watch** | four things it does to them |
 | a fact's **value** · a snapshot's **name** · a question's **question** | three those need |
 
@@ -308,10 +308,10 @@ A design is mostly the things you said no to.
 
 | Not built | Why |
 |---|---|
-| **Distribution / consensus** | A ledger is already a boundary owned by one writer, and no operation writes to two. The honest unit is ledger placement, not consensus — and *replication* is the option that would actually break the load-bearing claim, because an async failover to a replica missing an acknowledged transaction makes a name answer differently forever. |
+| **Distribution / consensus** | A world is already a boundary owned by one writer, and no operation writes to two. The honest unit is world placement, not consensus — and *replication* is the option that would actually break the load-bearing claim, because an async failover to a replica missing an acknowledged transaction makes a name answer differently forever. |
 | **A migration system** | Everything extends; nothing redefines. A redeclaration is a later fact, and a narrowing that existing facts contradict is *refused* with the additive repair. The refusal is the migration engine. |
-| **A job queue** | The ledger is the queue. Cadence, runs and failures are ordinary facts, so a restart needs no reconciliation and there is no second store to keep in step. |
-| **Row-level security** | Sovereignty is which ledger, decided at write time. See §6. |
+| **A job queue** | The world is the queue. Cadence, runs and failures are ordinary facts, so a restart needs no reconciliation and there is no second store to keep in step. |
+| **Row-level security** | Sovereignty is which world, decided at write time. See §6. |
 | **A workflow DSL** | Nobody writes a workflow graph. The graph is the closure of facts naming what made them, written by the act of computing — so what ran and what was declared cannot diverge. |
 | **An observability stack** | Vitals are facts written by a job. A trend is a query over old readings rather than a time-series database. |
 
@@ -342,7 +342,7 @@ the design.
 Design documents that only contain good decisions are fiction. These are real,
 and each left a test behind:
 
-**A rename made every ledger on disk unreadable.** `term_to_binary` stores a
+**A rename made every world on disk unreadable.** `term_to_binary` stores a
 struct's keys *and its module name*, so renaming a field — and later the whole
 project — meant records written last week could not be read. The whole suite
 stayed green, because every test wrote its facts with the same code that read
@@ -351,10 +351,10 @@ must read every shape it has ever written, **forever**, and there is no
 migration available because a migration is a rewrite.
 
 **A read could destroy a writer's data.** A pattern naming a field a fact does
-not have raised *inside* the ledger process, killing it and everything it held.
+not have raised *inside* the world process, killing it and everything it held.
 Found by measuring throughput, not by a test.
 
-**A check that was not a constraint.** `check:` claimed the ledger applied it;
+**A check that was not a constraint.** `check:` claimed the world applied it;
 it ran in the caller. Two writers both passed and both appended. One process
 cannot race itself, so no existing test could see it.
 

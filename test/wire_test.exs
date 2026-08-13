@@ -29,7 +29,7 @@ defmodule Blazie.WireTest do
       end
     end
 
-    test "whether it is defined is the ledger\'s question, not this one" do
+    test "whether it is defined is the world\'s question, not this one" do
       # Wire says it is a name. The vocabulary check on write says whether it
       # means anything, and that check reads a snapshot rather than the VM.
       assert {:ok, [attribute: "never_defined_anywhere"]} =

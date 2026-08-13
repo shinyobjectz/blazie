@@ -15,8 +15,8 @@ defmodule Blazie.Job do
   ## Nothing here is a queue
 
   Cron is an attribute of a job, not a word of its own. Its cadence, the times
-  it ran, and the times it failed are all ordinary facts in the ledger, so the
-  scheduler reads the ledger and there is no second store to keep in step. A
+  it ran, and the times it failed are all ordinary facts in the world, so the
+  scheduler reads the world and there is no second store to keep in step. A
   redeploy mid-flight loses nothing: whatever finished wrote a fact before the
   restart, and `due/2` picks up from there.
 
@@ -39,7 +39,7 @@ defmodule Blazie.Job do
   module is the shape that boundary will sit on, not the boundary.
   """
 
-  alias Blazie.{Attribute, Ledger, Snapshot}
+  alias Blazie.{Attribute, World, Snapshot}
 
   @enforce_keys [:id, :work]
   defstruct [:id, :work]
@@ -82,19 +82,19 @@ defmodule Blazie.Job do
   lands alongside a `ran_at` too, because a job that failed still ran. Either
   way the answer is durable, since nothing can rebuild it.
   """
-  @spec run(t(), Ledger.ref(), Snapshot.t(), integer()) ::
+  @spec run(t(), World.ref(), Snapshot.t(), integer()) ::
           {:ok, pos_integer()} | {:failed, pos_integer(), String.t()}
-  def run(%__MODULE__{} = job, ledger, %Snapshot{} = snapshot, now) do
+  def run(%__MODULE__{} = job, world, %Snapshot{} = snapshot, now) do
     try do
       assertions = job.work.(snapshot) |> Enum.map(&stamp(&1, job.id))
-      {:ok, tx} = Ledger.append(ledger, assertions ++ [{job.id, "ran_at", now, job.id}])
+      {:ok, tx} = World.append(world, assertions ++ [{job.id, "ran_at", now, job.id}])
       {:ok, tx}
     rescue
       error ->
         reason = Exception.message(error)
 
         {:ok, tx} =
-          Ledger.append(ledger, [
+          World.append(world, [
             {job.id, "failed", reason, job.id},
             {job.id, "ran_at", now, job.id}
           ])
@@ -127,7 +127,7 @@ defmodule Blazie.Job do
   end
 
   @doc """
-  Every job due at `now`, read out of the ledger.
+  Every job due at `now`, read out of the world.
 
   This is the whole scheduler: there is no queue, no separate store, and
   nothing to reconcile after a restart.

@@ -14,13 +14,13 @@ import { useCluster } from "./cluster"
  * runs is one you could paste into the editor and get the same answer from.
  */
 export function useLua<T = Value>(source: string) {
-  const { ask, ledger } = useCluster()
+  const { ask, world } = useCluster()
   const [value, setValue] = useState<T | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [running, setRunning] = useState(true)
 
   const go = useCallback(() => {
-    if (!ledger) {
+    if (!world) {
       setRunning(false)
       return
     }
@@ -37,8 +37,8 @@ export function useLua<T = Value>(source: string) {
     return () => {
       live = false
     }
-    // `ask` closes over the chosen ledger, so choosing another re-runs the page.
-  }, [ask, source, ledger])
+    // `ask` closes over the chosen world, so choosing another re-runs the page.
+  }, [ask, source, world])
 
   useEffect(go, [go])
 
@@ -46,7 +46,7 @@ export function useLua<T = Value>(source: string) {
 }
 
 /**
- * Every entity in the ledger, with every field it holds, as rows.
+ * Every entity in the world, with every field it holds, as rows.
  *
  * This is the chunk the data browser runs, kept here because it is also the
  * best short answer to "what does using blazie look like" — six lines of

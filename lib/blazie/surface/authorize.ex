@@ -6,16 +6,16 @@ defmodule Blazie.Surface.Authorize do
 
   A snapshot name is a plain map — which ledgers, at which transaction — and a
   caller can write one by hand. So checking only at `open` would mean a caller
-  could reach any ledger by inventing a name for it. Every operation that names
-  a ledger is checked, and a test forges a name to prove it.
+  could reach any world by inventing a name for it. Every operation that names
+  a world is checked, and a test forges a name to prove it.
 
   The doctrine still holds as written: authorization is *which ledgers a caller
   may name*. Naming is what `ask` and `write` also do.
 
   ## Refusals say which
 
-  A refusal names the ledger that failed, because a caller holding several
-  grants otherwise cannot tell which one it is missing. That leaks the ledger
+  A refusal names the world that failed, because a caller holding several
+  grants otherwise cannot tell which one it is missing. That leaks the world
   name back to a caller who already sent it, and nothing else.
   """
 
@@ -53,9 +53,9 @@ defmodule Blazie.Surface.Authorize do
     end
   end
 
-  # Every place a ledger can be named, in one list — so adding an operation
+  # Every place a world can be named, in one list — so adding an operation
   # that names one and forgetting to check it is a change here, not an omission.
-  # Claiming a name is the one operation whose whole point is to name a ledger
+  # Claiming a name is the one operation whose whole point is to name a world
   # this caller does not hold yet, so checking the grant first would refuse
   # every request it is meant to serve. It still needs a valid token — the
   # check that is dropped is authorization, never authentication — and the
@@ -65,10 +65,10 @@ defmodule Blazie.Surface.Authorize do
 
   defp named(%{params: params}) do
     [
-      names(Map.get(params, "ledgers")),
+      names(Map.get(params, "worlds")),
       names(Map.get(params, "also")),
       keys(Map.get(params, "name")),
-      List.wrap(Map.get(params, "ledger"))
+      List.wrap(Map.get(params, "world"))
     ]
     |> List.flatten()
     |> Enum.uniq()

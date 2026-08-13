@@ -74,7 +74,7 @@ defmodule Blazie.Surface.IdentityController do
     json(conn, %{
       "login" => Identity.login_of(token),
       "caller" => Authority.caller(token),
-      "ledgers" => Authority.allowed(token)
+      "worlds" => Authority.allowed(token)
     })
   end
 

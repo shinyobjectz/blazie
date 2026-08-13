@@ -10,19 +10,19 @@ defmodule Blazie.ErasureDurabilityTest do
   """
   use ExUnit.Case, async: false
 
-  alias Blazie.{Attribute, Erasure, Keyring, Ledger, Snapshot, TestLedger}
+  alias Blazie.{Attribute, Erasure, Keyring, World, Snapshot, TestLedger}
 
   setup do
     subject = "person-#{System.unique_integer([:positive])}"
     on_exit(fn -> Keyring.destroy(subject) end)
 
-    ledger = TestLedger.open()
-    {:ok, _} = Ledger.append(ledger, Attribute.seed() ++ Erasure.seed())
-    {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
-    {:ok, _} = Ledger.append(ledger, [{42, "subject", subject}])
-    {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
+    world = TestLedger.open()
+    {:ok, _} = World.append(world, Attribute.seed() ++ Erasure.seed())
+    {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+    {:ok, _} = World.append(world, [{42, "subject", subject}])
+    {:ok, _} = World.append(world, [{42, "height", 180}])
 
-    %{ledger: ledger, subject: subject}
+    %{world: world, subject: subject}
   end
 
   describe "erasure leaves a tombstone" do
@@ -38,7 +38,7 @@ defmodule Blazie.ErasureDurabilityTest do
     test "the tombstone is a fact like any other", ctx do
       :ok = Erasure.erase(ctx.subject)
 
-      {:ok, tombstones} = Ledger.open(Erasure.ledger())
+      {:ok, tombstones} = World.open(Erasure.world())
       found = Snapshot.find(Snapshot.open([tombstones]), id: ctx.subject)
 
       assert [%{attribute: "erased_at"}] = found
@@ -55,7 +55,7 @@ defmodule Blazie.ErasureDurabilityTest do
   describe "a restored key store does not resurrect anybody" do
     test "reconciling on open re-destroys what was erased", ctx do
       :ok = Erasure.erase(ctx.subject)
-      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == :erased
+      assert Snapshot.value(Snapshot.open([ctx.world]), 42, "height") == :erased
 
       # Stand in for a backup restore: the key is back, as it would be if the
       # key store were rolled back to before the erasure.
@@ -65,13 +65,13 @@ defmodule Blazie.ErasureDurabilityTest do
       :ok = Keyring.reconcile()
 
       assert Keyring.unwrap(<<0::96, 0::128, 0>>, ctx.subject) == :forgotten
-      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == :erased
+      assert Snapshot.value(Snapshot.open([ctx.world]), 42, "height") == :erased
     end
 
     test "a subject nobody erased is untouched by reconciling", ctx do
       :ok = Keyring.reconcile()
 
-      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == 180
+      assert Snapshot.value(Snapshot.open([ctx.world]), 42, "height") == 180
     end
 
     test "reconciling is idempotent", ctx do
@@ -79,7 +79,7 @@ defmodule Blazie.ErasureDurabilityTest do
 
       assert :ok = Keyring.reconcile()
       assert :ok = Keyring.reconcile()
-      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == :erased
+      assert Snapshot.value(Snapshot.open([ctx.world]), 42, "height") == :erased
     end
   end
 
@@ -91,14 +91,14 @@ defmodule Blazie.ErasureDurabilityTest do
 
       # Erased before, erased after — and for the right reason: the tombstone
       # said so, not because a restart loses everything.
-      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == :erased
+      assert Snapshot.value(Snapshot.open([ctx.world]), 42, "height") == :erased
       assert Erasure.erased?(ctx.subject)
     end
 
     test "and an unerased subject still reads after a restart", ctx do
       :ok = Keyring.restart()
 
-      assert Snapshot.value(Snapshot.open([ctx.ledger]), 42, "height") == 180
+      assert Snapshot.value(Snapshot.open([ctx.world]), 42, "height") == 180
     end
   end
 end

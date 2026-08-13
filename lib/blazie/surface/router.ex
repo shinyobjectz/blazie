@@ -23,7 +23,7 @@ defmodule Blazie.Surface.Router do
     plug(:accepts, ["json"])
   end
 
-  # Authenticated, but not authorized against a name — claiming a ledger is the
+  # Authenticated, but not authorized against a name — claiming a world is the
   # one operation whose purpose is to name one this caller does not hold. The
   # operation refuses a name already taken; the plug cannot, because to it every
   # ungranted name looks identical.
@@ -43,7 +43,7 @@ defmodule Blazie.Surface.Router do
   scope "/", Blazie.Surface do
     pipe_through(:claiming)
 
-    post("/ledgers", Controller, :claim)
+    post("/worlds", Controller, :claim)
   end
 
   scope "/", Blazie.Surface do

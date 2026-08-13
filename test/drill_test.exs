@@ -18,9 +18,9 @@ defmodule Blazie.DrillTest do
   A backup is only ever proven by the last restore, so the restore is a job.
 
   Most of what is here is about the two ways a drill lies. It lies if it opens
-  the copy under the live ledger's name, because `Ledger.open/2` hands back the
-  ledger already open under a name — the drill would then compare the live
-  ledger against itself and pass forever. And it lies if it compares byte counts
+  the copy under the live world's name, because `World.open/2` hands back the
+  world already open under a name — the drill would then compare the live
+  world against itself and pass forever. And it lies if it compares byte counts
   rather than answers, because a broken restore has byte counts.
 
   So the assertions that matter are: that the copy is opened under a name of its
@@ -30,7 +30,7 @@ defmodule Blazie.DrillTest do
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Attribute, Backup, Drill, Fact, Job, Ledger, Snapshot, Store}
+  alias Blazie.{Attribute, Backup, Drill, Fact, Job, World, Snapshot, Store}
 
   setup do
     root = Path.join(System.tmp_dir!(), "lr_drill_#{System.unique_integer([:positive])}")
@@ -43,12 +43,12 @@ defmodule Blazie.DrillTest do
     on_exit(fn -> File.rm_rf!(root) end)
 
     name = {:drill_test, System.unique_integer([:positive])}
-    {:ok, live} = Ledger.open(name, store: {Store.File, dir: ledgers})
-    on_exit(fn -> Ledger.close(name) end)
+    {:ok, live} = World.open(name, store: {Store.File, dir: ledgers})
+    on_exit(fn -> World.close(name) end)
 
-    {:ok, _} = Ledger.append(live, Attribute.seed())
-    {:ok, _} = Ledger.append(live, Attribute.define("height", answers: "integer"))
-    {:ok, _} = Ledger.append(live, [{"ada", "height", 180}])
+    {:ok, _} = World.append(live, Attribute.seed())
+    {:ok, _} = World.append(live, Attribute.define("height", answers: "integer"))
+    {:ok, _} = World.append(live, [{"ada", "height", 180}])
 
     backup = [ledger_dir: ledgers, key_dir: keys, target: {Backup.Target.Directory, root: remote}]
     {:ok, _} = Backup.run(backup)
@@ -59,9 +59,9 @@ defmodule Blazie.DrillTest do
     opts = [target: {Backup.Target.Directory, root: remote}, scratch_dir: scratch]
 
     journal = {:drill_journal, System.unique_integer([:positive])}
-    {:ok, journal_ref} = Ledger.open(journal)
-    on_exit(fn -> Ledger.close(journal) end)
-    {:ok, _} = Ledger.append(journal_ref, Attribute.seed() ++ Job.seed() ++ Drill.seed())
+    {:ok, journal_ref} = World.open(journal)
+    on_exit(fn -> World.close(journal) end)
+    {:ok, _} = World.append(journal_ref, Attribute.seed() ++ Job.seed() ++ Drill.seed())
 
     %{
       opts: opts,
@@ -82,34 +82,34 @@ defmodule Blazie.DrillTest do
 
       assert report.ledgers == 1
       assert report.drilled == ctx.name
-      assert report.proven_tx == Ledger.tx(ctx.live)
-      assert report.compared_facts == length(Ledger.find_at(ctx.live, Ledger.tx(ctx.live), []))
+      assert report.proven_tx == World.tx(ctx.live)
+      assert report.compared_facts == length(World.find_at(ctx.live, World.tx(ctx.live), []))
       assert report.took_ms >= 0
     end
 
     test "it compares at the restored transaction, so ordinary lag is not a failure", ctx do
-      # The live ledger moves on after the copy was taken, which is the only
+      # The live world moves on after the copy was taken, which is the only
       # state production is ever in. What must hold is that the copy answers at
       # its own transaction what the original answers at that transaction.
-      {:ok, _} = Ledger.append(ctx.live, [{"ada", "height", 181}])
-      {:ok, _} = Ledger.append(ctx.live, [{"ada", "height", 182}])
+      {:ok, _} = World.append(ctx.live, [{"ada", "height", 181}])
+      {:ok, _} = World.append(ctx.live, [{"ada", "height", 182}])
 
       {:ok, report} = Drill.run(Snapshot.open([ctx.journal]), ctx.opts)
 
       assert report.proven_tx == 3
-      assert report.proven_tx < Ledger.tx(ctx.live)
+      assert report.proven_tx < World.tx(ctx.live)
     end
 
     test "the copy is opened under a name of its own, never the live one", ctx do
-      live_pid = GenServer.whereis(Ledger.via(ctx.name))
+      live_pid = GenServer.whereis(World.via(ctx.name))
 
       {:ok, report} = Drill.run(Snapshot.open([ctx.journal]), ctx.opts)
       assert report.drilled == ctx.name
 
-      # The bug this whole module has to avoid: `Ledger.open/2` hands back the
-      # ledger already open under a name, so a drill that opened the copy as
-      # `ctx.name` would have compared the live ledger against itself.
-      assert GenServer.whereis(Ledger.via(ctx.name)) == live_pid
+      # The bug this whole module has to avoid: `World.open/2` hands back the
+      # world already open under a name, so a drill that opened the copy as
+      # `ctx.name` would have compared the live world against itself.
+      assert GenServer.whereis(World.via(ctx.name)) == live_pid
       assert Snapshot.value(Snapshot.open([ctx.live]), "ada", "height") == 180
     end
 
@@ -149,10 +149,10 @@ defmodule Blazie.DrillTest do
       assert refusal.repair =~ "Do not trust this backup"
     end
 
-    test "a hole in the segments is a refusal, because a prefix is not the ledger", ctx do
-      {:ok, _} = Ledger.append(ctx.live, [{"ada", "height", 181}])
+    test "a hole in the segments is a refusal, because a prefix is not the world", ctx do
+      {:ok, _} = World.append(ctx.live, [{"ada", "height", 181}])
       {:ok, _} = Backup.run(ctx.backup)
-      {:ok, _} = Ledger.append(ctx.live, [{"ada", "height", 182}])
+      {:ok, _} = World.append(ctx.live, [{"ada", "height", 182}])
       {:ok, _} = Backup.run(ctx.backup)
 
       # Punch out the middle one: a put that failed after a later one succeeded,
@@ -190,7 +190,7 @@ defmodule Blazie.DrillTest do
     test "running it writes what it proved, naming itself", ctx do
       {:ok, tx} = Job.run(Drill.job(ctx.opts), ctx.journal, Snapshot.open([ctx.journal]), 1000)
 
-      written = Ledger.facts_at(ctx.journal, tx) |> Enum.filter(&(&1.tx == tx))
+      written = World.facts_at(ctx.journal, tx) |> Enum.filter(&(&1.tx == tx))
       assert written != []
       assert Enum.all?(written, &(&1.by == "drill"))
 
@@ -202,7 +202,7 @@ defmodule Blazie.DrillTest do
       assert is_integer(Snapshot.value(snapshot, "drill", "took_ms"))
     end
 
-    test "when we last proved we could restore is a question the ledger answers", ctx do
+    test "when we last proved we could restore is a question the world answers", ctx do
       assert Snapshot.value(Snapshot.open([ctx.journal]), "drill", "proven_at") == nil
 
       {:ok, _} = Job.run(Drill.job(ctx.opts), ctx.journal, Snapshot.open([ctx.journal]), 1000)
@@ -222,7 +222,7 @@ defmodule Blazie.DrillTest do
 
       snapshot = Snapshot.open([ctx.journal])
       assert Job.failures(snapshot, "drill") != []
-      # A job that failed still ran, and the ledger says so.
+      # A job that failed still ran, and the world says so.
       assert Job.last_run(snapshot, "drill") == 1000
       # And nothing was proven, so nothing claims to have been.
       assert Snapshot.value(snapshot, "drill", "proven_at") == nil
@@ -244,14 +244,14 @@ defmodule Blazie.DrillTest do
     end
 
     test "it has a cadence and the runner picks it up", ctx do
-      {:ok, _} = Ledger.append(ctx.journal, Drill.declare(every: 21_600))
+      {:ok, _} = World.append(ctx.journal, Drill.declare(every: 21_600))
 
       assert Job.due?(Snapshot.open([ctx.journal]), "drill", 0)
 
       runner =
         start_supervised!(
           {Job.Runner,
-           ledger: ctx.journal,
+           world: ctx.journal,
            jobs: [Drill.job(ctx.opts)],
            name: :"drill_#{System.unique_integer([:positive])}"}
         )
@@ -260,15 +260,15 @@ defmodule Blazie.DrillTest do
     end
   end
 
-  describe "one ledger per run, chosen by what has waited longest" do
+  describe "one world per run, chosen by what has waited longest" do
     setup ctx do
       second = {:drill_test_b, System.unique_integer([:positive])}
-      {:ok, other} = Ledger.open(second, store: {Store.File, dir: ctx.ledgers})
-      on_exit(fn -> Ledger.close(second) end)
+      {:ok, other} = World.open(second, store: {Store.File, dir: ctx.ledgers})
+      on_exit(fn -> World.close(second) end)
 
-      {:ok, _} = Ledger.append(other, Attribute.seed())
-      {:ok, _} = Ledger.append(other, Attribute.define("depth", answers: "integer"))
-      {:ok, _} = Ledger.append(other, [{"trench", "depth", 10_994}])
+      {:ok, _} = World.append(other, Attribute.seed())
+      {:ok, _} = World.append(other, Attribute.define("depth", answers: "integer"))
+      {:ok, _} = World.append(other, [{"trench", "depth", 10_994}])
 
       {:ok, report} = Backup.run(ctx.backup)
       assert report.ledgers == 2
@@ -283,7 +283,7 @@ defmodule Blazie.DrillTest do
       assert report.drilled in [ctx.name, ctx.second]
     end
 
-    test "and the next run drills the other, so every ledger comes round", ctx do
+    test "and the next run drills the other, so every world comes round", ctx do
       {:ok, _} = Job.run(Drill.job(ctx.opts), ctx.journal, Snapshot.open([ctx.journal]), 1000)
       {:ok, _} = Job.run(Drill.job(ctx.opts), ctx.journal, Snapshot.open([ctx.journal]), 2000)
 
@@ -295,7 +295,7 @@ defmodule Blazie.DrillTest do
       assert Enum.sort(drilled) == Enum.sort([ctx.name, ctx.second])
     end
 
-    test "only the sampled ledger's segments are ever fetched", ctx do
+    test "only the sampled world's segments are ever fetched", ctx do
       # The narrowed target is what makes sampling real rather than cosmetic: a
       # drill that restored everything and compared one would cost the whole
       # backup every cadence.
@@ -313,7 +313,7 @@ defmodule Blazie.DrillTest do
   end
 
   describe "limits, stated rather than hidden" do
-    test "a ledger over the ceiling is skipped and named, not passed over quietly", ctx do
+    test "a world over the ceiling is skipped and named, not passed over quietly", ctx do
       {:ok, report} =
         Drill.run(Snapshot.open([ctx.journal]), Keyword.put(ctx.opts, :max_bytes, 1))
 
@@ -330,7 +330,7 @@ defmodule Blazie.DrillTest do
       {:ok, tx} = Job.run(Drill.job(opts), ctx.journal, Snapshot.open([ctx.journal]), 1000)
 
       snapshot = Snapshot.open([ctx.journal])
-      written = Enum.filter(Ledger.facts_at(ctx.journal, tx), &(&1.tx == tx))
+      written = Enum.filter(World.facts_at(ctx.journal, tx), &(&1.tx == tx))
 
       assert written != []
       assert Snapshot.value(snapshot, "drill", "restored_ledgers") == 0
@@ -360,11 +360,11 @@ defmodule Blazie.DrillTest do
   end
 
   describe "the narrowed target" do
-    test "shows one ledger's segments and hides the rest", ctx do
+    test "shows one world's segments and hides the rest", ctx do
       second = {:drill_test_c, System.unique_integer([:positive])}
-      {:ok, other} = Ledger.open(second, store: {Store.File, dir: ctx.ledgers})
-      on_exit(fn -> Ledger.close(second) end)
-      {:ok, _} = Ledger.append(other, Attribute.seed())
+      {:ok, other} = World.open(second, store: {Store.File, dir: ctx.ledgers})
+      on_exit(fn -> World.close(second) end)
+      {:ok, _} = World.append(other, Attribute.seed())
       {:ok, _} = Backup.run(ctx.backup)
 
       opts = [target: {Backup.Target.Directory, root: ctx.remote}, file: filename(ctx.name)]

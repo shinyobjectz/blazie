@@ -1,4 +1,4 @@
-defmodule Blazie.Lua.World do
+defmodule Blazie.Lua.Binding do
   @moduledoc """
   The database, as ordinary Lua tables (`wor`).
 
@@ -24,7 +24,7 @@ defmodule Blazie.Lua.World do
 
   Reading asks the snapshot the world was built on, so the same code at the same
   name answers the same forever. Writing stages an assertion and returns it to
-  the host — a guest never touches a ledger. That is what lets one path serve
+  the host — a guest never touches a world. That is what lets one path serve
   both a formula, whose writes are its answer, and a job, whose writes are
   appended after it returns.
 
@@ -33,7 +33,7 @@ defmodule Blazie.Lua.World do
   A write to an undeclared field declares it, inferring what it answers from
   what was assigned. The vocabulary is real and still checked; it is just no
   longer something a person has to write down first. Before this, the first
-  write into a fresh ledger was refused until somebody defined an attribute by
+  write into a fresh world was refused until somebody defined an attribute by
   hand — correct, and an absurd thing to ask of someone whose whole interface is
   `ada.height = 180`.
 
@@ -154,7 +154,7 @@ defmodule Blazie.Lua.World do
     cond do
       # Retracting a field nobody ever wrote. There is nothing to unsay, and
       # declaring one so that its retraction can be recorded would leave a
-      # ledger describing a field that never held anything.
+      # world describing a field that never held anything.
       is_nil(value) and not known? ->
         {[], state}
 
@@ -219,12 +219,12 @@ defmodule Blazie.Lua.World do
 
   # ── deciding what a value is ───────────────────────────────────────────────
 
-  # Which constraint to hand the ledger, so it can use an index instead of
+  # Which constraint to hand the world, so it can use an index instead of
   # returning everything for this to filter.
   #
-  # A ledger indexes by id, by attribute, and by value, so an exact value is the
+  # A world indexes by id, by attribute, and by value, so an exact value is the
   # narrowest thing there is to ask for and a bare field is the next. Asking for
-  # everything and filtering here read the whole ledger for a query that matched
+  # everything and filtering here read the whole world for a query that matched
   # one row — correct, and it made `each` cost the size of the database rather
   # than the size of the answer.
   #
@@ -237,7 +237,7 @@ defmodule Blazie.Lua.World do
     cond do
       exact -> [attribute: to_string(elem(exact, 0)), value: elem(exact, 1)]
       any -> [attribute: to_string(elem(any, 0))]
-      # An empty spec is everyone, and everyone is the whole ledger.
+      # An empty spec is everyone, and everyone is the whole world.
       true -> []
     end
   end
@@ -287,15 +287,15 @@ defmodule Blazie.Lua.World do
 
   defp at_snapshot(nil), do: Process.get(:blazie_lua_snapshot)
 
-  # `at(42)` reads "no later than 42". With one ledger that is exactly what it
+  # `at(42)` reads "no later than 42". With one world that is exactly what it
   # says; with several it caps each, because a single number cannot name a
   # position in more than one sequence and capping is the reading that never
-  # invents a transaction a ledger never had.
+  # invents a transaction a world never had.
   defp at_snapshot(tx) when is_number(tx) do
     %Snapshot{at: at} = Process.get(:blazie_lua_snapshot)
 
     at
-    |> Map.new(fn {ledger, held} -> {ledger, min(held, trunc(tx))} end)
+    |> Map.new(fn {world, held} -> {world, min(held, trunc(tx))} end)
     |> Snapshot.reopen()
   end
 

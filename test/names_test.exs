@@ -2,7 +2,7 @@ defmodule Blazie.NamesTest do
   @moduledoc """
   A name is what a thing is called. An address is where it currently is.
 
-  Those were both called "name" and they were different values — `Ledger.open/2`
+  Those were both called "name" and they were different values — `World.open/2`
   took a term, `Snapshot.name/1` handed back a map keyed by process addresses.
   Not interchangeable, one noun, which is the divergence the vocabulary exists
   to catch and the one montology refuses to grant an exception for.
@@ -21,75 +21,75 @@ defmodule Blazie.NamesTest do
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Attribute, Ledger, Snapshot, TestLedger}
+  alias Blazie.{Attribute, World, Snapshot, TestLedger}
 
   setup do
-    ledger = TestLedger.open()
-    {:ok, _} = Ledger.append(ledger, Attribute.seed())
-    {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
-    %{ledger: ledger}
+    world = TestLedger.open()
+    {:ok, _} = World.append(world, Attribute.seed())
+    {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+    %{world: world}
   end
 
   describe "an address and a name are different things" do
-    test "and one can be recovered from the other", %{ledger: ledger} do
-      name = Ledger.name_of(ledger)
+    test "and one can be recovered from the other", %{world: world} do
+      name = World.name_of(world)
 
-      assert Ledger.via(name) == ledger
-      assert Ledger.name_of(Ledger.via(name)) == name
+      assert World.via(name) == world
+      assert World.name_of(World.via(name)) == name
     end
 
     test "a bare pid has no name, and says so rather than inventing one" do
       assert_raise ArgumentError, ~r/cannot be recovered from a bare pid/, fn ->
-        Ledger.name_of(self())
+        World.name_of(self())
       end
     end
 
     test "a name handed in where a name belongs is left alone" do
-      assert Ledger.name_of({:tenant, 7}) == {:tenant, 7}
-      assert Ledger.name_of("$vitals") == "$vitals"
+      assert World.name_of({:tenant, 7}) == {:tenant, 7}
+      assert World.name_of("$vitals") == "$vitals"
     end
   end
 
-  describe "a snapshot's name is made of ledger names" do
-    test "never of addresses", %{ledger: ledger} do
-      name = Snapshot.name(Snapshot.open([ledger]))
+  describe "a snapshot's name is made of world names" do
+    test "never of addresses", %{world: world} do
+      name = Snapshot.name(Snapshot.open([world]))
 
       assert [key] = Map.keys(name)
-      assert key == Ledger.name_of(ledger)
+      assert key == World.name_of(world)
       refute match?({:via, _, _}, key)
     end
 
-    test "so it survives a round trip through reopen", %{ledger: ledger} do
-      {:ok, tx} = Ledger.append(ledger, [{"ada", "height", 180}])
-      name = Snapshot.name(Snapshot.open([ledger]))
+    test "so it survives a round trip through reopen", %{world: world} do
+      {:ok, tx} = World.append(world, [{"ada", "height", 180}])
+      name = Snapshot.name(Snapshot.open([world]))
 
       assert Snapshot.name(Snapshot.reopen(name)) == name
       assert Snapshot.value(Snapshot.reopen(name), "ada", "height") == 180
-      assert name[Ledger.name_of(ledger)] == tx
+      assert name[World.name_of(world)] == tx
     end
 
-    test "and an address handed to reopen is normalised, not stored", %{ledger: ledger} do
+    test "and an address handed to reopen is normalised, not stored", %{world: world} do
       # Nothing in lib/ does this any more, but a name arrives from outside and
       # the shape a snapshot promises must not depend on who built it.
-      snapshot = Snapshot.reopen(%{ledger => Ledger.tx(ledger)})
+      snapshot = Snapshot.reopen(%{world => World.tx(world)})
 
       assert [key] = Map.keys(Snapshot.name(snapshot))
       refute match?({:via, _, _}, key)
-      assert key == Ledger.name_of(ledger)
+      assert key == World.name_of(world)
     end
 
-    test "a name over several ledgers keys each by its own name", %{ledger: one} do
+    test "a name over several ledgers keys each by its own name", %{world: one} do
       two = TestLedger.open()
-      {:ok, _} = Ledger.append(two, Attribute.seed())
+      {:ok, _} = World.append(two, Attribute.seed())
 
       name = Snapshot.name(Snapshot.open([one, two]))
 
       assert Map.keys(name) |> Enum.sort() ==
-               Enum.sort([Ledger.name_of(one), Ledger.name_of(two)])
+               Enum.sort([World.name_of(one), World.name_of(two)])
     end
   end
 
-  describe "a name with ordinary ledger names is something a wire can carry" do
+  describe "a name with ordinary world names is something a wire can carry" do
     test "which is what the crash was about", _ctx do
       # The names a caller actually uses are strings, because they arrived as
       # JSON. A tuple name is a test's way of proving atoms never leak, and is
@@ -105,50 +105,50 @@ defmodule Blazie.NamesTest do
     end
   end
 
-  describe "a read can never take the ledger down with it" do
+  describe "a read can never take the world down with it" do
     # Found by measurement, not by a test: `Fact.matches?/2` used `Map.fetch!`,
     # so a pattern naming a field a fact does not have raised inside the
-    # ledger's own process. The ledger died, and with a memory store every fact
+    # world's own process. The world died, and with a memory store every fact
     # in it died too — a read destroying what a writer put there.
     #
     # `subject` is the example worth naming: it is a real attribute in
     # `Erasure`, and it is not a field of a fact. The mistake is one letter
     # from a legitimate query.
-    test "a pattern naming something that is not a field is refused", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{"ada", "height", 180}])
-      tx = Ledger.tx(ledger)
+    test "a pattern naming something that is not a field is refused", %{world: world} do
+      {:ok, _} = World.append(world, [{"ada", "height", 180}])
+      tx = World.tx(world)
 
       assert_raise ArgumentError, ~r/is not one/, fn ->
-        Ledger.find_at(ledger, tx, subject: "person-x")
+        World.find_at(world, tx, subject: "person-x")
       end
 
       # Still alive, still holding everything.
-      assert Ledger.tx(ledger) == tx
-      assert [%{value: 180}] = Ledger.find_at(ledger, tx, attribute: "height")
+      assert World.tx(world) == tx
+      assert [%{value: 180}] = World.find_at(world, tx, attribute: "height")
     end
 
-    test "and the refusal says what to write instead", %{ledger: ledger} do
+    test "and the refusal says what to write instead", %{world: world} do
       error =
         assert_raise ArgumentError, fn ->
-          Snapshot.find(Snapshot.open([ledger]), subject: "person-x")
+          Snapshot.find(Snapshot.open([world]), subject: "person-x")
         end
 
       assert error.message =~ "id, attribute, value, tx, by"
       assert error.message =~ ~s(attribute: "subject")
     end
 
-    test "a snapshot read is checked the same way", %{ledger: ledger} do
-      snapshot = Snapshot.open([ledger])
+    test "a snapshot read is checked the same way", %{world: world} do
+      snapshot = Snapshot.open([world])
 
       assert_raise ArgumentError, fn -> Snapshot.find(snapshot, nonsense: 1) end
       assert Snapshot.find(snapshot, attribute: "height") == []
     end
 
-    test "every field a fact really has is accepted", %{ledger: ledger} do
-      {:ok, tx} = Ledger.append(ledger, [{"ada", "height", 180}])
+    test "every field a fact really has is accepted", %{world: world} do
+      {:ok, tx} = World.append(world, [{"ada", "height", 180}])
 
       for pattern <- [[id: "ada"], [attribute: "height"], [value: 180], [tx: tx], [by: nil]] do
-        assert is_list(Ledger.find_at(ledger, tx, pattern)), "#{inspect(pattern)} was refused"
+        assert is_list(World.find_at(world, tx, pattern)), "#{inspect(pattern)} was refused"
       end
     end
   end

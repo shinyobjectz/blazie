@@ -2,13 +2,13 @@ defmodule Blazie.Authority do
   @moduledoc """
   Which ledgers a caller may name (doctrine 17).
 
-  Not row rules and not predicates — a caller either may name a ledger or may
+  Not row rules and not predicates — a caller either may name a world or may
   not, decided before anything is read. There is no filter to remember, because
   there is no query that spans ledgers you did not name.
 
   ## Grants are facts
 
-  They live in a ledger like everything else, so revoking is a later fact
+  They live in a world like everything else, so revoking is a later fact
   correcting an earlier one and nothing is deleted. "Who could open what, and
   when" is a question rather than an audit log someone remembered to write.
 
@@ -18,7 +18,7 @@ defmodule Blazie.Authority do
   Whichever of those landed later is the answer, so grant → revoke → grant
   works without any of them being removed.
 
-  ## The authority ledger is never nameable
+  ## The authority world is never nameable
 
   It holds the answer to "what may this caller name," so a caller who could
   name it could grant itself everything. It is excluded structurally rather
@@ -27,43 +27,43 @@ defmodule Blazie.Authority do
 
   ## A caller is a token's fingerprint
 
-  Grants are keyed by `sha256` of the presented token, so the ledger holds no
-  secret. A stolen ledger reveals which fingerprints could name what, and no
+  Grants are keyed by `sha256` of the presented token, so the world holds no
+  secret. A stolen world reveals which fingerprints could name what, and no
   token. The token is still a bearer credential — anyone holding it is the
   caller — which is the right shape for a substrate and the wrong one for a
   public API. An identity behind the token is the next step, not this one.
   """
 
-  alias Blazie.{Attribute, Ledger, Snapshot}
+  alias Blazie.{Attribute, World, Snapshot}
 
-  @ledger "$authority"
+  @world "$authority"
   @may_name "may_name"
   @revoked "revoked"
 
   @type refusal :: %{problem: atom(), repair: String.t()}
 
-  @doc "The ledger holding grants. Never nameable by a caller."
-  @spec ledger() :: String.t()
-  def ledger, do: @ledger
+  @doc "The world holding grants. Never nameable by a caller."
+  @spec world() :: String.t()
+  def world, do: @world
 
   @doc "A caller's identity: the fingerprint of the token it presented."
   @spec caller(String.t()) :: String.t()
   def caller(token) when is_binary(token),
     do: :crypto.hash(:sha256, token) |> Base.encode16(case: :lower)
 
-  @doc "May this caller name this ledger?"
-  @spec may_name?(String.t(), Ledger.name()) :: boolean()
-  def may_name?(_token, @ledger), do: false
+  @doc "May this caller name this world?"
+  @spec may_name?(String.t(), World.name()) :: boolean()
+  def may_name?(_token, @world), do: false
 
-  def may_name?(token, ledger) do
-    case latest(caller(token), ledger) do
+  def may_name?(token, world) do
+    case latest(caller(token), world) do
       %{attribute: @may_name} -> true
       _ -> false
     end
   end
 
-  @doc "Every ledger this caller may name."
-  @spec allowed(String.t()) :: [Ledger.name()]
+  @doc "Every world this caller may name."
+  @spec allowed(String.t()) :: [World.name()]
   def allowed(token) do
     who = caller(token)
 
@@ -71,44 +71,44 @@ defmodule Blazie.Authority do
     |> Snapshot.find(id: who)
     |> Enum.map(& &1.value)
     |> Enum.uniq()
-    |> Enum.filter(&(&1 != @ledger))
-    |> Enum.filter(fn ledger -> match?(%{attribute: @may_name}, latest(who, ledger)) end)
+    |> Enum.filter(&(&1 != @world))
+    |> Enum.filter(fn world -> match?(%{attribute: @may_name}, latest(who, world)) end)
     |> Enum.sort()
   end
 
-  @doc "Grant a caller the right to name a ledger."
-  @spec grant(String.t(), Ledger.name()) :: {:ok, pos_integer()}
-  def grant(token, ledger), do: write(caller(token), @may_name, ledger)
+  @doc "Grant a caller the right to name a world."
+  @spec grant(String.t(), World.name()) :: {:ok, pos_integer()}
+  def grant(token, world), do: write(caller(token), @may_name, world)
 
   @doc """
   Grant, refusing the one grant that must never exist.
 
-  Granting the authority ledger would let a caller grant itself everything, so
+  Granting the authority world would let a caller grant itself everything, so
   it is refused where it is written rather than only where it is read.
   """
-  @spec grant_checked(String.t(), Ledger.name()) :: {:ok, pos_integer()} | {:error, refusal()}
-  def grant_checked(_token, @ledger),
+  @spec grant_checked(String.t(), World.name()) :: {:ok, pos_integer()} | {:error, refusal()}
+  def grant_checked(_token, @world),
     do:
       {:error,
        %{
          problem: :authority_is_not_nameable,
          repair:
-           "The authority ledger holds the answer to what a caller may name, so no caller may " <>
+           "The authority world holds the answer to what a caller may name, so no caller may " <>
              "name it. Grant the ledgers it should reach instead."
        }}
 
-  def grant_checked(token, ledger), do: grant(token, ledger)
+  def grant_checked(token, world), do: grant(token, world)
 
   @doc "Revoke by writing a later fact. Nothing is deleted."
-  @spec revoke(String.t(), Ledger.name()) :: {:ok, pos_integer()}
-  def revoke(token, ledger), do: write(caller(token), @revoked, ledger)
+  @spec revoke(String.t(), World.name()) :: {:ok, pos_integer()}
+  def revoke(token, world), do: write(caller(token), @revoked, world)
 
-  @doc "Every grant and revocation for this caller and ledger, oldest first."
-  @spec history(String.t(), Ledger.name()) :: [Blazie.Fact.t()]
-  def history(token, ledger) do
+  @doc "Every grant and revocation for this caller and world, oldest first."
+  @spec history(String.t(), World.name()) :: [Blazie.Fact.t()]
+  def history(token, world) do
     snapshot()
     |> Snapshot.find(id: caller(token))
-    |> Enum.filter(&(&1.value == ledger))
+    |> Enum.filter(&(&1.value == world))
   end
 
   @doc "The attributes the authority describes itself with."
@@ -120,25 +120,25 @@ defmodule Blazie.Authority do
 
   # ── plumbing ───────────────────────────────────────────────────────────────
 
-  defp latest(who, ledger) do
+  defp latest(who, world) do
     snapshot()
     |> Snapshot.find(id: who)
-    |> Enum.filter(&(&1.value == ledger and &1.attribute in [@may_name, @revoked]))
+    |> Enum.filter(&(&1.value == world and &1.attribute in [@may_name, @revoked]))
     |> Enum.max_by(& &1.tx, fn -> nil end)
   end
 
-  defp write(who, attribute, ledger) do
+  defp write(who, attribute, world) do
     {:ok, ref} = open()
-    Ledger.append(ref, [{who, attribute, ledger}])
+    World.append(ref, [{who, attribute, world}])
   end
 
   defp snapshot, do: Snapshot.open([elem(open(), 1)])
 
   defp open do
-    {:ok, ref} = Ledger.open(@ledger)
+    {:ok, ref} = World.open(@world)
 
     # Seed once: the authority describes itself with ordinary attributes.
-    if Ledger.tx(ref) == 0, do: Ledger.append(ref, Attribute.seed() ++ seed())
+    if World.tx(ref) == 0, do: World.append(ref, Attribute.seed() ++ seed())
 
     {:ok, ref}
   end

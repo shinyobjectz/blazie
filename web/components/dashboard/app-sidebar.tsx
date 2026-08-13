@@ -36,7 +36,7 @@ import {
 const items: { href: string; label: string; icon: typeof Table2 }[] = [
   { href: "/dashboard", label: "data", icon: Table2 },
   { href: "/dashboard/editor", label: "editor", icon: SquareTerminal },
-  { href: "/dashboard/ledgers", label: "ledgers", icon: Database },
+  { href: "/dashboard/worlds", label: "worlds", icon: Database },
   { href: "/dashboard/activity", label: "activity", icon: Activity },
   { href: "/dashboard/settings", label: "settings", icon: Settings },
 ]

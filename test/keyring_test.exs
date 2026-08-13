@@ -3,7 +3,7 @@ defmodule Blazie.KeyringTest do
   Envelope encryption: a key per fact, wrapped by a key per subject.
 
   The point of the second tier is where the wrapped key can live. It is noise
-  without the KEK, so it goes in the ledger with everything else — which means
+  without the KEK, so it goes in the world with everything else — which means
   nothing durable is held in memory, and the defect this replaces (a restart
   erasing every subject by accident) cannot happen.
 
@@ -12,7 +12,7 @@ defmodule Blazie.KeyringTest do
   """
   use ExUnit.Case, async: false
 
-  alias Blazie.{Attribute, Erasure, Keyring, Ledger, Snapshot, TestLedger}
+  alias Blazie.{Attribute, Erasure, Keyring, World, Snapshot, TestLedger}
 
   setup do
     dir = Path.join(System.tmp_dir!(), "blazie_keys_#{System.unique_integer([:positive])}")
@@ -86,47 +86,47 @@ defmodule Blazie.KeyringTest do
 
   describe "the defect this replaces" do
     test "facts survive a keyring restart", ctx do
-      ledger = TestLedger.open()
-      {:ok, _} = Ledger.append(ledger, Attribute.seed() ++ Erasure.seed())
-      {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
-      {:ok, _} = Ledger.append(ledger, [{42, "subject", ctx.subject}])
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
+      world = TestLedger.open()
+      {:ok, _} = World.append(world, Attribute.seed() ++ Erasure.seed())
+      {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+      {:ok, _} = World.append(world, [{42, "subject", ctx.subject}])
+      {:ok, _} = World.append(world, [{42, "height", 180}])
 
-      assert Snapshot.value(Snapshot.open([ledger]), 42, "height") == 180
+      assert Snapshot.value(Snapshot.open([world]), 42, "height") == 180
 
       # The old keyring held the only copy of every key in memory. Restarting
       # it used to erase everyone by accident.
       :ok = Keyring.restart()
 
-      assert Snapshot.value(Snapshot.open([ledger]), 42, "height") == 180
+      assert Snapshot.value(Snapshot.open([world]), 42, "height") == 180
 
       Keyring.destroy(ctx.subject)
     end
 
     test "and erasure still works afterwards", ctx do
-      ledger = TestLedger.open()
-      {:ok, _} = Ledger.append(ledger, Attribute.seed() ++ Erasure.seed())
-      {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
-      {:ok, _} = Ledger.append(ledger, [{42, "subject", ctx.subject}])
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
+      world = TestLedger.open()
+      {:ok, _} = World.append(world, Attribute.seed() ++ Erasure.seed())
+      {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+      {:ok, _} = World.append(world, [{42, "subject", ctx.subject}])
+      {:ok, _} = World.append(world, [{42, "height", 180}])
 
       :ok = Keyring.restart()
       :ok = Erasure.erase(ctx.subject)
 
-      assert Snapshot.value(Snapshot.open([ledger]), 42, "height") == :erased
+      assert Snapshot.value(Snapshot.open([world]), 42, "height") == :erased
     end
   end
 
   describe "the wrapped key rides in the fact" do
-    test "the ledger holds it, so nothing durable is in memory", ctx do
-      ledger = TestLedger.open()
-      {:ok, _} = Ledger.append(ledger, Attribute.seed() ++ Erasure.seed())
-      {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
-      {:ok, _} = Ledger.append(ledger, [{42, "subject", ctx.subject}])
-      {:ok, tx} = Ledger.append(ledger, [{42, "height", 180}])
+    test "the world holds it, so nothing durable is in memory", ctx do
+      world = TestLedger.open()
+      {:ok, _} = World.append(world, Attribute.seed() ++ Erasure.seed())
+      {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+      {:ok, _} = World.append(world, [{42, "subject", ctx.subject}])
+      {:ok, tx} = World.append(world, [{42, "height", 180}])
 
       # Read the raw row rather than the revealed one.
-      raw = Ledger.raw_at(ledger, tx) |> Enum.find(&(&1.attribute == "height"))
+      raw = World.raw_at(world, tx) |> Enum.find(&(&1.attribute == "height"))
 
       assert {:sealed, subject, wrapped, _iv, _tag, _cipher} = raw.value
       assert subject == ctx.subject

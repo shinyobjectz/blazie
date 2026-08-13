@@ -21,7 +21,7 @@ import {
 } from "@/lib/blazie"
 
 /**
- * Which ledger the console is pointed at, and how to run against it.
+ * Which world the console is pointed at, and how to run against it.
  *
  * An earlier version held one snapshot name for the whole console and froze
  * every page at it. That was true to how blazie works and wrong for a console:
@@ -34,14 +34,14 @@ import {
 
 type Cluster = {
   who: Me
-  /** Which ledger every page on the console is looking at. */
-  ledger: string | null
-  choose: (ledger: string) => void
+  /** Which world every page on the console is looking at. */
+  world: string | null
+  choose: (world: string) => void
   /** Where the last run read. Shown in the header so a page can be cited. */
   at: SnapshotName | null
-  /** Run Lua against the chosen ledger. */
+  /** Run Lua against the chosen world. */
   ask: (source: string) => Promise<RunResult>
-  /** Re-read `/me`, for when a ledger has just been claimed. */
+  /** Re-read `/me`, for when a world has just been claimed. */
   refresh: () => void
 }
 
@@ -55,12 +55,12 @@ export function useCluster(): Cluster {
   return cluster
 }
 
-const CHOSEN = "blazie.ledger"
+const CHOSEN = "blazie.world"
 
 export function useClusterState() {
   const router = useRouter()
   const [who, setWho] = useState<Me | null>(null)
-  const [ledger, setLedger] = useState<string | null>(null)
+  const [world, setLedger] = useState<string | null>(null)
   const [at, setAt] = useState<SnapshotName | null>(null)
   const [error, setError] = useState<unknown>(null)
 
@@ -74,12 +74,12 @@ export function useClusterState() {
       setWho(found)
 
       // Whatever was chosen last, if it is still granted. Otherwise the first
-      // one, so a console with exactly one ledger needs no choosing at all.
+      // one, so a console with exactly one world needs no choosing at all.
       setLedger((held) => {
-        if (held && found.ledgers.includes(held)) return held
+        if (held && found.worlds.includes(held)) return held
         const remembered = window.localStorage.getItem(CHOSEN)
-        if (remembered && found.ledgers.includes(remembered)) return remembered
-        return found.ledgers[0] ?? null
+        if (remembered && found.worlds.includes(remembered)) return remembered
+        return found.worlds[0] ?? null
       })
     } catch (thrown) {
       setError(thrown)
@@ -103,19 +103,19 @@ export function useClusterState() {
 
   const ask = useCallback(
     async (source: string) => {
-      if (!ledger) {
-        throw new Error("no ledger chosen")
+      if (!world) {
+        throw new Error("no world chosen")
       }
-      const result = await run(ledger, source)
+      const result = await run(world, source)
       setAt(result.name)
       return result
     },
-    [ledger],
+    [world],
   )
 
   const cluster = useMemo<Cluster | null>(
-    () => (who ? { who, ledger, choose, at, ask, refresh: load } : null),
-    [who, ledger, choose, at, ask, load],
+    () => (who ? { who, world, choose, at, ask, refresh: load } : null),
+    [who, world, choose, at, ask, load],
   )
 
   return { cluster, error, retry: load }

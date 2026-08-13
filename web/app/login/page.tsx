@@ -52,7 +52,7 @@ export default function Login() {
           </h1>
 
           <p className="mx-auto mt-5 max-w-sm text-balance text-sm leading-relaxed text-white/70">
-            github says who you are. what you may read is which ledgers this
+            github says who you are. what you may read is which worlds this
             caller was granted — a list, not a rule, and you can see it once you
             are in.
           </p>

@@ -18,10 +18,10 @@ defmodule Blazie.AdversarialTest do
 
   setup do
     token = "adversary-#{System.unique_integer([:positive])}"
-    ledger = open_ledger()
-    Authority.grant(token, ledger)
+    world = open_ledger()
+    Authority.grant(token, world)
 
-    %{ledger: ledger, token: token}
+    %{world: world, token: token}
   end
 
   defp as(conn, token), do: put_req_header(conn, "authorization", "Bearer #{token}")
@@ -29,25 +29,25 @@ defmodule Blazie.AdversarialTest do
   defp run(conn, token, source, params) do
     conn
     |> as(token)
-    |> post("/run", Map.merge(%{"ledger" => params["ledger"], "source" => source}, params))
+    |> post("/run", Map.merge(%{"world" => params["world"], "source" => source}, params))
   end
 
   describe "malformed requests are refused, never fatal" do
-    test "every shape of junk is answered rather than fatal", %{conn: conn, token: token, ledger: ledger} do
+    test "every shape of junk is answered rather than fatal", %{conn: conn, token: token, world: world} do
       junk = [
         %{},
-        %{"ledger" => ledger},
+        %{"world" => world},
         %{"source" => "return 1"},
-        %{"ledger" => ledger, "source" => nil},
-        %{"ledger" => ledger, "source" => 12_345},
-        %{"ledger" => ledger, "source" => %{"not" => "a string"}},
-        %{"ledger" => nil, "source" => "return 1"},
-        %{"ledger" => %{"nested" => true}, "source" => "return 1"},
-        %{"ledger" => ledger, "source" => "return 1", "also" => "not a list"},
-        %{"ledger" => ledger, "source" => "return 1", "also" => [nil]},
-        %{"ledger" => ledger, "source" => "return 1", "name" => "not a map"},
-        %{"ledger" => ledger, "source" => "return 1", "name" => %{ledger => "three"}},
-        %{"ledger" => ledger, "source" => "return 1", "as" => %{}}
+        %{"world" => world, "source" => nil},
+        %{"world" => world, "source" => 12_345},
+        %{"world" => world, "source" => %{"not" => "a string"}},
+        %{"world" => nil, "source" => "return 1"},
+        %{"world" => %{"nested" => true}, "source" => "return 1"},
+        %{"world" => world, "source" => "return 1", "also" => "not a list"},
+        %{"world" => world, "source" => "return 1", "also" => [nil]},
+        %{"world" => world, "source" => "return 1", "name" => "not a map"},
+        %{"world" => world, "source" => "return 1", "name" => %{world => "three"}},
+        %{"world" => world, "source" => "return 1", "as" => %{}}
       ]
 
       for body <- junk do
@@ -58,15 +58,15 @@ defmodule Blazie.AdversarialTest do
       end
     end
 
-    test "source that is not Lua is a refusal with a repair", %{conn: conn, token: token, ledger: ledger} do
-      body = json_response(run(conn, token, "this is not lua ((", %{"ledger" => ledger}), 422)
+    test "source that is not Lua is a refusal with a repair", %{conn: conn, token: token, world: world} do
+      body = json_response(run(conn, token, "this is not lua ((", %{"world" => world}), 422)
 
       assert body["error"]["problem"] == "not_lua"
       assert body["error"]["repair"] != ""
     end
 
-    test "an error raised inside Lua is a refusal, not a crash", %{conn: conn, token: token, ledger: ledger} do
-      body = json_response(run(conn, token, "error('deliberate')", %{"ledger" => ledger}), 422)
+    test "an error raised inside Lua is a refusal, not a crash", %{conn: conn, token: token, world: world} do
+      body = json_response(run(conn, token, "error('deliberate')", %{"world" => world}), 422)
 
       assert body["error"]["problem"] == "raised"
       assert body["error"]["repair"] =~ "deliberate"
@@ -74,16 +74,16 @@ defmodule Blazie.AdversarialTest do
   end
 
   describe "a caller cannot reach past its grants" do
-    test "no way of naming a ledger gets past authorization", %{conn: conn, token: token, ledger: ledger} do
+    test "no way of naming a world gets past authorization", %{conn: conn, token: token, world: world} do
       forbidden = "not-granted-#{System.unique_integer([:positive])}"
 
       attempts = [
-        %{"ledger" => forbidden, "source" => "return 1"},
-        %{"ledger" => ledger, "source" => "return 1", "also" => [forbidden]},
-        %{"ledger" => ledger, "source" => "return 1", "name" => %{forbidden => 0}},
-        %{"ledger" => Authority.ledger(), "source" => "return 1"},
-        %{"ledger" => ledger, "source" => "return 1", "also" => [Authority.ledger()]},
-        %{"ledger" => ledger, "source" => "return 1", "name" => %{Authority.ledger() => 0}}
+        %{"world" => forbidden, "source" => "return 1"},
+        %{"world" => world, "source" => "return 1", "also" => [forbidden]},
+        %{"world" => world, "source" => "return 1", "name" => %{forbidden => 0}},
+        %{"world" => Authority.world(), "source" => "return 1"},
+        %{"world" => world, "source" => "return 1", "also" => [Authority.world()]},
+        %{"world" => world, "source" => "return 1", "name" => %{Authority.world() => 0}}
       ]
 
       for body <- attempts do
@@ -92,97 +92,97 @@ defmodule Blazie.AdversarialTest do
       end
     end
 
-    test "a token that is not a token is refused", %{conn: conn, ledger: ledger} do
+    test "a token that is not a token is refused", %{conn: conn, world: world} do
       for bad <- ["", "Bearer", "Basic abc", "Bearer ", "bearer lowercase"] do
         conn =
           conn
           |> delete_req_header("authorization")
           |> put_req_header("authorization", bad)
-          |> post("/run", %{"ledger" => ledger, "source" => "return 1"})
+          |> post("/run", %{"world" => world, "source" => "return 1"})
 
         assert conn.status in [401, 403], "#{inspect(bad)} gave #{conn.status}"
       end
     end
 
-    test "guessing a real ledger's name does not help", %{conn: conn, token: token} do
+    test "guessing a real world's name does not help", %{conn: conn, token: token} do
       theirs = "private-#{System.unique_integer([:positive])}"
-      {:ok, _} = Blazie.Ledger.open(theirs)
-      on_exit(fn -> Blazie.Ledger.close(theirs) end)
+      {:ok, _} = Blazie.World.open(theirs)
+      on_exit(fn -> Blazie.World.close(theirs) end)
 
       # The name is correct. The grant is not.
-      assert json_response(run(conn, token, "return 1", %{"ledger" => theirs}), 403)
+      assert json_response(run(conn, token, "return 1", %{"world" => theirs}), 403)
     end
   end
 
   describe "a guest cannot spend without limit" do
-    test "a loop forever is stopped", %{conn: conn, token: token, ledger: ledger} do
-      body = json_response(run(conn, token, "while true do end", %{"ledger" => ledger}), 422)
+    test "a loop forever is stopped", %{conn: conn, token: token, world: world} do
+      body = json_response(run(conn, token, "while true do end", %{"world" => world}), 422)
 
       assert body["error"]["problem"] == "took_too_long"
     end
 
-    test "a table that grows forever is stopped", %{conn: conn, token: token, ledger: ledger} do
+    test "a table that grows forever is stopped", %{conn: conn, token: token, world: world} do
       bomb = "local t = {} while true do t[#t + 1] = string.rep('x', 1000) end"
-      body = json_response(run(conn, token, bomb, %{"ledger" => ledger}), 422)
+      body = json_response(run(conn, token, bomb, %{"world" => world}), 422)
 
       assert body["error"]["problem"] in ["took_too_much_memory", "took_too_long"]
     end
 
-    test "a stopped guest writes nothing", %{conn: conn, token: token, ledger: ledger} do
+    test "a stopped guest writes nothing", %{conn: conn, token: token, world: world} do
       source = "ada.height = 180 while true do end"
-      json_response(run(conn, token, source, %{"ledger" => ledger}), 422)
+      json_response(run(conn, token, source, %{"world" => world}), 422)
 
       # Staged writes are appended only after a chunk returns, so a guest killed
       # mid-run leaves nothing behind — the write above must not be there.
-      after_it = json_response(run(build_conn(), token, "return ada.height", %{"ledger" => ledger}), 200)
+      after_it = json_response(run(build_conn(), token, "return ada.height", %{"world" => world}), 200)
       assert after_it["value"] == nil
     end
   end
 
   describe "a guest cannot reach the outside" do
-    test "a formula gets no http", %{conn: conn, token: token, ledger: ledger} do
+    test "a formula gets no http", %{conn: conn, token: token, world: world} do
       assert %{"value" => nil} =
-               json_response(run(conn, token, "return http", %{"ledger" => ledger}), 200)
+               json_response(run(conn, token, "return http", %{"world" => world}), 200)
     end
 
-    test "the removed globals stay removed", %{conn: conn, token: token, ledger: ledger} do
+    test "the removed globals stay removed", %{conn: conn, token: token, world: world} do
       for name <- Blazie.Lua.removed() do
-        body = json_response(run(conn, token, "return #{name}", %{"ledger" => ledger}), 200)
+        body = json_response(run(conn, token, "return #{name}", %{"world" => world}), 200)
         assert body["value"] == nil, "#{name} came back as #{inspect(body["value"])}"
       end
     end
 
-    test "redefining the deny list does not hand anything back", %{conn: conn, token: token, ledger: ledger} do
+    test "redefining the deny list does not hand anything back", %{conn: conn, token: token, world: world} do
       # `__denied` only decides whether an unknown name becomes an entity. The
       # globals themselves are genuinely absent from the state, so clearing it
       # gets an empty entity rather than `io` — the fence is the absence, and
       # this proves the deny list is a tidiness measure rather than the wall.
       source = "__denied = {} local reached = io return type(reached)"
-      body = json_response(run(conn, token, source, %{"ledger" => ledger}), 200)
+      body = json_response(run(conn, token, source, %{"world" => world}), 200)
 
       assert body["value"] in [nil, "table"]
 
       # Whatever it is, nothing on it works.
       escape = "__denied = {} return io.write ~= nil"
       assert %{"value" => false} =
-               json_response(run(build_conn(), token, escape, %{"ledger" => ledger}), 200)
+               json_response(run(build_conn(), token, escape, %{"world" => world}), 200)
     end
   end
 
   describe "a guest cannot talk the wire into lying" do
-    test "a guest cannot claim provenance", %{conn: conn, token: token, ledger: ledger} do
+    test "a guest cannot claim provenance", %{conn: conn, token: token, world: world} do
       # `__write` is a global a guest can call directly, so the question is what
       # happens when it is called with more than the surface passes. The staged
       # tuple is three wide and there is no fourth slot to put a producer in.
       source = "__write('ada', 'height', 180, false, 'some-formula') return 1"
-      assert json_response(run(conn, token, source, %{"ledger" => ledger}), 200)
+      assert json_response(run(conn, token, source, %{"world" => world}), 200)
 
-      read = json_response(run(build_conn(), token, "return ada.height", %{"ledger" => ledger}), 200)
+      read = json_response(run(build_conn(), token, "return ada.height", %{"world" => world}), 200)
       assert read["value"] == 180
 
       # Written from outside, so it names nothing — whatever was appended to the
       # call. Provenance belongs to what ran, not to what asked.
-      {:ok, ref} = Blazie.Ledger.open(ledger)
+      {:ok, ref} = Blazie.World.open(world)
 
       assert Blazie.Snapshot.open([ref])
              |> Blazie.Snapshot.find(id: "ada", attribute: "height")
@@ -222,12 +222,12 @@ defmodule Blazie.AdversarialTest do
   end
 
   describe "a refusal never leaks what it should not" do
-    test "an ungranted ledger's refusal says the name the caller already sent", %{
+    test "an ungranted world's refusal says the name the caller already sent", %{
       conn: conn,
       token: token
     } do
       forbidden = "secret-name-#{System.unique_integer([:positive])}"
-      body = json_response(run(conn, token, "return 1", %{"ledger" => forbidden}), 403)
+      body = json_response(run(conn, token, "return 1", %{"world" => forbidden}), 403)
 
       # It echoes what was sent, and nothing about what exists.
       assert body["error"]["repair"] =~ forbidden

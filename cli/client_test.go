@@ -60,7 +60,7 @@ func TestRunCarriesThePinnedNameWhenThereIsOne(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The name goes back exactly as it was held, keyed by what each ledger is
+	// The name goes back exactly as it was held, keyed by what each world is
 	// called. Anything else and the node reopens the wrong transaction.
 	pinned, ok := node.sent[0].Body["name"].(map[string]any)
 	if !ok || pinned["tenant-7"] != float64(12) {
@@ -102,17 +102,17 @@ func TestRunTakesAnyShapeBack(t *testing.T) {
 
 func TestClaimTakesAName(t *testing.T) {
 	node := &fakeNode{replies: []reply{{status: 201, body: map[string]any{
-		"ledger": "orders", "name": map[string]any{"orders": 0},
+		"world": "orders", "name": map[string]any{"orders": 0},
 	}}}}
 	client, _ := clientWith(t, node)
 
 	if _, err := client.Claim(context.Background(), "orders"); err != nil {
 		t.Fatal(err)
 	}
-	if got := node.sent[0].Path; got != "/ledgers" {
+	if got := node.sent[0].Path; got != "/worlds" {
 		t.Fatalf("claim went to %s", got)
 	}
-	if got := node.sent[0].Body["ledger"]; got != "orders" {
+	if got := node.sent[0].Body["world"]; got != "orders" {
 		t.Fatalf("claim carried %v", got)
 	}
 }
@@ -127,7 +127,7 @@ func mustJSON(value any) string {
 
 func TestEveryRequestCarriesTheBearerToken(t *testing.T) {
 	node := &fakeNode{replies: []reply{{status: 200, body: map[string]any{
-		"login": "shinyobjectz", "caller": "abc", "ledgers": []string{"tenant-7"},
+		"login": "shinyobjectz", "caller": "abc", "worlds": []string{"tenant-7"},
 	}}}}
 	client, _ := clientWith(t, node)
 

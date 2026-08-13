@@ -25,7 +25,7 @@ defmodule Blazie.Formula do
       {assertions, reads} = Formula.run(doubled, snapshot)
   """
 
-  alias Blazie.{Fact, Ledger, Snapshot}
+  alias Blazie.{Fact, World, Snapshot}
 
   @enforce_keys [:id, :compute]
   defstruct [:id, :compute]
@@ -45,23 +45,23 @@ defmodule Blazie.Formula do
   set that says when to ask again. Nothing is written — storing a formula's
   answer is a performance choice, so materializing is a separate decision.
   """
-  @spec run(t(), Snapshot.t()) :: {[Ledger.assertion()], read_set()}
+  @spec run(t(), Snapshot.t()) :: {[World.assertion()], read_set()}
   def run(%__MODULE__{} = formula, %Snapshot{} = snapshot) do
     {assertions, reads} = Snapshot.track_reads(fn -> formula.compute.(snapshot) end)
     {Enum.map(assertions, &stamp(&1, formula.id)), reads}
   end
 
   @doc """
-  Write the formula's answer into a ledger, and return the read set with it.
+  Write the formula's answer into a world, and return the read set with it.
 
   Materializing is optional by construction — this exists for when keeping the
   answer is cheaper than recomputing it, not because the answer needs a home.
   """
-  @spec materialize(t(), Snapshot.t(), Ledger.ref()) ::
+  @spec materialize(t(), Snapshot.t(), World.ref()) ::
           {:ok, pos_integer(), read_set()}
-  def materialize(%__MODULE__{} = formula, %Snapshot{} = snapshot, ledger) do
+  def materialize(%__MODULE__{} = formula, %Snapshot{} = snapshot, world) do
     {assertions, reads} = run(formula, snapshot)
-    {:ok, tx} = Ledger.append(ledger, assertions)
+    {:ok, tx} = World.append(world, assertions)
     {:ok, tx, reads}
   end
 

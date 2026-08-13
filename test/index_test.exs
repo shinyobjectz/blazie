@@ -2,28 +2,28 @@ defmodule Blazie.IndexTest do
   @moduledoc """
   Facts are reached by a sort order rather than by scanning.
 
-  Doctrine 12: an index is the engine's business. Nothing above the ledger
+  Doctrine 12: an index is the engine's business. Nothing above the world
   knows these exist — the tests below are about answers being identical and
   the work being smaller.
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Ledger, Snapshot, TestLedger}
+  alias Blazie.{World, Snapshot, TestLedger}
 
   setup do
-    ledger = TestLedger.open()
+    world = TestLedger.open()
 
     {:ok, _} =
-      Ledger.append(ledger, [
+      World.append(world, [
         {1, "height", 180},
         {1, "colour", "blue"},
         {2, "height", 190},
         {2, "parent", 1}
       ])
 
-    {:ok, _} = Ledger.append(ledger, [{3, "height", 200}, {3, "parent", 1}])
+    {:ok, _} = World.append(world, [{3, "height", 200}, {3, "parent", 1}])
 
-    %{ledger: ledger, snapshot: Snapshot.open([ledger])}
+    %{world: world, snapshot: Snapshot.open([world])}
   end
 
   describe "every pattern shape answers the same as a scan would" do
@@ -67,17 +67,17 @@ defmodule Blazie.IndexTest do
       assert txs == Enum.sort(txs)
     end
 
-    test "an earlier name does not see later facts", %{ledger: ledger} do
-      early = Snapshot.open([ledger])
-      {:ok, _} = Ledger.append(ledger, [{4, "height", 210}])
+    test "an earlier name does not see later facts", %{world: world} do
+      early = Snapshot.open([world])
+      {:ok, _} = World.append(world, [{4, "height", 210}])
 
       assert length(Snapshot.find(early, attribute: "height")) == 3
-      assert length(Snapshot.find(Snapshot.open([ledger]), attribute: "height")) == 4
+      assert length(Snapshot.find(Snapshot.open([world]), attribute: "height")) == 4
     end
 
-    test "composing several ledgers still answers across them", %{ledger: a} do
+    test "composing several ledgers still answers across them", %{world: a} do
       b = TestLedger.open()
-      {:ok, _} = Ledger.append(b, [{9, "height", 1}])
+      {:ok, _} = World.append(b, [{9, "height", 1}])
 
       assert length(Snapshot.find(Snapshot.open([a, b]), attribute: "height")) == 4
     end
@@ -85,18 +85,18 @@ defmodule Blazie.IndexTest do
 
   describe "the work is smaller, not just the same" do
     @tag timeout: 30_000
-    test "a targeted question over a large ledger stays fast" do
-      ledger = TestLedger.open()
+    test "a targeted question over a large world stays fast" do
+      world = TestLedger.open()
 
       # 20k facts across 10k entities and two attributes.
       for chunk <- Enum.chunk_every(1..10_000, 500) do
         facts =
           Enum.flat_map(chunk, fn n -> [{n, "height", n}, {n, "colour", "c#{rem(n, 7)}"}] end)
 
-        {:ok, _} = Ledger.append(ledger, facts)
+        {:ok, _} = World.append(world, facts)
       end
 
-      snapshot = Snapshot.open([ledger])
+      snapshot = Snapshot.open([world])
 
       {by_id, _} = :timer.tc(fn -> Snapshot.find(snapshot, id: 7777) end)
       {by_pair, _} = :timer.tc(fn -> Snapshot.find(snapshot, id: 7777, attribute: "height") end)

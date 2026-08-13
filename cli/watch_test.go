@@ -11,7 +11,7 @@ import (
 
 // The channel protocol, without a socket underneath it. Everything here is
 // about the five-slot array and the one thing that must not be swallowed: a
-// join refused for a ledger this caller may not name.
+// join refused for a world this caller may not name.
 
 func TestSocketURLSpeaksVersionTwoAndCarriesTheToken(t *testing.T) {
 	got, err := socketURL("http://127.0.0.1:4000", "a-token", nil)
@@ -58,7 +58,7 @@ func TestSocketURLRefusesSomethingThatIsNotAnHTTPURL(t *testing.T) {
 func TestAChannelMessageRoundTrips(t *testing.T) {
 	encoded, err := phxMessage{
 		JoinRef: "1", Ref: "1", Topic: watchTopic, Event: "phx_join",
-		Payload: json.RawMessage(`{"ledgers":["tenant-7"]}`),
+		Payload: json.RawMessage(`{"worlds":["tenant-7"]}`),
 	}.encode()
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestDecodeRefusesSomethingThatIsNotFiveSlots(t *testing.T) {
 }
 
 // The refusal a join can produce is the one this whole design is about: a
-// caller may hold a socket and still not be allowed to name a ledger.
+// caller may hold a socket and still not be allowed to name a world.
 func TestARefusedJoinCarriesItsRepair(t *testing.T) {
 	message := phxMessage{
 		JoinRef: "1", Ref: "1", Topic: watchTopic, Event: "phx_reply",

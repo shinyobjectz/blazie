@@ -7,28 +7,28 @@ defmodule Blazie.Drill do
   proven by the last restore. This deployment's last restore was done by a
   human, by hand, once. That is a rumour with a timestamp on it, and the answer
   to a rumour here is the same as the answer to everything else — make it a job,
-  and let the ledger hold what it proved.
+  and let the world hold what it proved.
 
-  So every cadence this pulls one ledger back out of the backup, opens it, asks
-  it for every fact it holds, and asks the live ledger the same question. If the
+  So every cadence this pulls one world back out of the backup, opens it, asks
+  it for every fact it holds, and asks the live world the same question. If the
   two answers differ the run fails, and the failure is a fact.
 
   ## Bytes matching is not proof; answering the same is
 
   `Backup.verify/1` already compares byte counts, and a byte count is exactly
   what a broken restore has plenty of. The question here is asked *of an opened
-  ledger*: the copy is renamed, opened through `Store.File` like any other
-  ledger, and read back through `Ledger.find_at/3` with an empty pattern, which
+  world*: the copy is renamed, opened through `Store.File` like any other
+  world, and read back through `World.find_at/3` with an empty pattern, which
   is every fact it holds.
 
-  The comparison is made **at the restored ledger's transaction**, not at the
-  live one's. A backup is always a prefix — a run copies, and the live ledger
+  The comparison is made **at the restored world's transaction**, not at the
+  live one's. A backup is always a prefix — a run copies, and the live world
   goes on being written to — so the honest question is whether the copy answers,
   at transaction *n*, exactly what the original answers at *n*. That is a
   snapshot, and an answer at a snapshot is the same answer forever, which is why
   this can be an equality rather than a tolerance.
 
-  ## One ledger per run, chosen by what has waited longest
+  ## One world per run, chosen by what has waited longest
 
   A full drill every cadence would restore the entire backup every cadence, and
   the property that makes the backup affordable is precisely that it never moves
@@ -36,30 +36,30 @@ defmodule Blazie.Drill do
   minutes would cost more than the thing it checks, every time, forever — and a
   check nobody can afford is a check somebody turns off.
 
-  So a run drills exactly one ledger, and the one it picks is the one drilled
+  So a run drills exactly one world, and the one it picks is the one drilled
   longest ago, read out of this job's own past facts. No state is kept in this
-  process, so a redeploy picks the rotation up where it left off: the ledger is
+  process, so a redeploy picks the rotation up where it left off: the world is
   the state, the same way it is already the scheduler. With *n* ledgers every one
-  of them is proven inside *n* cadences, and a run costs one ledger rather than
+  of them is proven inside *n* cadences, and a run costs one world rather than
   all of them. The default cadence is six hours for the same reason — a drill is
   a real download and a real replay, and what it checks changes on the scale of
   days.
 
-  Only that ledger's segments cross the wire. `Blazie.Drill.Sample` is a
+  Only that world's segments cross the wire. `Blazie.Drill.Sample` is a
   `Backup.Target` that wraps the configured one and hides every key but the
-  chosen ledger's, so this runs `Backup.restore/1` itself rather than a second
+  chosen world's, so this runs `Backup.restore/1` itself rather than a second
   restore path that could be correct while the real one is not. It also refuses
   to put, so a drill cannot write to the backup it is checking.
 
   ## Limits, stated rather than hidden
 
   **Only ledgers that are open are drilled.** Comparing means asking the live
-  ledger the same question, and a ledger nobody has opened would have to be
+  world the same question, and a world nobody has opened would have to be
   opened to ask — which would mean the drill starting live ledgers on the node.
-  It will not. A cold tenant ledger is backed up and not drilled, and the
+  It will not. A cold tenant world is backed up and not drilled, and the
   `drilled` facts are how you see which ones were.
 
-  **A ledger larger than `max_bytes` is skipped**, and named in a `too_big` fact
+  **A world larger than `max_bytes` is skipped**, and named in a `too_big` fact
   every run rather than passed over quietly. The default ceiling is 512 MB,
   because the scratch disk under a release is not the data volume, and a drill
   that fills it takes the node with it.
@@ -81,12 +81,12 @@ defmodule Blazie.Drill do
   have buried rather than shown.
   """
 
-  alias Blazie.{Attribute, Backup, Job, Ledger, Snapshot, Store}
+  alias Blazie.{Attribute, Backup, Job, World, Snapshot, Store}
 
   @id "drill"
-  @ledger "$drill"
+  @world "$drill"
 
-  # Six hours. A drill is a real download and a real replay of one ledger, and
+  # Six hours. A drill is a real download and a real replay of one world, and
   # what it is checking — can this backup be given back — changes on the scale of
   # days. The backup's own cadence is minutes because its cost is only what
   # changed; this one's cost is not.
@@ -110,7 +110,7 @@ defmodule Blazie.Drill do
   #
   # `proven_at` is the only one with cardinality one, and the question it answers
   # is why: "when did we last prove we could restore" wants the latest and only
-  # the latest. Every earlier one is still in the ledger — nothing is rewritten,
+  # the latest. Every earlier one is still in the world — nothing is rewritten,
   # so a later fact simply corrects it.
   @spec seed() :: [{String.t(), String.t(), term()}]
   def seed do
@@ -123,9 +123,9 @@ defmodule Blazie.Drill do
       Attribute.define("proven_at", answers: "integer")
   end
 
-  @doc "The ledger a drill's own history is written to."
-  @spec ledger() :: String.t()
-  def ledger, do: @ledger
+  @doc "The world a drill's own history is written to."
+  @spec world() :: String.t()
+  def world, do: @world
 
   @doc "Declare the drill as a job, with how often to run."
   @spec declare(keyword()) :: [tuple()]
@@ -136,7 +136,7 @@ defmodule Blazie.Drill do
 
   A restore that cannot be given back is raised rather than returned, because
   `Job.run/4` turns a raise into a `failed` fact — so a backup that has stopped
-  being restorable becomes a question the ledger answers rather than a silence.
+  being restorable becomes a question the world answers rather than a silence.
 
   The cost of that choice, said out loud: a failed run keeps its numbers in the
   failure's message and not in `compared_facts`, because `Job.run/4` records the
@@ -154,9 +154,9 @@ defmodule Blazie.Drill do
   end
 
   @doc """
-  Restore one ledger into a scratch directory, open it, and ask it everything.
+  Restore one world into a scratch directory, open it, and ask it everything.
 
-  `history` is a snapshot of this job's own ledger. Which ledgers have been
+  `history` is a snapshot of this job's own world. Which ledgers have been
   drilled, and in what order, is read out of it — that is the whole of the
   rotation. A snapshot with none of those facts in it picks whatever is first.
 
@@ -196,7 +196,7 @@ defmodule Blazie.Drill do
   # that set, because it exists entirely to catch the case where something else
   # is silently not working.
 
-  @doc "Start the drill job under a runner, seeding its ledger if it is new."
+  @doc "Start the drill job under a runner, seeding its world if it is new."
   @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
     %{id: __MODULE__, start: {__MODULE__, :start_runner, [opts]}, type: :worker}
@@ -205,21 +205,21 @@ defmodule Blazie.Drill do
   @doc false
   def start_runner(opts) do
     every = Keyword.get(opts, :every, @default_every)
-    {:ok, ledger} = Ledger.open(@ledger)
+    {:ok, world} = World.open(@world)
 
-    if Ledger.tx(ledger) == 0 do
-      Ledger.append(ledger, Attribute.seed() ++ Job.seed() ++ seed() ++ declare(every: every))
+    if World.tx(world) == 0 do
+      World.append(world, Attribute.seed() ++ Job.seed() ++ seed() ++ declare(every: every))
     end
 
     Job.Runner.start_link(
-      ledger: ledger,
+      world: world,
       jobs: [job(opts)],
       every: :timer.seconds(every),
       name: __MODULE__.Runner
     )
   end
 
-  # ── choosing which ledger to prove ─────────────────────────────────────────
+  # ── choosing which world to prove ─────────────────────────────────────────
 
   # Least recently drilled first, and never drilled before that. The rotation
   # lives in the drill's own past facts rather than in this process, so a
@@ -231,14 +231,14 @@ defmodule Blazie.Drill do
       |> Enum.map(& &1.value)
       |> Enum.with_index()
       # Later entries overwrite earlier ones, so this holds the *last* time each
-      # ledger was drilled rather than the first.
+      # world was drilled rather than the first.
       |> Map.new()
 
-    Ledger.open_ledgers()
+    World.open_worlds()
     |> Enum.sort_by(&Map.get(order, &1, -1))
     |> Enum.reduce_while({nil, []}, fn name, {nil, too_big} ->
       case held(target, name) do
-        # Nothing held under this name: a ledger kept in memory, or one opened
+        # Nothing held under this name: a world kept in memory, or one opened
         # since the last backup run. Neither is a finding.
         0 -> {:cont, {nil, too_big}}
         held when held > ceiling -> {:cont, {nil, [name | too_big]}}
@@ -248,7 +248,7 @@ defmodule Blazie.Drill do
   end
 
   # `Backup.held/2` insists the target answered, and a target that cannot be
-  # listed would otherwise reach the ledger as a match error with no repair on
+  # listed would otherwise reach the world as a match error with no repair on
   # it. Said properly, because a boundary that rejects without saying how to
   # comply produces loops rather than compliance.
   defp held(target, name) do
@@ -286,8 +286,8 @@ defmodule Blazie.Drill do
     after
       # Both of these run whether the drill proved something or raised on the way
       # there. A scratch directory left behind is a disk that fills one cadence
-      # at a time, and a ledger left open is a name nobody can ever take again.
-      Ledger.close(copy)
+      # at a time, and a world left open is a name nobody can ever take again.
+      World.close(copy)
       File.rm_rf(scratch)
     end
   end
@@ -308,9 +308,9 @@ defmodule Blazie.Drill do
     {:error,
      %{
        problem: :nothing_came_back,
-       ledger: name,
+       world: name,
        repair:
-         "The backup holds segments for this ledger and restoring it produced no file. " <>
+         "The backup holds segments for this world and restoring it produced no file. " <>
            "Check the target is readable, then run Backup.verify/1 to see what it believes " <>
            "it holds."
      }}
@@ -320,7 +320,7 @@ defmodule Blazie.Drill do
     {:error,
      %{
        problem: :incomplete,
-       ledger: name,
+       world: name,
        incomplete: incomplete,
        repair:
          "A segment is missing, so the restore stopped at the hole rather than gluing across " <>
@@ -333,10 +333,10 @@ defmodule Blazie.Drill do
 
   # ── asking both the same question ──────────────────────────────────────────
 
-  # A ledger's file is named for the ledger, so the copy is renamed before it is
-  # opened. This is the one thing a drill has to get right: `Ledger.open/2` hands
-  # back the ledger already open under a name, so opening the copy under its
-  # original name would silently return the *live* ledger — and the drill would
+  # A world's file is named for the world, so the copy is renamed before it is
+  # opened. This is the one thing a drill has to get right: `World.open/2` hands
+  # back the world already open under a name, so opening the copy under its
+  # original name would silently return the *live* world — and the drill would
   # compare it against itself and pass forever.
   defp ask_both(name, copy, dir) do
     File.rename!(
@@ -344,26 +344,26 @@ defmodule Blazie.Drill do
       Path.join(dir, Store.File.filename(copy))
     )
 
-    {:ok, restored} = Ledger.open(copy, store: {Store.File, dir: dir})
-    live = Ledger.via(name)
-    at = Ledger.tx(restored)
+    {:ok, restored} = World.open(copy, store: {Store.File, dir: dir})
+    live = World.via(name)
+    at = World.tx(restored)
 
     # `find_at/3` with an empty pattern rather than `facts_at/2`. They are the
-    # same answer on an unbounded ledger and not on a bounded one: only
+    # same answer on an unbounded world and not on a bounded one: only
     # `find_at/3` goes back to the store for facts that have been evicted, and a
-    # drill comparing a trimmed live ledger against a whole restored one would
+    # drill comparing a trimmed live world against a whole restored one would
     # report a difference that is not there.
-    theirs = Ledger.find_at(restored, at, [])
-    ours = Ledger.find_at(live, at, [])
+    theirs = World.find_at(restored, at, [])
+    ours = World.find_at(live, at, [])
 
     cond do
-      at == 0 and Ledger.tx(live) > 0 ->
+      at == 0 and World.tx(live) > 0 ->
         {:error,
          %{
            problem: :restored_nothing,
-           ledger: name,
+           world: name,
            repair:
-             "The restored copy opened at transaction 0 while the live ledger is further on. " <>
+             "The restored copy opened at transaction 0 while the live world is further on. " <>
                "The segments are there and unreadable — a torn first record, or bytes the " <>
                "target gave back that are not the bytes that were put."
          }}
@@ -372,12 +372,12 @@ defmodule Blazie.Drill do
         {:error,
          %{
            problem: :answers_differently,
-           ledger: name,
+           world: name,
            at: at,
            live_facts: length(ours),
            restored_facts: length(theirs),
            repair:
-             "The restored ledger does not answer at transaction #{at} what the live one " <>
+             "The restored world does not answer at transaction #{at} what the live one " <>
                "answers there, so the copy is not a prefix of the original. Do not trust this " <>
                "backup until a run of Backup.verify/1 and a re-copy make this drill pass."
          }}
@@ -389,17 +389,17 @@ defmodule Blazie.Drill do
 
   # Belt and braces on the one mistake that would make this whole module a lie.
   # The name is minted fresh per run so it cannot already be taken, and this
-  # checks anyway, because a drill quietly comparing a live ledger against itself
+  # checks anyway, because a drill quietly comparing a live world against itself
   # would pass forever and prove nothing.
   defp free?(copy) do
-    if copy in Ledger.open_ledgers() do
+    if copy in World.open_worlds() do
       {:error,
        %{
          problem: :name_taken,
-         ledger: copy,
+         world: copy,
          repair:
-           "A drill's scratch ledger name is already open. Close it — the drill must never " <>
-             "open the copy under a name that could resolve to a live ledger."
+           "A drill's scratch world name is already open. Close it — the drill must never " <>
+             "open the copy under a name that could resolve to a live world."
        }}
     else
       :ok
@@ -480,12 +480,12 @@ end
 
 defmodule Blazie.Drill.Sample do
   @moduledoc """
-  One ledger's worth of a backup, and nothing else.
+  One world's worth of a backup, and nothing else.
 
   A `Blazie.Backup.Target` that wraps the configured one and hides every key
-  but the chosen ledger's segments. That is what lets a drill sample:
+  but the chosen world's segments. That is what lets a drill sample:
   `Backup.restore/1` restores everything it can see, so narrowing what it can see
-  restores one ledger without a second restore path that could be correct while
+  restores one world without a second restore path that could be correct while
   the real one is not.
 
   It refuses to put. A drill reads the backup, and nothing about proving a

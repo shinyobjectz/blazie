@@ -5,11 +5,11 @@ defmodule Blazie.FormulaTest do
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Fact, Formula, Ledger, Snapshot}
+  alias Blazie.{Fact, Formula, World, Snapshot}
   alias Blazie.TestLedger
 
   setup do
-    %{ledger: TestLedger.open()}
+    %{world: TestLedger.open()}
   end
 
   defp doubled do
@@ -21,38 +21,38 @@ defmodule Blazie.FormulaTest do
   end
 
   describe "a formula is a fact" do
-    test "every fact it produced names it", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      {assertions, _reads} = Formula.run(doubled(), Snapshot.open([ledger]))
+    test "every fact it produced names it", %{world: world} do
+      {:ok, _} = World.append(world, [{42, "height", 180}])
+      {assertions, _reads} = Formula.run(doubled(), Snapshot.open([world]))
 
       assert assertions == [{42, "double_height", 360, :doubled}]
     end
 
-    test "materializing writes facts that name the formula", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      snapshot = Snapshot.open([ledger])
+    test "materializing writes facts that name the formula", %{world: world} do
+      {:ok, _} = World.append(world, [{42, "height", 180}])
+      snapshot = Snapshot.open([world])
 
-      {:ok, tx, _reads} = Formula.materialize(doubled(), snapshot, ledger)
+      {:ok, tx, _reads} = Formula.materialize(doubled(), snapshot, world)
 
       assert [%Fact{attribute: "double_height", value: 360, by: :doubled} = fact] =
-               Ledger.facts_at(ledger, tx) |> Enum.filter(&(&1.tx == tx))
+               World.facts_at(world, tx) |> Enum.filter(&(&1.tx == tx))
 
       refute Fact.from_outside?(fact)
     end
 
-    test "provenance is a column, so what a formula made is a question", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      {:ok, _, _} = Formula.materialize(doubled(), Snapshot.open([ledger]), ledger)
+    test "provenance is a column, so what a formula made is a question", %{world: world} do
+      {:ok, _} = World.append(world, [{42, "height", 180}])
+      {:ok, _, _} = Formula.materialize(doubled(), Snapshot.open([world]), world)
 
-      snapshot = Snapshot.open([ledger])
+      snapshot = Snapshot.open([world])
       assert [%Fact{attribute: "double_height"}] = Snapshot.find(snapshot, by: :doubled)
     end
   end
 
   describe "the graph is observed, not declared" do
-    test "running a formula records what it read", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      {_assertions, reads} = Formula.run(doubled(), Snapshot.open([ledger]))
+    test "running a formula records what it read", %{world: world} do
+      {:ok, _} = World.append(world, [{42, "height", 180}])
+      {_assertions, reads} = Formula.run(doubled(), Snapshot.open([world]))
 
       assert reads == [[attribute: "height"]]
     end
@@ -65,23 +65,23 @@ defmodule Blazie.FormulaTest do
   end
 
   describe "a formula says what, never when" do
-    test "the same snapshot gives the same answer", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      snapshot = Snapshot.open([ledger])
+    test "the same snapshot gives the same answer", %{world: world} do
+      {:ok, _} = World.append(world, [{42, "height", 180}])
+      snapshot = Snapshot.open([world])
 
       {first, _} = Formula.run(doubled(), snapshot)
-      {:ok, _} = Ledger.append(ledger, [{43, "height", 190}])
+      {:ok, _} = World.append(world, [{43, "height", 190}])
       {second, _} = Formula.run(doubled(), snapshot)
 
       assert first == second
     end
 
-    test "a later snapshot gives a later answer", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      {early, _} = Formula.run(doubled(), Snapshot.open([ledger]))
+    test "a later snapshot gives a later answer", %{world: world} do
+      {:ok, _} = World.append(world, [{42, "height", 180}])
+      {early, _} = Formula.run(doubled(), Snapshot.open([world]))
 
-      {:ok, _} = Ledger.append(ledger, [{43, "height", 190}])
-      {late, _} = Formula.run(doubled(), Snapshot.open([ledger]))
+      {:ok, _} = World.append(world, [{43, "height", 190}])
+      {late, _} = Formula.run(doubled(), Snapshot.open([world]))
 
       assert length(early) == 1
       assert length(late) == 2
@@ -89,45 +89,45 @@ defmodule Blazie.FormulaTest do
   end
 
   describe "re-execution is bounded by the read set" do
-    setup %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      before = Snapshot.open([ledger])
+    setup %{world: world} do
+      {:ok, _} = World.append(world, [{42, "height", 180}])
+      before = Snapshot.open([world])
       {_assertions, reads} = Formula.run(doubled(), before)
       %{before: before, reads: reads}
     end
 
     test "a fact inside the read set makes it stale", ctx do
-      {:ok, _} = Ledger.append(ctx.ledger, [{43, "height", 190}])
-      arrived = Formula.since(ctx.before, Snapshot.open([ctx.ledger]))
+      {:ok, _} = World.append(ctx.world, [{43, "height", 190}])
+      arrived = Formula.since(ctx.before, Snapshot.open([ctx.world]))
 
       assert Formula.stale?(ctx.reads, arrived)
     end
 
     test "a fact outside the read set does not", ctx do
-      {:ok, _} = Ledger.append(ctx.ledger, [{43, "favourite_colour", :green}])
-      arrived = Formula.since(ctx.before, Snapshot.open([ctx.ledger]))
+      {:ok, _} = World.append(ctx.world, [{43, "favourite_colour", :green}])
+      arrived = Formula.since(ctx.before, Snapshot.open([ctx.world]))
 
       assert arrived != []
       refute Formula.stale?(ctx.reads, arrived)
     end
 
     test "nothing arriving is never stale", ctx do
-      assert Formula.since(ctx.before, Snapshot.open([ctx.ledger])) == []
+      assert Formula.since(ctx.before, Snapshot.open([ctx.world])) == []
       refute Formula.stale?(ctx.reads, [])
     end
   end
 
   describe "tracking is off unless a formula turned it on" do
-    test "an ordinary read records nothing", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      Snapshot.find(Snapshot.open([ledger]), attribute: "height")
+    test "an ordinary read records nothing", %{world: world} do
+      {:ok, _} = World.append(world, [{42, "height", 180}])
+      Snapshot.find(Snapshot.open([world]), attribute: "height")
 
       assert Process.get(:blazie_reads) == nil
     end
 
-    test "tracking is restored after a formula runs", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
-      Formula.run(doubled(), Snapshot.open([ledger]))
+    test "tracking is restored after a formula runs", %{world: world} do
+      {:ok, _} = World.append(world, [{42, "height", 180}])
+      Formula.run(doubled(), Snapshot.open([world]))
 
       assert Process.get(:blazie_reads) == nil
     end

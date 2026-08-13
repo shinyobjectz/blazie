@@ -3,7 +3,7 @@ defmodule Blazie.StorageEventsTest do
   Doctrine 20: a storage event is not a fact.
 
   Checkpoints, segment rotation and a backup run change bytes and change nothing
-  anybody asked about. Nothing below the ledger may announce, and the ledger
+  anybody asked about. Nothing below the world may announce, and the world
   announces only what it appended.
 
   This is asserted rather than assumed because the failure is catastrophic and
@@ -14,14 +14,14 @@ defmodule Blazie.StorageEventsTest do
   housekeeping, and it grows fastest exactly when it is busiest.
 
   The structure makes this true today: checkpointing happens inside `Store.File`,
-  which is below the ledger and holds no reference to the watcher registry, and
-  the backup reads files without going through a ledger at all. That is an
+  which is below the world and holds no reference to the watcher registry, and
+  the backup reads files without going through a world at all. That is an
   argument, not a proof — and it would survive exactly until somebody added a
   convenience announcement.
   """
   use ExUnit.Case, async: false
 
-  alias Blazie.{Attribute, Backup, Ledger, Store, Subscription}
+  alias Blazie.{Attribute, Backup, World, Store, Subscription}
 
   setup do
     root = Path.join(System.tmp_dir!(), "lr_events_#{System.unique_integer([:positive])}")
@@ -34,16 +34,16 @@ defmodule Blazie.StorageEventsTest do
     name = {:events, System.unique_integer([:positive])}
 
     # A checkpoint every other transaction, so the run below crosses several.
-    {:ok, ledger} =
-      Ledger.open(name, store: {Store.File, dir: ledgers, checkpoint_every: 2})
+    {:ok, world} =
+      World.open(name, store: {Store.File, dir: ledgers, checkpoint_every: 2})
 
-    on_exit(fn -> Ledger.close(name) end)
+    on_exit(fn -> World.close(name) end)
 
-    {:ok, _} = Ledger.append(ledger, Attribute.seed())
-    {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
+    {:ok, _} = World.append(world, Attribute.seed())
+    {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
 
     %{
-      ledger: ledger,
+      world: world,
       name: name,
       ledgers: ledgers,
       opts: [
@@ -64,12 +64,12 @@ defmodule Blazie.StorageEventsTest do
 
   describe "a watcher wakes for appends and for nothing else" do
     test "a checkpoint is not an announcement", ctx do
-      {:ok, _ref} = Subscription.watch([ctx.ledger], attribute: "height")
+      {:ok, _ref} = Subscription.watch([ctx.world], attribute: "height")
       drain()
 
       # Ten appends at checkpoint_every: 2 means several checkpoints are written
       # underneath. If one of them announced, the count would exceed the writes.
-      for n <- 1..10, do: {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", n}])
+      for n <- 1..10, do: {:ok, _} = World.append(ctx.world, [{"ada", "height", n}])
 
       assert drain() == 10, "a watcher was woken more times than there were writes"
 
@@ -78,9 +78,9 @@ defmodule Blazie.StorageEventsTest do
     end
 
     test "a backup run is not an announcement", ctx do
-      for n <- 1..6, do: {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", n}])
+      for n <- 1..6, do: {:ok, _} = World.append(ctx.world, [{"ada", "height", n}])
 
-      {:ok, _ref} = Subscription.watch([ctx.ledger], attribute: "height")
+      {:ok, _ref} = Subscription.watch([ctx.world], attribute: "height")
       drain()
 
       {:ok, report} = Backup.run(ctx.opts)
@@ -90,36 +90,36 @@ defmodule Blazie.StorageEventsTest do
     end
 
     test "a second backup run, and a verify, are not announcements either", ctx do
-      for n <- 1..6, do: {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", n}])
+      for n <- 1..6, do: {:ok, _} = World.append(ctx.world, [{"ada", "height", n}])
       {:ok, _} = Backup.run(ctx.opts)
 
-      {:ok, _ref} = Subscription.watch([ctx.ledger], attribute: "height")
+      {:ok, _ref} = Subscription.watch([ctx.world], attribute: "height")
       drain()
 
       {:ok, _} = Backup.run(ctx.opts)
       {:ok, _} = Backup.verify(ctx.opts)
-      {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", 99}])
+      {:ok, _} = World.append(ctx.world, [{"ada", "height", 99}])
 
       # Exactly one: the write. Not the backup, not the verify.
       assert drain() == 1
     end
 
     test "reading does not announce, however much of it there is", ctx do
-      for n <- 1..6, do: {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", n}])
+      for n <- 1..6, do: {:ok, _} = World.append(ctx.world, [{"ada", "height", n}])
 
-      {:ok, _ref} = Subscription.watch([ctx.ledger], attribute: "height")
+      {:ok, _ref} = Subscription.watch([ctx.world], attribute: "height")
       drain()
 
-      tx = Ledger.tx(ctx.ledger)
-      for _ <- 1..50, do: Ledger.find_at(ctx.ledger, tx, attribute: "height")
-      for _ <- 1..50, do: Ledger.facts_at(ctx.ledger, tx)
+      tx = World.tx(ctx.world)
+      for _ <- 1..50, do: World.find_at(ctx.world, tx, attribute: "height")
+      for _ <- 1..50, do: World.facts_at(ctx.world, tx)
 
       assert drain() == 0, "a read woke a watcher"
     end
   end
 
   describe "the registry itself" do
-    test "nothing below the ledger holds the watcher registry", _ctx do
+    test "nothing below the world holds the watcher registry", _ctx do
       # The structural argument, made checkable. If a storage module ever learns
       # the name of the registry, this fails before the behaviour does.
       below = [
@@ -131,7 +131,7 @@ defmodule Blazie.StorageEventsTest do
 
       for path <- below do
         refute File.read!(path) =~ "Watchers",
-               "#{path} names the watcher registry, and nothing below the ledger may announce"
+               "#{path} names the watcher registry, and nothing below the world may announce"
       end
     end
   end

@@ -3,13 +3,13 @@ defmodule Blazie.AuthorityTest do
   Doctrine 17: authorization is which ledgers a caller may name. Not row rules,
   not predicates.
 
-  Grants are facts, in a ledger, read from a snapshot — so revoking is a later
+  Grants are facts, in a world, read from a snapshot — so revoking is a later
   fact correcting an earlier one, and "who could open what, and when" is a
   question rather than an audit log.
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Authority, Ledger}
+  alias Blazie.{Authority, World}
 
   # A token per test rather than a shared reset: grants are keyed by caller, so
   # distinct callers cannot interfere and nothing global has to be torn down.
@@ -25,7 +25,7 @@ defmodule Blazie.AuthorityTest do
       assert Authority.allowed(token) == []
     end
 
-    test "a grant lets it name that ledger and no other", %{token: token} do
+    test "a grant lets it name that world and no other", %{token: token} do
       Authority.grant(token, "tenant-7")
 
       assert Authority.may_name?(token, "tenant-7")
@@ -72,19 +72,19 @@ defmodule Blazie.AuthorityTest do
     end
   end
 
-  describe "the authority ledger is never nameable" do
+  describe "the authority world is never nameable" do
     test "not by default", %{token: token} do
-      refute Authority.may_name?(token, Authority.ledger())
+      refute Authority.may_name?(token, Authority.world())
     end
 
     test "not even when granted", %{token: token} do
-      Authority.grant(token, Authority.ledger())
+      Authority.grant(token, Authority.world())
 
-      refute Authority.may_name?(token, Authority.ledger())
+      refute Authority.may_name?(token, Authority.world())
     end
 
     test "granting it is refused at the door rather than silently ignored", %{token: token} do
-      assert {:error, refusal} = Authority.grant_checked(token, Authority.ledger())
+      assert {:error, refusal} = Authority.grant_checked(token, Authority.world())
       assert refusal.problem == :authority_is_not_nameable
     end
   end
@@ -93,8 +93,8 @@ defmodule Blazie.AuthorityTest do
     test "the token itself is never stored", %{token: token} do
       Authority.grant(token, "tenant-7")
 
-      {:ok, ledger} = Ledger.open(Authority.ledger())
-      facts = Blazie.Snapshot.open([ledger]) |> Blazie.Snapshot.facts()
+      {:ok, world} = World.open(Authority.world())
+      facts = Blazie.Snapshot.open([world]) |> Blazie.Snapshot.facts()
 
       refute Enum.any?(facts, fn fact ->
                token in [fact.id, fact.value]

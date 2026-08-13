@@ -24,7 +24,7 @@ const version = "0.1.0"
 // The terminal's way in.
 //
 // Four operations reach this database and this is one of the two front doors
-// onto them. It holds no opinions the node does not hold: it names ledgers,
+// onto them. It holds no opinions the node does not hold: it names worlds,
 // puts questions to snapshots, and prints what comes back — including, above
 // all, the repair on anything refused.
 
@@ -69,7 +69,7 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		asJSON, err = cmdLogout(rest, out)
 	case "whoami":
 		asJSON, err = cmdWhoami(ctx, rest, out)
-	case "ledger":
+	case "world":
 		asJSON, err = cmdLedger(ctx, rest, out)
 	case "run":
 		asJSON, err = cmdRun(ctx, rest, out)
@@ -151,7 +151,7 @@ func hoistGlobals(args []string) (command string, rest []string, err error) {
 			return "", nil, &usageError{&Refusal{
 				Problem: "flag_before_command",
 				Repair: fmt.Sprintf("%s is a flag on a command rather than on blazie itself — "+
-					"put it after the command, as in `blazie ask <ledger> %s`. Only --url and "+
+					"put it after the command, as in `blazie ask <world> %s`. Only --url and "+
 					"--json may come first.", arg, arg),
 			}}
 		}
@@ -210,7 +210,7 @@ func (c *common) parse(args []string) error {
 //
 // Go's flag package stops at the first thing that is not a flag, so
 // `blazie ask tenant-7 --attribute height` would otherwise reach the node as a
-// request to open three ledgers, one of them called "--attribute". The node
+// request to open three worlds, one of them called "--attribute". The node
 // refuses that correctly and with a repair, which is the system working — and
 // is still a terrible thing to hand somebody who typed the obvious command.
 //
@@ -434,16 +434,16 @@ func cmdWhoami(ctx context.Context, args []string, out io.Writer) (bool, error) 
 	// written against — so it is the thing to paste when asking for one.
 	fmt.Fprintf(out, "%-9s %s\n", "caller", me.Caller)
 	fmt.Fprintf(out, "%-9s %s\n", "node", client.BaseURL)
-	fmt.Fprintf(out, "%-9s %s\n", "ledgers", plural(len(me.Ledgers), "ledger", "ledgers"))
+	fmt.Fprintf(out, "%-9s %s\n", "worlds", plural(len(me.Worlds), "world", "worlds"))
 	return flags.asJSON, nil
 }
 
-// ── ledger ls ───────────────────────────────────────────────────────────────
+// ── world ls ───────────────────────────────────────────────────────────────
 
 func cmdLedger(ctx context.Context, args []string, out io.Writer) (bool, error) {
-	// Flags first, so `blazie ledger --json ls` and `blazie ledger ls --json`
+	// Flags first, so `blazie world --json ls` and `blazie world ls --json`
 	// are the same command rather than one of them being a mystery.
-	flags := newFlags("ledger ls")
+	flags := newFlags("world ls")
 	if err := flags.parse(args); err != nil {
 		return false, err
 	}
@@ -459,8 +459,8 @@ func cmdLedger(ctx context.Context, args []string, out io.Writer) (bool, error) 
 	default:
 		return flags.asJSON, &usageError{&Refusal{
 			Problem: "unknown_command",
-			Repair: "There are two: `blazie ledger ls` for the ledgers this token may " +
-				"name, and `blazie ledger new <name>` to take one.",
+			Repair: "There are two: `blazie world ls` for the worlds this token may " +
+				"name, and `blazie world new <name>` to take one.",
 		}}
 	}
 
@@ -475,26 +475,26 @@ func cmdLedger(ctx context.Context, args []string, out io.Writer) (bool, error) 
 	}
 
 	if flags.asJSON {
-		writeJSON(out, map[string]any{"ledgers": me.Ledgers})
+		writeJSON(out, map[string]any{"worlds": me.Worlds})
 		return flags.asJSON, nil
 	}
 
-	if len(me.Ledgers) == 0 {
+	if len(me.Worlds) == 0 {
 		fmt.Fprintf(out, "%s\n", styleFor(out).dim(
-			"This token may name no ledgers. Authorization here is which ledgers a caller "+
+			"This token may name no worlds. Authorization here is which worlds a caller "+
 				"may name, so a grant has to be written for "+me.Caller+"."))
 		return flags.asJSON, nil
 	}
 
-	for _, ledger := range me.Ledgers {
-		fmt.Fprintln(out, ledger)
+	for _, world := range me.Worlds {
+		fmt.Fprintln(out, world)
 	}
 	return flags.asJSON, nil
 }
 
 // cmdLedgerNew takes a name. Claiming grants it to whoever claimed it, which is
 // the part a caller could never write for itself — every request is checked
-// against the ledgers it may name, so a new one was refused before it could be
+// against the worlds it may name, so a new one was refused before it could be
 // created.
 func cmdLedgerNew(ctx context.Context, flags *common, name string, out io.Writer) (bool, error) {
 	client, _, err := flags.client()
@@ -508,7 +508,7 @@ func cmdLedgerNew(ctx context.Context, flags *common, name string, out io.Writer
 	}
 
 	if flags.asJSON {
-		writeJSON(out, map[string]any{"ledger": name, "name": at})
+		writeJSON(out, map[string]any{"world": name, "name": at})
 		return flags.asJSON, nil
 	}
 
@@ -533,12 +533,12 @@ func cmdRun(ctx context.Context, args []string, out io.Writer) (bool, error) {
 	if len(rest) == 0 {
 		return flags.asJSON, &usageError{&Refusal{
 			Problem: "no_ledger",
-			Repair: "Name the ledger to run against — `blazie run <ledger> '<lua>'` or " +
-				"`blazie run <ledger> -f script.lua`.",
+			Repair: "Name the world to run against — `blazie run <world> '<lua>'` or " +
+				"`blazie run <world> -f script.lua`.",
 		}}
 	}
 
-	ledger := rest[0]
+	world := rest[0]
 	source, err := sourceFrom(rest[1:], *file)
 	if err != nil {
 		return flags.asJSON, err
@@ -560,7 +560,7 @@ func cmdRun(ctx context.Context, args []string, out io.Writer) (bool, error) {
 		}
 	}
 
-	result, err := client.Run(ctx, ledger, source, opts)
+	result, err := client.Run(ctx, world, source, opts)
 	if err != nil {
 		return flags.asJSON, err
 	}
@@ -611,7 +611,7 @@ func sourceFrom(args []string, file string) (string, error) {
 	default:
 		return "", &usageError{&Refusal{
 			Problem: "no_source",
-			Repair: "Give the lua to run — `blazie run <ledger> 'ada.height = 180'`, " +
+			Repair: "Give the lua to run — `blazie run <world> 'ada.height = 180'`, " +
 				"`-f script.lua`, or `-f -` for stdin.",
 		}}
 	}
@@ -626,12 +626,12 @@ func cmdWatch(ctx context.Context, args []string, out, errOut io.Writer) (bool, 
 		return false, err
 	}
 
-	ledgers := flags.set.Args()
-	if len(ledgers) == 0 {
+	worlds := flags.set.Args()
+	if len(worlds) == 0 {
 		return flags.asJSON, &usageError{&Refusal{
 			Problem: "no_ledger",
-			Repair: "Name the ledger to watch, and the lua to keep answering — " +
-				"`blazie watch <ledger> '<lua>'`.",
+			Repair: "Name the world to watch, and the lua to keep answering — " +
+				"`blazie watch <world> '<lua>'`.",
 		}}
 	}
 
@@ -640,15 +640,15 @@ func cmdWatch(ctx context.Context, args []string, out, errOut io.Writer) (bool, 
 		return flags.asJSON, err
 	}
 
-	// The first argument is the ledger, and everything after it is the chunk —
+	// The first argument is the world, and everything after it is the chunk —
 	// the same shape as `run`, because watching IS a run kept and a client that
 	// learned one should not discover the other wants something else.
-	source, err := sourceFrom(ledgers[1:], *file)
+	source, err := sourceFrom(worlds[1:], *file)
 	if err != nil {
 		return flags.asJSON, err
 	}
 
-	return flags.asJSON, client.Watch(ctx, out, errOut, ledgers[:1], source, flags.asJSON)
+	return flags.asJSON, client.Watch(ctx, out, errOut, worlds[:1], source, flags.asJSON)
 }
 
 // ── config ──────────────────────────────────────────────────────────────────
@@ -813,11 +813,11 @@ func writeUsage(out io.Writer) {
   blazie config             where the settings are and which node is in force
 
 %s
-  blazie ledger ls                the ledgers this token may name
-  blazie ledger new <name>        take a name, and hold what you took
-  blazie run <ledger> '<lua>'     run it, and print what it returned
-  blazie run <ledger> -f <file>   the same, from a file (- for stdin)
-  blazie watch <ledger> '<lua>'   the same chunk, answered again as things land
+  blazie world ls                the worlds this token may name
+  blazie world new <name>        take a name, and hold what you took
+  blazie run <world> '<lua>'     run it, and print what it returned
+  blazie run <world> -f <file>   the same, from a file (- for stdin)
+  blazie watch <world> '<lua>'   the same chunk, answered again as things land
 
 %s
   ada.height = 180                     a field is a field

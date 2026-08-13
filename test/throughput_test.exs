@@ -1,8 +1,8 @@
 defmodule Blazie.ThroughputTest do
   @moduledoc """
-  What one ledger costs per write, and where that stops working.
+  What one world costs per write, and where that stops working.
 
-  A ledger is a GenServer, so every append to one ledger is serialised through
+  A world is a GenServer, so every append to one world is serialised through
   one process. That is the design; the question this file answers is what the
   ceiling actually is, in transactions per second, in latency at the tail, and
   in bytes — and which of those three gives out first.
@@ -19,7 +19,7 @@ defmodule Blazie.ThroughputTest do
   """
   use ExUnit.Case, async: false
 
-  alias Blazie.{Ledger, Store}
+  alias Blazie.{World, Store}
 
   @moduletag :throughput
   @moduletag timeout: 3_600_000
@@ -33,13 +33,13 @@ defmodule Blazie.ThroughputTest do
     dir
   end
 
-  # Every ledger here is opened with an explicit store so nothing depends on
+  # Every world here is opened with an explicit store so nothing depends on
   # what the environment happens to be configured with.
   defp open_ledger(:memory, opts) do
     name = {:thr, System.unique_integer([:positive])}
-    {:ok, ledger} = Ledger.open(name, [store: {Store.Memory, []}] ++ opts)
-    ExUnit.Callbacks.on_exit(fn -> Ledger.close(name) end)
-    {name, ledger}
+    {:ok, world} = World.open(name, [store: {Store.Memory, []}] ++ opts)
+    ExUnit.Callbacks.on_exit(fn -> World.close(name) end)
+    {name, world}
   end
 
   defp open_ledger(:file, opts) do
@@ -50,9 +50,9 @@ defmodule Blazie.ThroughputTest do
     name = {:thr, System.unique_integer([:positive])}
     {store_opts, opts} = Keyword.split(opts, [:sync, :checkpoint_every])
     store = {Store.File, [dir: dir] ++ store_opts}
-    {:ok, ledger} = Ledger.open(name, [store: store] ++ opts)
-    ExUnit.Callbacks.on_exit(fn -> Ledger.close(name) end)
-    {name, ledger}
+    {:ok, world} = World.open(name, [store: store] ++ opts)
+    ExUnit.Callbacks.on_exit(fn -> World.close(name) end)
+    {name, world}
   end
 
   # Ids are unique unless a test wants them not to be. A repeated id is a
@@ -62,9 +62,9 @@ defmodule Blazie.ThroughputTest do
 
   defp assertions(count), do: for(id <- ids(count), do: {id, "height", id})
 
-  defp fill(ledger, count, batch \\ 500) do
+  defp fill(world, count, batch \\ 500) do
     Enum.each(1..ceil(count / batch), fn _ ->
-      {:ok, _} = Ledger.append(ledger, assertions(batch))
+      {:ok, _} = World.append(world, assertions(batch))
     end)
   end
 
@@ -79,12 +79,12 @@ defmodule Blazie.ThroughputTest do
   # A `GenServer.call` that ran out of patience is data, not a crash. The
   # server is still alive and will still process the request — the caller just
   # stopped waiting, which is exactly the failure mode being looked for.
-  defp timed_append(ledger, facts, timeout \\ 5_000) do
+  defp timed_append(world, facts, timeout \\ 5_000) do
     t0 = now()
 
     outcome =
       try do
-        case GenServer.call(ledger, {:append, facts}, timeout) do
+        case GenServer.call(world, {:append, facts}, timeout) do
           {:ok, _tx} -> :ok
           other -> other
         end
@@ -116,16 +116,16 @@ defmodule Blazie.ThroughputTest do
   defp rate(count, micros) when micros > 0, do: round(count * 1_000_000 / micros)
   defp rate(_count, _micros), do: 0
 
-  defp pid_of(ledger), do: GenServer.whereis(ledger)
+  defp pid_of(world), do: GenServer.whereis(world)
 
-  defp process_bytes(ledger) do
-    pid = pid_of(ledger)
+  defp process_bytes(world) do
+    pid = pid_of(world)
     :erlang.garbage_collect(pid)
     {:memory, bytes} = Process.info(pid, :memory)
     bytes
   end
 
-  # Runs inside the ledger and hands the answer back, because a term's size is
+  # Runs inside the world and hands the answer back, because a term's size is
   # only honest where it lives — sharing does not survive being copied out.
   # The state is returned untouched, so this reads without writing.
   defp inside(pid, fun) do
@@ -140,7 +140,7 @@ defmodule Blazie.ThroughputTest do
     receive do
       {^tag, answer} -> answer
     after
-      60_000 -> raise "the ledger never answered from inside"
+      60_000 -> raise "the world never answered from inside"
     end
   end
 
@@ -165,7 +165,7 @@ defmodule Blazie.ThroughputTest do
     @tag :throughput
     test "throughput per append, by facts per transaction" do
       # The same 10,000 facts every time, so every configuration walks the
-      # ledger through the same range of sizes. Only the number of transactions
+      # world through the same range of sizes. Only the number of transactions
       # it takes to get there changes.
       budget = 10_000
 
@@ -186,18 +186,18 @@ defmodule Blazie.ThroughputTest do
             {"file sync:false", :file, [sync: false]}
           ],
           batch <- [1, 10, 100, 1000] do
-        {_name, ledger} = open_ledger(kind, opts)
+        {_name, world} = open_ledger(kind, opts)
 
         # Warmup, discarded: the first appends pay for lazily-loaded code and
         # the process's first heap growth.
-        Enum.each(1..5, fn _ -> Ledger.append(ledger, assertions(batch)) end)
+        Enum.each(1..5, fn _ -> World.append(world, assertions(batch)) end)
 
         txns = div(budget, batch)
 
         {elapsed, latencies} =
           timed(fn ->
             for _ <- 1..txns do
-              {us, :ok} = timed_append(ledger, assertions(batch))
+              {us, :ok} = timed_append(world, assertions(batch))
               us
             end
           end)
@@ -229,15 +229,15 @@ defmodule Blazie.ThroughputTest do
       results =
         for {label, sync} <- [{"file sync:false", false}, {"file sync:true", true}],
             batch <- [1, 10, 100, 1000] do
-          {_name, ledger} = open_ledger(:file, sync: sync)
-          Enum.each(1..5, fn _ -> Ledger.append(ledger, assertions(batch)) end)
+          {_name, world} = open_ledger(:file, sync: sync)
+          Enum.each(1..5, fn _ -> World.append(world, assertions(batch)) end)
 
           txns = div(budget, batch)
 
           {elapsed, latencies} =
             timed(fn ->
               for _ <- 1..txns do
-                {us, :ok} = timed_append(ledger, assertions(batch))
+                {us, :ok} = timed_append(world, assertions(batch))
                 us
               end
             end)
@@ -279,7 +279,7 @@ defmodule Blazie.ThroughputTest do
 
   describe "growth" do
     @tag :throughput
-    test "append cost as the ledger fills" do
+    test "append cost as the world fills" do
       # One append of one fact, measured at each size. One fact so the number
       # is per-transaction overhead — the part that depends on what is already
       # resident — rather than per-fact work.
@@ -301,18 +301,18 @@ defmodule Blazie.ThroughputTest do
             {"file sync:false", :file, [sync: false]},
             {"file checkpoint:1000", :file, [sync: false, checkpoint_every: 1_000]}
           ] do
-        {_name, ledger} = open_ledger(kind, opts)
+        {_name, world} = open_ledger(kind, opts)
         filled = 0
 
         Enum.reduce(sizes, filled, fn size, filled ->
-          fill(ledger, size - filled)
+          fill(world, size - filled)
 
-          Enum.each(1..50, fn _ -> Ledger.append(ledger, assertions(1)) end)
+          Enum.each(1..50, fn _ -> World.append(world, assertions(1)) end)
 
           {elapsed, latencies} =
             timed(fn ->
               for _ <- 1..300 do
-                {us, :ok} = timed_append(ledger, assertions(1), 30_000)
+                {us, :ok} = timed_append(world, assertions(1), 30_000)
                 us
               end
             end)
@@ -347,12 +347,12 @@ defmodule Blazie.ThroughputTest do
             {"one id", fn _ -> :hot end}
           ],
           size <- [1_000, 10_000] do
-        {_name, ledger} = open_ledger(:memory, [])
+        {_name, world} = open_ledger(:memory, [])
 
         {elapsed, latencies} =
           timed(fn ->
             for n <- 1..size do
-              {us, :ok} = timed_append(ledger, [{id_fun.(n), "height", n}], 30_000)
+              {us, :ok} = timed_append(world, [{id_fun.(n), "height", n}], 30_000)
               us
             end
           end)
@@ -363,11 +363,11 @@ defmodule Blazie.ThroughputTest do
     end
   end
 
-  # ── 3. many writers, one ledger ────────────────────────────────────────────
+  # ── 3. many writers, one world ────────────────────────────────────────────
 
   describe "concurrency" do
     @tag :throughput
-    test "N writers against one ledger" do
+    test "N writers against one world" do
       # The same total number of appends however many writers there are, so the
       # server does identical work in every row and only the queue in front of
       # it changes.
@@ -386,18 +386,18 @@ defmodule Blazie.ThroughputTest do
       ])
 
       for prefill <- [0, 100_000], writers <- [1, 2, 8, 32, 128] do
-        {_name, ledger} = open_ledger(:file, sync: false)
-        if prefill > 0, do: fill(ledger, prefill)
+        {_name, world} = open_ledger(:file, sync: false)
+        if prefill > 0, do: fill(world, prefill)
 
         each = div(total, writers)
-        Enum.each(1..20, fn _ -> Ledger.append(ledger, assertions(1)) end)
+        Enum.each(1..20, fn _ -> World.append(world, assertions(1)) end)
 
         {elapsed, results} =
           timed(fn ->
             1..writers
             |> Task.async_stream(
               fn _ ->
-                for _ <- 1..each, do: timed_append(ledger, assertions(1))
+                for _ <- 1..each, do: timed_append(world, assertions(1))
               end,
               max_concurrency: writers,
               timeout: :infinity,
@@ -439,19 +439,19 @@ defmodule Blazie.ThroughputTest do
         "writers before a 5s timeout"
       ])
 
-      {_name, ledger} = open_ledger(:file, sync: false)
+      {_name, world} = open_ledger(:file, sync: false)
       filled = 0
 
       Enum.reduce(
         [10_000, 50_000, 100_000, 250_000, 500_000, 1_000_000, 2_000_000],
         filled,
         fn size, filled ->
-          fill(ledger, size - filled, 5_000)
-          Enum.each(1..20, fn _ -> Ledger.append(ledger, assertions(1)) end)
+          fill(world, size - filled, 5_000)
+          Enum.each(1..20, fn _ -> World.append(world, assertions(1)) end)
 
           latencies =
             for _ <- 1..100 do
-              {us, :ok} = timed_append(ledger, assertions(1), 60_000)
+              {us, :ok} = timed_append(world, assertions(1), 60_000)
               us
             end
 
@@ -462,7 +462,7 @@ defmodule Blazie.ThroughputTest do
             s.p50,
             s.p99,
             rate(1, s.p50),
-            Float.round(process_bytes(ledger) / 1_048_576, 1),
+            Float.round(process_bytes(world) / 1_048_576, 1),
             round(5_000_000 / max(s.p50, 1))
           ])
 
@@ -477,7 +477,7 @@ defmodule Blazie.ThroughputTest do
   describe "many ledgers" do
     @tag :throughput
     test "throughput across 1, 8 and 64 ledgers written at once" do
-      # One ledger is serial by design. The claim this checks is that the
+      # One world is serial by design. The claim this checks is that the
       # design still scales sideways: N ledgers are N independent processes and
       # should use N cores until there are no more cores.
       per_ledger = 1_000
@@ -488,7 +488,7 @@ defmodule Blazie.ThroughputTest do
         "facts written",
         "wall ms",
         "facts/s total",
-        "facts/s per ledger",
+        "facts/s per world",
         "speedup vs 1"
       ])
 
@@ -497,17 +497,17 @@ defmodule Blazie.ThroughputTest do
       Enum.reduce([1, 2, 4, 8, 16, 64], one, fn count, one ->
         ledgers =
           for _ <- 1..count do
-            {_name, ledger} = open_ledger(:memory, [])
-            Enum.each(1..5, fn _ -> Ledger.append(ledger, assertions(batch)) end)
-            ledger
+            {_name, world} = open_ledger(:memory, [])
+            Enum.each(1..5, fn _ -> World.append(world, assertions(batch)) end)
+            world
           end
 
         {elapsed, _} =
           timed(fn ->
             ledgers
             |> Task.async_stream(
-              fn ledger ->
-                for _ <- 1..per_ledger, do: {:ok, _} = Ledger.append(ledger, assertions(batch))
+              fn world ->
+                for _ <- 1..per_ledger, do: {:ok, _} = World.append(world, assertions(batch))
               end,
               max_concurrency: count,
               timeout: :infinity,
@@ -556,11 +556,11 @@ defmodule Blazie.ThroughputTest do
             {"by attribute (all)", fn _known -> [attribute: "height"] end}
           ],
           writers <- [0, 1, 8, 32] do
-        {_name, ledger} = open_ledger(:file, sync: false)
-        fill(ledger, 20_000)
+        {_name, world} = open_ledger(:file, sync: false)
+        fill(world, 20_000)
         known = for _ <- 1..50, do: hd(ids(1))
-        {:ok, _} = Ledger.append(ledger, for(id <- known, do: {id, "height", 1}))
-        tx = Ledger.tx(ledger)
+        {:ok, _} = World.append(world, for(id <- known, do: {id, "height", 1}))
+        tx = World.tx(world)
 
         stop = :atomics.new(1, [])
 
@@ -571,7 +571,7 @@ defmodule Blazie.ThroughputTest do
                 if :atomics.get(stop, 1) == 1 do
                   acc
                 else
-                  {us, _} = timed_append(ledger, assertions(1), 30_000)
+                  {us, _} = timed_append(world, assertions(1), 30_000)
                   loop.(loop, [us | acc])
                 end
               end
@@ -580,11 +580,11 @@ defmodule Blazie.ThroughputTest do
             end)
           end
 
-        Enum.each(1..5, fn _ -> Ledger.find_at(ledger, tx, pattern_fun.(known)) end)
+        Enum.each(1..5, fn _ -> World.find_at(world, tx, pattern_fun.(known)) end)
 
         latencies =
           for _ <- 1..200 do
-            {us, _} = timed(fn -> Ledger.find_at(ledger, tx, pattern_fun.(known)) end)
+            {us, _} = timed(fn -> World.find_at(world, tx, pattern_fun.(known)) end)
             us
           end
 
@@ -614,7 +614,7 @@ defmodule Blazie.ThroughputTest do
 
   describe "cliffs" do
     @tag :throughput
-    test "a checkpoint writes the whole ledger, and the ledger waits for it" do
+    test "a checkpoint writes the whole world, and the world waits for it" do
       # Production configures `checkpoint_every: 1000` whenever `ledger_dir` is
       # set, and a checkpoint serialises every fact ever written. That is a
       # stall inside `handle_call`, so it lands on whichever writer is unlucky
@@ -629,20 +629,20 @@ defmodule Blazie.ThroughputTest do
         "written in 2100 txns"
       ])
 
-      {_name, ledger} = open_ledger(:file, sync: false, checkpoint_every: 1_000)
+      {_name, world} = open_ledger(:file, sync: false, checkpoint_every: 1_000)
 
       Enum.reduce([10_000, 100_000, 500_000], {0, 0}, fn size, {filled, before} ->
-        fill(ledger, size - filled, 5_000)
+        fill(world, size - filled, 5_000)
 
         # Enough single-fact appends to cross the checkpoint threshold twice.
         latencies =
           for _ <- 1..2_100 do
-            {us, :ok} = timed_append(ledger, assertions(1), 60_000)
+            {us, :ok} = timed_append(world, assertions(1), 60_000)
             us
           end
 
         s = stats(latencies)
-        path = inside(pid_of(ledger), & &1.store.path)
+        path = inside(pid_of(world), & &1.store.path)
 
         checkpoint =
           case File.stat(path <> ".checkpoint") do
@@ -653,7 +653,7 @@ defmodule Blazie.ThroughputTest do
         # How often one is written is the policy under test, so it is counted
         # rather than assumed from `checkpoint_every`. The counter is
         # cumulative; only what this round added is interesting.
-        written = Map.get(Ledger.store_stats(ledger), :checkpoints_written, 0)
+        written = Map.get(World.store_stats(world), :checkpoints_written, 0)
 
         row([
           size,
@@ -671,7 +671,7 @@ defmodule Blazie.ThroughputTest do
 
     @tag :throughput
     test "bounding memory unbounds reads" do
-      # What a bounded ledger evicted is answered by re-reading the store, and
+      # What a bounded world evicted is answered by re-reading the store, and
       # `Store.File.replay/1` hands back everything it ever loaded. So the read
       # that memory bounding was supposed to make affordable is the one it
       # makes O(everything) — and it runs inside the same call as the writes.
@@ -679,48 +679,48 @@ defmodule Blazie.ThroughputTest do
 
       for bound <- [:unbounded, 1_000] do
         opts = if bound == :unbounded, do: [], else: [resident: bound]
-        {_name, ledger} = open_ledger(:file, [sync: false] ++ opts)
-        fill(ledger, 100_000, 5_000)
+        {_name, world} = open_ledger(:file, [sync: false] ++ opts)
+        fill(world, 100_000, 5_000)
 
         known = hd(ids(1))
-        {:ok, _} = Ledger.append(ledger, [{known, "height", 1}])
-        tx = Ledger.tx(ledger)
+        {:ok, _} = World.append(world, [{known, "height", 1}])
+        tx = World.tx(world)
 
-        Enum.each(1..3, fn _ -> Ledger.find_at(ledger, tx, id: known) end)
+        Enum.each(1..3, fn _ -> World.find_at(world, tx, id: known) end)
 
         latencies =
           for _ <- 1..30 do
-            {us, _} = timed(fn -> Ledger.find_at(ledger, tx, id: known) end)
+            {us, _} = timed(fn -> World.find_at(world, tx, id: known) end)
             us
           end
 
         s = stats(latencies)
-        row([inspect(bound), 100_000, Ledger.resident(ledger), s.p50, s.p99, s.max])
+        row([inspect(bound), 100_000, World.resident(world), s.p50, s.p99, s.max])
       end
     end
 
     @tag :throughput
-    test "a wide read costs the write budget, and grows with the ledger" do
-      header(["facts in ledger", "find_at attribute p50 us", "p99 us", "appends it displaces"])
+    test "a wide read costs the write budget, and grows with the world" do
+      header(["facts in world", "find_at attribute p50 us", "p99 us", "appends it displaces"])
 
-      {_name, ledger} = open_ledger(:file, sync: false)
+      {_name, world} = open_ledger(:file, sync: false)
       filled = 0
 
       Enum.reduce([10_000, 100_000, 500_000], filled, fn size, filled ->
-        fill(ledger, size - filled, 5_000)
-        tx = Ledger.tx(ledger)
+        fill(world, size - filled, 5_000)
+        tx = World.tx(world)
 
-        Enum.each(1..2, fn _ -> Ledger.find_at(ledger, tx, attribute: "height") end)
+        Enum.each(1..2, fn _ -> World.find_at(world, tx, attribute: "height") end)
 
         read =
           for _ <- 1..10 do
-            {us, _} = timed(fn -> Ledger.find_at(ledger, tx, attribute: "height") end)
+            {us, _} = timed(fn -> World.find_at(world, tx, attribute: "height") end)
             us
           end
 
         append =
           for _ <- 1..30 do
-            {us, :ok} = timed_append(ledger, assertions(1), 60_000)
+            {us, :ok} = timed_append(world, assertions(1), 60_000)
             us
           end
 
@@ -743,13 +743,13 @@ defmodule Blazie.ThroughputTest do
             {"memory", :memory, []},
             {"file sync:false", :file, [sync: false]}
           ] do
-        {_name, ledger} = open_ledger(kind, opts)
-        empty = process_bytes(ledger)
+        {_name, world} = open_ledger(kind, opts)
+        empty = process_bytes(world)
         row([label, 0, empty, "—", Float.round(empty / 1_048_576, 2), "—"])
 
         Enum.reduce([1_000, 10_000, 100_000], 0, fn size, filled ->
-          fill(ledger, size - filled)
-          bytes = process_bytes(ledger)
+          fill(world, size - filled)
+          bytes = process_bytes(world)
           per = (bytes - empty) / size
 
           row([
@@ -770,7 +770,7 @@ defmodule Blazie.ThroughputTest do
     test "live bytes, and which structure is holding them" do
       # Process heap is what the VM reserved, which is not what is live — it
       # grows in steps and a collection does not hand the slack back. The live
-      # figure has to be taken *inside* the ledger, because the same five
+      # figure has to be taken *inside* the world, because the same five
       # references share one copy of each fact there and `:sys.get_state`
       # copies the state out, which flattens exactly the sharing being counted.
       header([
@@ -783,14 +783,14 @@ defmodule Blazie.ThroughputTest do
         "copied-out B/fact"
       ])
 
-      {_name, ledger} = open_ledger(:file, sync: false)
+      {_name, world} = open_ledger(:file, sync: false)
 
       Enum.reduce([1_000, 10_000, 100_000], 0, fn size, filled ->
-        fill(ledger, size - filled)
+        fill(world, size - filled)
 
-        {live, indexes} = sizes_inside(pid_of(ledger))
-        heap = process_bytes(ledger)
-        copied = :erts_debug.size_shared(:sys.get_state(pid_of(ledger))) * 8
+        {live, indexes} = sizes_inside(pid_of(world))
+        heap = process_bytes(world)
+        copied = :erts_debug.size_shared(:sys.get_state(pid_of(world))) * 8
 
         row([
           size,
@@ -808,19 +808,19 @@ defmodule Blazie.ThroughputTest do
       IO.puts(
         "\n(the last column is what the same state weighs once copied out of the " <>
           "process — five references to one fact become five facts. Every reply " <>
-          "a ledger sends pays that.)"
+          "a world sends pays that.)"
       )
     end
 
     @tag :throughput
-    test "a bounded ledger, for contrast" do
+    test "a bounded world, for contrast" do
       # `resident:` is the only lever that exists. It costs a rebuild of all
       # three sort orders every time the high-water mark is crossed, and it
       # only saves anything when the facts are durable somewhere else.
       header([
         "resident bound",
         "facts written",
-        "ledger list",
+        "world list",
         "store list",
         "live MB",
         "live B/fact written",
@@ -829,19 +829,19 @@ defmodule Blazie.ThroughputTest do
 
       for bound <- [:unbounded, 10_000, 1_000] do
         opts = if bound == :unbounded, do: [], else: [resident: bound]
-        {_name, ledger} = open_ledger(:file, [sync: false] ++ opts)
+        {_name, world} = open_ledger(:file, [sync: false] ++ opts)
 
-        {elapsed, _} = timed(fn -> fill(ledger, 100_000, 100) end)
+        {elapsed, _} = timed(fn -> fill(world, 100_000, 100) end)
 
-        # Reaching into the state is the only way to separate what the ledger
+        # Reaching into the state is the only way to separate what the world
         # is holding from what its store is holding, and the difference is the
         # whole point of the row.
         {ledger_list, store_list} =
-          inside(pid_of(ledger), fn state ->
+          inside(pid_of(world), fn state ->
             {length(state.facts), length(state.store.facts)}
           end)
 
-        {live, _indexes} = sizes_inside(pid_of(ledger))
+        {live, _indexes} = sizes_inside(pid_of(world))
 
         row([
           inspect(bound),

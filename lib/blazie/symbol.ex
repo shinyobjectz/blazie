@@ -22,7 +22,7 @@ defmodule Blazie.Symbol do
   invalidate. An index is a formula the engine writes for itself, and it should
   not write one until measurement says to.
 
-      Ledger.append(ledger, Symbol.seed() ++
+      World.append(world, Symbol.seed() ++
         Attribute.define("embedding", answers: "symbol", space: "potion_256"))
   """
 

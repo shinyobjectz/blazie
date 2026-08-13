@@ -2,19 +2,19 @@ defmodule Blazie.Job.Runner do
   @moduledoc """
   The thing that actually calls `Job.run/4`.
 
-  It holds no work list. The ledger is the queue, so each tick asks which jobs
+  It holds no work list. The world is the queue, so each tick asks which jobs
   are due and runs those — which is why a restart needs no reconciliation and a
   job added while the system runs is picked up without telling anybody.
 
   ## What it does hold
 
-  Two things the ledger cannot say. **The work**, because a job's cadence is a
+  Two things the world cannot say. **The work**, because a job's cadence is a
   fact but its body is code, so a job has to be registered before the runner
   can run it. And **what is still in flight**, because a slow job must not be
-  started again just because its cadence came round — the ledger only learns a
+  started again just because its cadence came round — the world only learns a
   job ran once it finished.
 
-  A job that the ledger declares and nobody registered is skipped and reported
+  A job that the world declares and nobody registered is skipped and reported
   by `unclaimed/1`, rather than skipped silently. A gap between what is
   declared and what is deployed is worth being able to see.
 
@@ -33,10 +33,10 @@ defmodule Blazie.Job.Runner do
 
   use GenServer
 
-  alias Blazie.{Job, Ledger, Snapshot}
+  alias Blazie.{Job, World, Snapshot}
 
   @type option ::
-          {:ledger, Ledger.name() | Ledger.ref()}
+          {:world, World.name() | World.ref()}
           | {:jobs, [Job.t()]}
           | {:every, pos_integer() | nil}
           | {:name, GenServer.name()}
@@ -60,7 +60,7 @@ defmodule Blazie.Job.Runner do
   @spec in_flight(GenServer.server()) :: [term()]
   def in_flight(runner), do: GenServer.call(runner, :in_flight)
 
-  @doc "Jobs the ledger declares that nobody registered work for."
+  @doc "Jobs the world declares that nobody registered work for."
   @spec unclaimed(GenServer.server()) :: [term()]
   def unclaimed(runner), do: GenServer.call(runner, :unclaimed)
 
@@ -72,13 +72,13 @@ defmodule Blazie.Job.Runner do
 
   @impl true
   def init(opts) do
-    ledger = Keyword.fetch!(opts, :ledger)
+    world = Keyword.fetch!(opts, :world)
     jobs = opts |> Keyword.get(:jobs, []) |> Map.new(&{&1.id, &1})
     every = Keyword.get(opts, :every)
 
     if every, do: :timer.send_interval(every, :beat)
 
-    {:ok, %{ledger: ledger, jobs: jobs, running: %{}, unclaimed: [], every: every}}
+    {:ok, %{world: world, jobs: jobs, running: %{}, unclaimed: [], every: every}}
   end
 
   @impl true
@@ -108,7 +108,7 @@ defmodule Blazie.Job.Runner do
     do: {:noreply, update_in(state.running, &Map.delete(&1, ref))}
 
   defp run_due(state, now) do
-    snapshot = Snapshot.open([state.ledger])
+    snapshot = Snapshot.open([state.world])
     due = Job.due(snapshot, now)
 
     {claimed, unclaimed} = Enum.split_with(due, &Map.has_key?(state.jobs, &1))
@@ -118,12 +118,12 @@ defmodule Blazie.Job.Runner do
     running =
       Enum.reduce(startable, state.running, fn id, acc ->
         job = state.jobs[id]
-        ledger = state.ledger
+        world = state.world
 
         task =
           Task.async(fn ->
             # A fresh snapshot per job: it may have been waiting behind another.
-            Job.run(job, ledger, Snapshot.open([ledger]), now)
+            Job.run(job, world, Snapshot.open([world]), now)
           end)
 
         Map.put(acc, task.ref, id)

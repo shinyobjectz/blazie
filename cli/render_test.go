@@ -126,7 +126,7 @@ func TestNameStringIsStableAndReadable(t *testing.T) {
 	if got != "$identities@3 tenant-7@12" {
 		t.Fatalf("got %q", got)
 	}
-	if nameString(nil) != "(no ledgers)" {
+	if nameString(nil) != "(no worlds)" {
 		t.Fatalf("got %q", nameString(nil))
 	}
 }

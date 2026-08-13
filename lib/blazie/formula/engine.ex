@@ -24,13 +24,13 @@ defmodule Blazie.Formula.Engine do
   because recomputation is always available — a miss costs time, never
   correctness.
 
-  It belongs to no ledger. A cache key is a formula and a snapshot name, and a
+  It belongs to no world. A cache key is a formula and a snapshot name, and a
   snapshot name already says which ledgers it composed — so one engine serves
-  every ledger, and asking it to name one was state it never read.
+  every world, and asking it to name one was state it never read.
 
   It also counts what each formula was asked and what it had to compute, which
   is the input to the decision it does not yet make: whether an answer is
-  expensive and repeated enough to be worth writing into a ledger as facts.
+  expensive and repeated enough to be worth writing into a world as facts.
   Materialising is a performance choice, so it should be made from measurement
   rather than from a flag somebody set.
   """

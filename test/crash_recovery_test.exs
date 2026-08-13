@@ -27,11 +27,11 @@ defmodule Blazie.CrashRecoveryTest do
   defp writer_script(dir, receipts) do
     """
     dir = #{inspect(dir)}
-    {:ok, l} = Blazie.Ledger.open("crashy", store: {Blazie.Store.File, dir: dir, sync: true})
+    {:ok, l} = Blazie.World.open("crashy", store: {Blazie.Store.File, dir: dir, sync: true})
     {:ok, io} = File.open(#{inspect(receipts)}, [:append])
 
     Enum.each(1..100_000, fn n ->
-      {:ok, tx} = Blazie.Ledger.append(l, [{n, "n", n}])
+      {:ok, tx} = Blazie.World.append(l, [{n, "n", n}])
       # Written only after append returned, so anything here was committed.
       IO.write(io, "\#{tx}\\n")
       :file.sync(io)
@@ -155,12 +155,12 @@ defmodule Blazie.CrashRecoveryTest do
       assert acknowledged != []
       assert acknowledged -- recovered == []
 
-      # And it is still a working ledger, not merely a readable file.
-      {:ok, ledger} =
-        Blazie.Ledger.open("crashy-reopened", store: {Blazie.Store.File, dir: ctx.dir})
+      # And it is still a working world, not merely a readable file.
+      {:ok, world} =
+        Blazie.World.open("crashy-reopened", store: {Blazie.Store.File, dir: ctx.dir})
 
-      assert {:ok, _tx} = Blazie.Ledger.append(ledger, [{1, "n", 1}])
-      Blazie.Ledger.close("crashy-reopened")
+      assert {:ok, _tx} = Blazie.World.append(world, [{1, "n", 1}])
+      Blazie.World.close("crashy-reopened")
     end
   end
 end

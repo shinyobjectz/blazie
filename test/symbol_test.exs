@@ -5,30 +5,30 @@ defmodule Blazie.SymbolTest do
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Attribute, Fact, Formula, Ledger, Snapshot, Symbol}
+  alias Blazie.{Attribute, Fact, Formula, World, Snapshot, Symbol}
   alias Blazie.TestLedger
 
   setup do
-    ledger = TestLedger.open()
-    {:ok, _} = Ledger.append(ledger, Attribute.seed() ++ Symbol.seed())
+    world = TestLedger.open()
+    {:ok, _} = World.append(world, Attribute.seed() ++ Symbol.seed())
 
     {:ok, _} =
-      Ledger.append(ledger, Attribute.define("embedding", answers: "symbol", space: "potion_256"))
+      World.append(world, Attribute.define("embedding", answers: "symbol", space: "potion_256"))
 
-    %{ledger: ledger}
+    %{world: world}
   end
 
   describe "assert and represent are different, and share a row" do
-    test "a symbol is an ordinary answer", %{ledger: ledger} do
+    test "a symbol is an ordinary answer", %{world: world} do
       symbol = Symbol.new("potion_256", [1.0, 0.0])
-      {:ok, tx} = Ledger.append(ledger, [{42, "embedding", symbol, :potion}])
+      {:ok, tx} = World.append(world, [{42, "embedding", symbol, :potion}])
 
       assert [%Fact{attribute: "embedding", value: ^symbol, by: :potion}] =
-               Ledger.facts_at(ledger, tx) |> Enum.filter(&(&1.tx == tx))
+               World.facts_at(world, tx) |> Enum.filter(&(&1.tx == tx))
     end
 
-    test "an attribute declares its space", %{ledger: ledger} do
-      snapshot = Snapshot.open([ledger])
+    test "an attribute declares its space", %{world: world} do
+      snapshot = Snapshot.open([world])
 
       assert Snapshot.value(snapshot, "embedding", "space") == "potion_256"
       assert Snapshot.value(snapshot, "embedding", "answers") == "symbol"
@@ -36,16 +36,16 @@ defmodule Blazie.SymbolTest do
   end
 
   describe "a symbol is always produced by a formula" do
-    test "one taken from outside is refused", %{ledger: ledger} do
+    test "one taken from outside is refused", %{world: world} do
       loose = [{42, "embedding", Symbol.new("potion_256", [1.0, 0.0])}]
 
-      assert {:error, [refusal]} = Ledger.append(ledger, loose, check: &Symbol.check/1)
+      assert {:error, [refusal]} = World.append(world, loose, check: &Symbol.check/1)
       assert refusal.problem == :symbol_from_outside
       assert refusal.repair =~ "naming no formula"
     end
 
-    test "one a formula produced is accepted", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{42, "height", 180}])
+    test "one a formula produced is accepted", %{world: world} do
+      {:ok, _} = World.append(world, [{42, "height", 180}])
 
       embed =
         Formula.new(:potion, fn snapshot ->
@@ -54,15 +54,15 @@ defmodule Blazie.SymbolTest do
           end
         end)
 
-      {assertions, _reads} = Formula.run(embed, Snapshot.open([ledger]))
+      {assertions, _reads} = Formula.run(embed, Snapshot.open([world]))
 
       assert Symbol.check(assertions) == :ok
-      assert {:ok, _tx} = Ledger.append(ledger, assertions, check: &Symbol.check/1)
+      assert {:ok, _tx} = World.append(world, assertions, check: &Symbol.check/1)
     end
 
-    test "a literal answer is untouched by the check", %{ledger: ledger} do
+    test "a literal answer is untouched by the check", %{world: world} do
       assert Symbol.check([{42, "height", 180}]) == :ok
-      assert {:ok, _} = Ledger.append(ledger, [{42, "height", 180}], check: &Symbol.check/1)
+      assert {:ok, _} = World.append(world, [{42, "height", 180}], check: &Symbol.check/1)
     end
   end
 
@@ -105,15 +105,15 @@ defmodule Blazie.SymbolTest do
   end
 
   describe "search is one pass, exact" do
-    setup %{ledger: ledger} do
+    setup %{world: world} do
       {:ok, _} =
-        Ledger.append(ledger, [
+        World.append(world, [
           {1, "embedding", Symbol.new("potion_256", [1.0, 0.0]), :potion},
           {2, "embedding", Symbol.new("potion_256", [0.9, 0.1]), :potion},
           {3, "embedding", Symbol.new("potion_256", [0.0, 1.0]), :potion}
         ])
 
-      %{snapshot: Snapshot.open([ledger])}
+      %{snapshot: Snapshot.open([world])}
     end
 
     test "nearest returns the nearest first", %{snapshot: snapshot} do
@@ -129,21 +129,21 @@ defmodule Blazie.SymbolTest do
       assert length(Symbol.nearest(snapshot, "embedding", query, 10)) == 3
     end
 
-    test "another space is skipped, not refused", %{ledger: ledger, snapshot: _} do
+    test "another space is skipped, not refused", %{world: world, snapshot: _} do
       {:ok, _} =
-        Ledger.append(ledger, [{4, "embedding", Symbol.new("openai_1536", [1.0, 0.0]), :openai}])
+        World.append(world, [{4, "embedding", Symbol.new("openai_1536", [1.0, 0.0]), :openai}])
 
       query = Symbol.new("potion_256", [1.0, 0.0])
-      found = Symbol.nearest(Snapshot.open([ledger]), "embedding", query, 10)
+      found = Symbol.nearest(Snapshot.open([world]), "embedding", query, 10)
 
       assert Enum.map(found, fn {fact, _} -> fact.id end) |> Enum.sort() == [1, 2, 3]
     end
 
-    test "a literal answer under the same attribute is skipped", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, [{5, "embedding", "not a symbol"}])
+    test "a literal answer under the same attribute is skipped", %{world: world} do
+      {:ok, _} = World.append(world, [{5, "embedding", "not a symbol"}])
 
       query = Symbol.new("potion_256", [1.0, 0.0])
-      found = Symbol.nearest(Snapshot.open([ledger]), "embedding", query, 10)
+      found = Symbol.nearest(Snapshot.open([world]), "embedding", query, 10)
 
       refute Enum.any?(found, fn {fact, _} -> fact.id == 5 end)
     end

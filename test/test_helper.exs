@@ -2,19 +2,19 @@ ExUnit.start(exclude: [:gcp, :crash, :load, :object_storage, :throughput])
 
 defmodule Blazie.TestLedger do
   @moduledoc """
-  A ledger that closes itself when the test ends.
+  A world that closes itself when the test ends.
 
   Names are tuples rather than atoms on purpose — it is the same thing a tenant
   name would be, and using atoms here would hide the leak the registry exists
   to prevent.
   """
 
-  alias Blazie.Ledger
+  alias Blazie.World
 
   def open do
     name = {:test, System.unique_integer([:positive])}
-    {:ok, ledger} = Ledger.open(name)
-    ExUnit.Callbacks.on_exit(fn -> Ledger.close(name) end)
-    ledger
+    {:ok, world} = World.open(name)
+    ExUnit.Callbacks.on_exit(fn -> World.close(name) end)
+    world
   end
 end

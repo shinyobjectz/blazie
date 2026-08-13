@@ -9,7 +9,7 @@ import (
 
 // Go's flag package stops at the first argument that is not a flag, so
 // `blazie ask tenant-7 --attribute height` would reach the node as three
-// ledgers, one of them called "--attribute". Measured against a live node
+// worlds, one of them called "--attribute". Measured against a live node
 // before this existed: the refusal was correct, carried its repair, and was
 // still the wrong thing to hand somebody who typed the obvious command.
 
@@ -38,7 +38,7 @@ func TestFlagsMayFollowTheLedgers(t *testing.T) {
 func TestFlagsMayBeInterleaved(t *testing.T) {
 	set, attribute, stringly := testFlags()
 
-	args := []string{"tenant-7", "--string", "other-ledger", "--attribute=height", "third"}
+	args := []string{"tenant-7", "--string", "other-world", "--attribute=height", "third"}
 	if err := set.Parse(permute(set, args)); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestFlagsMayBeInterleaved(t *testing.T) {
 	}
 }
 
-// A boolean flag does not swallow the argument after it, or the ledger would
+// A boolean flag does not swallow the argument after it, or the world would
 // vanish into `--string`.
 func TestABooleanFlagDoesNotEatTheNextArgument(t *testing.T) {
 	set, _, stringly := testFlags()

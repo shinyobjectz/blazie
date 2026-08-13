@@ -13,7 +13,7 @@ import { useCluster } from "../cluster"
  * What this caller is and how far it reaches.
  *
  * There is nothing to edit here, and that is the design rather than a missing
- * feature: authorization is a list of ledgers a caller may name, written on the
+ * feature: authorization is a list of worlds a caller may name, written on the
  * cluster. No page that a token can reach may widen the reach of that token.
  */
 export default function Settings() {
@@ -23,7 +23,7 @@ export default function Settings() {
   return (
     <>
       <PageHead title="settings">
-        a caller is a fingerprint and a list of ledgers. that list is the whole of
+        a caller is a fingerprint and a list of worlds. that list is the whole of
         its reach — not row rules, not predicates, and readable in one glance,
         which is the point of it being a list.
       </PageHead>
@@ -53,14 +53,14 @@ export default function Settings() {
 
       <section className="mt-14">
         <h2 className="mb-2 text-lg font-medium tracking-tight text-white">
-          ledgers this caller may name
+          worlds this caller may name
         </h2>
         <p className="mb-6 max-w-2xl text-sm leading-relaxed text-muted-foreground">
           naming one it was not granted is refused at the door, before anything
           is read. there is no partial answer and nothing underneath to filter.
         </p>
 
-        {who.ledgers.length === 0 ? (
+        {who.worlds.length === 0 ? (
           <Nothing icon={KeyRound} title="granted nothing">
             a caller is granted, never registered — signing in proves who you
             are and grants nothing on its own. quote the caller fingerprint
@@ -68,12 +68,12 @@ export default function Settings() {
           </Nothing>
         ) : (
           <div className="overflow-hidden rounded-lg border border-border">
-            {who.ledgers.map((ledger) => (
+            {who.worlds.map((world) => (
               <p
-                key={ledger}
+                key={world}
                 className="font-mono border-b border-border px-4 py-3 text-sm text-white/85 last:border-b-0"
               >
-                {ledger}
+                {world}
               </p>
             ))}
           </div>

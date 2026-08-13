@@ -32,7 +32,7 @@ import (
 //     has changed rather than that the connection is broken.
 //
 //   - Authorization happens at join, not at connect. A token can hold a socket
-//     and still be refused a ledger, and that refusal arrives as a join reply
+//     and still be refused a world, and that refusal arrives as a join reply
 //     carrying its repair like any other.
 
 const (
@@ -150,7 +150,7 @@ type phxReply struct {
 
 // Watch joins the channel and prints every answer until the context is done or
 // the socket drops. It does not reconnect — see the note in the README.
-func (c *Client) Watch(ctx context.Context, out, status io.Writer, ledgers []string, source string, asJSON bool) error {
+func (c *Client) Watch(ctx context.Context, out, status io.Writer, worlds []string, source string, asJSON bool) error {
 	endpoint, err := socketURL(c.BaseURL, c.Token, nil)
 	if err != nil {
 		return err
@@ -162,7 +162,7 @@ func (c *Client) Watch(ctx context.Context, out, status io.Writer, ledgers []str
 			Problem: "socket_refused",
 			Repair: fmt.Sprintf("Could not open a websocket to %s (%v). The node must be "+
 				"running and reachable, and the token must be one it minted — a socket with "+
-				"no token is refused at connect, before any ledger is named.", c.BaseURL, err),
+				"no token is refused at connect, before any world is named.", c.BaseURL, err),
 		}
 	}
 	defer conn.Close()
@@ -199,7 +199,7 @@ func (c *Client) Watch(ctx context.Context, out, status io.Writer, ledgers []str
 		return strconv.Itoa(refs)
 	}
 
-	joinPayload, err := json.Marshal(map[string]any{"ledgers": ledgers, "source": source})
+	joinPayload, err := json.Marshal(map[string]any{"worlds": worlds, "source": source})
 	if err != nil {
 		return err
 	}

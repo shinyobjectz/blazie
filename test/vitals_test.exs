@@ -5,43 +5,43 @@ defmodule Blazie.VitalsTest do
   Reading the clock, the VM, or how many ledgers are open is reaching outside —
   the answer depends on when you ask. So vitals cannot be a formula, and being
   a job is not a workaround: it is the same line everything else obeys, and it
-  buys the whole ledger's machinery for free. Vitals have provenance, a
+  buys the whole world's machinery for free. Vitals have provenance, a
   cadence, failure records, and history, without any of it being built twice.
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Attribute, Job, Ledger, Snapshot, TestLedger, Vitals}
+  alias Blazie.{Attribute, Job, World, Snapshot, TestLedger, Vitals}
 
   setup do
-    ledger = TestLedger.open()
-    {:ok, _} = Ledger.append(ledger, Attribute.seed() ++ Job.seed() ++ Vitals.seed())
-    %{ledger: ledger}
+    world = TestLedger.open()
+    {:ok, _} = World.append(world, Attribute.seed() ++ Job.seed() ++ Vitals.seed())
+    %{world: world}
   end
 
   describe "vitals are facts" do
-    test "taking them writes facts naming the job", %{ledger: ledger} do
-      {:ok, tx} = Job.run(Vitals.job(), ledger, Snapshot.open([ledger]), 1000)
+    test "taking them writes facts naming the job", %{world: world} do
+      {:ok, tx} = Job.run(Vitals.job(), world, Snapshot.open([world]), 1000)
 
-      written = Ledger.facts_at(ledger, tx) |> Enum.filter(&(&1.tx == tx))
+      written = World.facts_at(world, tx) |> Enum.filter(&(&1.tx == tx))
 
       assert written != []
       assert Enum.all?(written, &(&1.by == "vitals"))
     end
 
-    test "they answer like anything else", %{ledger: ledger} do
-      {:ok, _} = Job.run(Vitals.job(), ledger, Snapshot.open([ledger]), 1000)
-      snapshot = Snapshot.open([ledger])
+    test "they answer like anything else", %{world: world} do
+      {:ok, _} = Job.run(Vitals.job(), world, Snapshot.open([world]), 1000)
+      snapshot = Snapshot.open([world])
 
       assert is_integer(Snapshot.value(snapshot, "vitals", "open_ledgers"))
       assert is_integer(Snapshot.value(snapshot, "vitals", "memory_bytes"))
       assert is_binary(Snapshot.value(snapshot, "vitals", "node"))
     end
 
-    test "taking them twice keeps both, so a trend is a query", %{ledger: ledger} do
-      {:ok, _} = Job.run(Vitals.job(), ledger, Snapshot.open([ledger]), 1000)
-      {:ok, _} = Job.run(Vitals.job(), ledger, Snapshot.open([ledger]), 2000)
+    test "taking them twice keeps both, so a trend is a query", %{world: world} do
+      {:ok, _} = Job.run(Vitals.job(), world, Snapshot.open([world]), 1000)
+      {:ok, _} = Job.run(Vitals.job(), world, Snapshot.open([world]), 2000)
 
-      snapshot = Snapshot.open([ledger])
+      snapshot = Snapshot.open([world])
       readings = Snapshot.find(snapshot, id: "vitals", attribute: "memory_bytes")
 
       assert length(readings) == 2
@@ -50,15 +50,15 @@ defmodule Blazie.VitalsTest do
   end
 
   describe "it is a job, with everything that follows" do
-    test "it has a cadence, and the runner picks it up", %{ledger: ledger} do
-      {:ok, _} = Ledger.append(ledger, Vitals.declare(every: 60))
+    test "it has a cadence, and the runner picks it up", %{world: world} do
+      {:ok, _} = World.append(world, Vitals.declare(every: 60))
 
-      assert Job.due?(Snapshot.open([ledger]), "vitals", 0)
+      assert Job.due?(Snapshot.open([world]), "vitals", 0)
 
       runner =
         start_supervised!(
           {Job.Runner,
-           ledger: ledger,
+           world: world,
            jobs: [Vitals.job()],
            name: :"vitals_#{System.unique_integer([:positive])}"}
         )
@@ -66,24 +66,24 @@ defmodule Blazie.VitalsTest do
       assert {:ok, ["vitals"]} = Job.Runner.tick(runner, 1000)
     end
 
-    test "when it last ran is answerable, like any job", %{ledger: ledger} do
-      {:ok, _} = Job.run(Vitals.job(), ledger, Snapshot.open([ledger]), 1000)
+    test "when it last ran is answerable, like any job", %{world: world} do
+      {:ok, _} = Job.run(Vitals.job(), world, Snapshot.open([world]), 1000)
 
-      assert Job.last_run(Snapshot.open([ledger]), "vitals") == 1000
+      assert Job.last_run(Snapshot.open([world]), "vitals") == 1000
     end
   end
 
   describe "the reading is of a moment, not of forever" do
-    test "each reading is its own transaction, and the latest wins", %{ledger: ledger} do
-      # Deliberately not comparing counts across readings: open_ledgers is
+    test "each reading is its own transaction, and the latest wins", %{world: world} do
+      # Deliberately not comparing counts across readings: open_worlds is
       # VM-wide and other async tests are opening and closing their own, so an
       # exact comparison measures the whole suite rather than this test.
-      {:ok, first} = Job.run(Vitals.job(), ledger, Snapshot.open([ledger]), 1000)
-      {:ok, second} = Job.run(Vitals.job(), ledger, Snapshot.open([ledger]), 2000)
+      {:ok, first} = Job.run(Vitals.job(), world, Snapshot.open([world]), 1000)
+      {:ok, second} = Job.run(Vitals.job(), world, Snapshot.open([world]), 2000)
 
       assert second > first
 
-      snapshot = Snapshot.open([ledger])
+      snapshot = Snapshot.open([world])
       readings = Snapshot.find(snapshot, id: "vitals", attribute: "open_ledgers")
 
       assert length(readings) == 2
@@ -91,11 +91,11 @@ defmodule Blazie.VitalsTest do
       assert Snapshot.value(snapshot, "vitals", "open_ledgers") == List.last(readings).value
     end
 
-    test "a reading reflects a live system", %{ledger: ledger} do
-      {:ok, _} = Job.run(Vitals.job(), ledger, Snapshot.open([ledger]), 1000)
-      snapshot = Snapshot.open([ledger])
+    test "a reading reflects a live system", %{world: world} do
+      {:ok, _} = Job.run(Vitals.job(), world, Snapshot.open([world]), 1000)
+      snapshot = Snapshot.open([world])
 
-      # Our own ledger is open, so this cannot be zero however busy the suite is.
+      # Our own world is open, so this cannot be zero however busy the suite is.
       assert Snapshot.value(snapshot, "vitals", "open_ledgers") >= 1
       assert Snapshot.value(snapshot, "vitals", "processes") > 0
       assert Snapshot.value(snapshot, "vitals", "memory_bytes") > 0

@@ -4,17 +4,17 @@ defmodule Blazie.BackupTest do
 
   Copying bytes somewhere is the easy half and the half that proves nothing, so
   most of what is here is the other half: delete the originals, pull them back,
-  and ask the ledger the same questions. If that does not hold, the rest is
+  and ask the world the same questions. If that does not hold, the rest is
   theatre.
 
-  Two properties do the work. A ledger is append-only, so a backup only ever
+  Two properties do the work. A world is append-only, so a backup only ever
   copies bytes it has not copied — the cost is what changed, not what exists.
   And a copy stops at the last complete record, because the tail of a live log
   may be half-written and half a record is not a fact.
   """
   use ExUnit.Case, async: true
 
-  alias Blazie.{Attribute, Backup, Ledger, Snapshot, Store}
+  alias Blazie.{Attribute, Backup, World, Snapshot, Store}
 
   setup do
     root = Path.join(System.tmp_dir!(), "lr_backup_#{System.unique_integer([:positive])}")
@@ -27,12 +27,12 @@ defmodule Blazie.BackupTest do
     on_exit(fn -> File.rm_rf!(root) end)
 
     name = {:backup_test, System.unique_integer([:positive])}
-    {:ok, ledger} = Ledger.open(name, store: {Store.File, dir: ledgers})
-    on_exit(fn -> Ledger.close(name) end)
+    {:ok, world} = World.open(name, store: {Store.File, dir: ledgers})
+    on_exit(fn -> World.close(name) end)
 
-    {:ok, _} = Ledger.append(ledger, Attribute.seed())
-    {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
-    {:ok, _} = Ledger.append(ledger, [{"ada", "height", 180}])
+    {:ok, _} = World.append(world, Attribute.seed())
+    {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+    {:ok, _} = World.append(world, [{"ada", "height", 180}])
 
     opts = [
       ledger_dir: ledgers,
@@ -40,7 +40,7 @@ defmodule Blazie.BackupTest do
       target: {Backup.Target.Directory, root: remote}
     ]
 
-    %{opts: opts, ledger: ledger, name: name, ledgers: ledgers, keys: keys, remote: remote}
+    %{opts: opts, world: world, name: name, ledgers: ledgers, keys: keys, remote: remote}
   end
 
   describe "the round trip, which is the only thing that matters" do
@@ -48,35 +48,35 @@ defmodule Blazie.BackupTest do
       {:ok, _report} = Backup.run(ctx.opts)
 
       # The disk is gone. Not the process — the bytes.
-      :ok = Ledger.close(ctx.name)
+      :ok = World.close(ctx.name)
       File.rm_rf!(ctx.ledgers)
 
       {:ok, restored} = Backup.restore(ctx.opts)
       assert restored.ledgers == 1
 
-      {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
+      {:ok, again} = World.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
       assert Snapshot.value(Snapshot.open([again]), "ada", "height") == 180
     end
 
-    test "a restore brings back every ledger, not the one you thought of", ctx do
+    test "a restore brings back every world, not the one you thought of", ctx do
       second = {:backup_test_b, System.unique_integer([:positive])}
-      {:ok, other} = Ledger.open(second, store: {Store.File, dir: ctx.ledgers})
-      on_exit(fn -> Ledger.close(second) end)
-      {:ok, _} = Ledger.append(other, Attribute.seed())
-      {:ok, _} = Ledger.append(other, Attribute.define("depth", answers: "integer"))
-      {:ok, _} = Ledger.append(other, [{"trench", "depth", 10_994}])
+      {:ok, other} = World.open(second, store: {Store.File, dir: ctx.ledgers})
+      on_exit(fn -> World.close(second) end)
+      {:ok, _} = World.append(other, Attribute.seed())
+      {:ok, _} = World.append(other, Attribute.define("depth", answers: "integer"))
+      {:ok, _} = World.append(other, [{"trench", "depth", 10_994}])
 
       {:ok, report} = Backup.run(ctx.opts)
       assert report.ledgers == 2
 
-      :ok = Ledger.close(ctx.name)
-      :ok = Ledger.close(second)
+      :ok = World.close(ctx.name)
+      :ok = World.close(second)
       File.rm_rf!(ctx.ledgers)
 
       {:ok, _} = Backup.restore(ctx.opts)
 
-      {:ok, a} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
-      {:ok, b} = Ledger.open(second, store: {Store.File, dir: ctx.ledgers})
+      {:ok, a} = World.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
+      {:ok, b} = World.open(second, store: {Store.File, dir: ctx.ledgers})
 
       assert Snapshot.value(Snapshot.open([a]), "ada", "height") == 180
       assert Snapshot.value(Snapshot.open([b]), "trench", "depth") == 10_994
@@ -103,7 +103,7 @@ defmodule Blazie.BackupTest do
 
     test "a run after an append copies only the append", ctx do
       {:ok, _} = Backup.run(ctx.opts)
-      {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", 181}])
+      {:ok, _} = World.append(ctx.world, [{"ada", "height", 181}])
 
       {:ok, second} = Backup.run(ctx.opts)
 
@@ -114,13 +114,13 @@ defmodule Blazie.BackupTest do
 
     test "the segments concatenate back to the file they came from", ctx do
       {:ok, _} = Backup.run(ctx.opts)
-      {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", 181}])
-      {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", 182}])
+      {:ok, _} = World.append(ctx.world, [{"ada", "height", 181}])
+      {:ok, _} = World.append(ctx.world, [{"ada", "height", 182}])
       {:ok, _} = Backup.run(ctx.opts)
 
       original = File.read!(ledger_path(ctx))
 
-      :ok = Ledger.close(ctx.name)
+      :ok = World.close(ctx.name)
       File.rm_rf!(ctx.ledgers)
       {:ok, _} = Backup.restore(ctx.opts)
 
@@ -148,13 +148,13 @@ defmodule Blazie.BackupTest do
 
       # The local log is already unreadable past the tear — a scan stops there.
       # So the restored copy answers exactly what the original answers.
-      before = Snapshot.value(Snapshot.open([ctx.ledger]), "ada", "height")
+      before = Snapshot.value(Snapshot.open([ctx.world]), "ada", "height")
 
-      :ok = Ledger.close(ctx.name)
+      :ok = World.close(ctx.name)
       File.rm_rf!(ctx.ledgers)
       {:ok, _} = Backup.restore(ctx.opts)
 
-      {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
+      {:ok, again} = World.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
       assert Snapshot.value(Snapshot.open([again]), "ada", "height") == before
     end
   end
@@ -170,13 +170,13 @@ defmodule Blazie.BackupTest do
       refute Enum.any?(held, &String.contains?(&1, "checkpoint"))
     end
 
-    test "a ledger restored without its checkpoint still answers", ctx do
+    test "a world restored without its checkpoint still answers", ctx do
       {:ok, _} = Backup.run(ctx.opts)
-      :ok = Ledger.close(ctx.name)
+      :ok = World.close(ctx.name)
       File.rm_rf!(ctx.ledgers)
       {:ok, _} = Backup.restore(ctx.opts)
 
-      {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
+      {:ok, again} = World.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
       assert Snapshot.value(Snapshot.open([again]), "ada", "height") == 180
     end
   end
@@ -221,13 +221,13 @@ defmodule Blazie.BackupTest do
   describe "it is a job, with everything that follows" do
     setup ctx do
       journal = {:backup_journal, System.unique_integer([:positive])}
-      {:ok, ledger} = Ledger.open(journal)
-      on_exit(fn -> Ledger.close(journal) end)
+      {:ok, world} = World.open(journal)
+      on_exit(fn -> World.close(journal) end)
 
       {:ok, _} =
-        Ledger.append(ledger, Attribute.seed() ++ Blazie.Job.seed() ++ Backup.seed())
+        World.append(world, Attribute.seed() ++ Blazie.Job.seed() ++ Backup.seed())
 
-      %{journal: ledger, opts: ctx.opts}
+      %{journal: world, opts: ctx.opts}
     end
 
     test "running it writes what it copied, naming itself", ctx do
@@ -239,7 +239,7 @@ defmodule Blazie.BackupTest do
           1000
         )
 
-      written = Ledger.facts_at(ctx.journal, tx) |> Enum.filter(&(&1.tx == tx))
+      written = World.facts_at(ctx.journal, tx) |> Enum.filter(&(&1.tx == tx))
 
       assert written != []
       assert Enum.all?(written, &(&1.by == "backup"))
@@ -250,14 +250,14 @@ defmodule Blazie.BackupTest do
     end
 
     test "it has a cadence and the runner picks it up", ctx do
-      {:ok, _} = Ledger.append(ctx.journal, Backup.declare(every: 900))
+      {:ok, _} = World.append(ctx.journal, Backup.declare(every: 900))
 
       assert Blazie.Job.due?(Snapshot.open([ctx.journal]), "backup", 0)
 
       runner =
         start_supervised!(
           {Blazie.Job.Runner,
-           ledger: ctx.journal,
+           world: ctx.journal,
            jobs: [Backup.job(ctx.opts)],
            name: :"backup_#{System.unique_integer([:positive])}"}
         )
@@ -284,12 +284,12 @@ defmodule Blazie.BackupTest do
 
       assert reason =~ "backup"
       assert Blazie.Job.failures(Snapshot.open([ctx.journal]), "backup") != []
-      # A job that failed still ran, and the ledger says so.
+      # A job that failed still ran, and the world says so.
       assert Blazie.Job.last_run(Snapshot.open([ctx.journal]), "backup") == 1000
     end
   end
 
-  describe "copying a ledger that is being written to" do
+  describe "copying a world that is being written to" do
     # The only condition production ever runs in. A run reads a file another
     # process is appending to, so the boundary it copies up to is a moving
     # target — and the thing that must hold is that every boundary it picks is
@@ -298,7 +298,7 @@ defmodule Blazie.BackupTest do
       writer =
         Task.async(fn ->
           Enum.each(1..200, fn n ->
-            {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", n}])
+            {:ok, _} = World.append(ctx.world, [{"ada", "height", n}])
           end)
         end)
 
@@ -319,14 +319,14 @@ defmodule Blazie.BackupTest do
       assert Enum.sum(copied) > 0
       assert {:ok, %{divergent: []}} = Backup.verify(ctx.opts)
 
-      before = Snapshot.find(Snapshot.open([ctx.ledger]), id: "ada", attribute: "height")
+      before = Snapshot.find(Snapshot.open([ctx.world]), id: "ada", attribute: "height")
 
-      :ok = Ledger.close(ctx.name)
+      :ok = World.close(ctx.name)
       File.rm_rf!(ctx.ledgers)
       {:ok, restored} = Backup.restore(ctx.opts)
       assert restored.incomplete == []
 
-      {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
+      {:ok, again} = World.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
       after_ = Snapshot.find(Snapshot.open([again]), id: "ada", attribute: "height")
 
       assert length(after_) == length(before)
@@ -341,7 +341,7 @@ defmodule Blazie.BackupTest do
       # writer happened to finish before any copy started.
       for batch <- 1..12 do
         for n <- 1..8 do
-          {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", batch * 100 + n}])
+          {:ok, _} = World.append(ctx.world, [{"ada", "height", batch * 100 + n}])
         end
 
         {:ok, _} = Backup.run(ctx.opts)
@@ -372,7 +372,7 @@ defmodule Blazie.BackupTest do
       end)
 
       # And what they concatenate to is what is on disk.
-      :ok = Ledger.close(ctx.name)
+      :ok = World.close(ctx.name)
       original = File.read!(ledger_path(ctx))
       File.rm_rf!(ctx.ledgers)
       {:ok, _} = Backup.restore(ctx.opts)
@@ -387,9 +387,9 @@ defmodule Blazie.BackupTest do
     # so the only safe answers are to stop there, say so, and re-copy.
     setup ctx do
       {:ok, _} = Backup.run(ctx.opts)
-      {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", 181}])
+      {:ok, _} = World.append(ctx.world, [{"ada", "height", 181}])
       {:ok, _} = Backup.run(ctx.opts)
-      {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", 182}])
+      {:ok, _} = World.append(ctx.world, [{"ada", "height", 182}])
       {:ok, _} = Backup.run(ctx.opts)
 
       {:ok, segments} = Backup.Target.Directory.list([root: ctx.remote], "ledgers/")
@@ -419,26 +419,26 @@ defmodule Blazie.BackupTest do
     end
 
     test "a restore stops at it rather than gluing across it", ctx do
-      :ok = Ledger.close(ctx.name)
+      :ok = World.close(ctx.name)
       File.rm_rf!(ctx.ledgers)
 
       {:ok, restored} = Backup.restore(ctx.opts)
 
       assert restored.incomplete != []
       # What did come back is whole records, so it still opens and answers.
-      {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
+      {:ok, again} = World.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
       assert Snapshot.value(Snapshot.open([again]), "ada", "height") == 180
     end
 
     test "and a whole restore says nothing was incomplete", ctx do
       {:ok, _} = Backup.run(ctx.opts)
-      :ok = Ledger.close(ctx.name)
+      :ok = World.close(ctx.name)
       File.rm_rf!(ctx.ledgers)
 
       {:ok, restored} = Backup.restore(ctx.opts)
 
       assert restored.incomplete == []
-      {:ok, again} = Ledger.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
+      {:ok, again} = World.open(ctx.name, store: {Store.File, dir: ctx.ledgers})
       assert Snapshot.value(Snapshot.open([again]), "ada", "height") == 182
     end
   end
@@ -452,22 +452,22 @@ defmodule Blazie.BackupTest do
       assert report.ledgers == 1
     end
 
-    test "it names a ledger the copy is behind on", ctx do
+    test "it names a world the copy is behind on", ctx do
       {:ok, _} = Backup.run(ctx.opts)
-      {:ok, _} = Ledger.append(ctx.ledger, [{"ada", "height", 181}])
+      {:ok, _} = World.append(ctx.world, [{"ada", "height", 181}])
 
       assert {:ok, report} = Backup.verify(ctx.opts)
-      assert [%{ledger: _, local: local, held: held}] = report.divergent
+      assert [%{world: _, local: local, held: held}] = report.divergent
       assert local > held
     end
 
-    test "it names a ledger with no copy at all", ctx do
+    test "it names a world with no copy at all", ctx do
       {:ok, _} = Backup.run(ctx.opts)
 
       later = {:backup_test_c, System.unique_integer([:positive])}
-      {:ok, fresh} = Ledger.open(later, store: {Store.File, dir: ctx.ledgers})
-      on_exit(fn -> Ledger.close(later) end)
-      {:ok, _} = Ledger.append(fresh, Attribute.seed())
+      {:ok, fresh} = World.open(later, store: {Store.File, dir: ctx.ledgers})
+      on_exit(fn -> World.close(later) end)
+      {:ok, _} = World.append(fresh, Attribute.seed())
 
       assert {:ok, report} = Backup.verify(ctx.opts)
       assert [%{held: 0}] = report.divergent

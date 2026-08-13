@@ -1,6 +1,6 @@
 defmodule Blazie do
   @moduledoc """
-  Seven words: fact, attribute, ledger, snapshot, formula, symbol, job.
+  Seven words: fact, attribute, world, snapshot, formula, symbol, job.
 
   Facts accumulate in ledgers. A snapshot is one or more ledgers read at a
   transaction, and it is a value — the answer at a named snapshot is the same
@@ -14,15 +14,15 @@ defmodule Blazie do
   the system is a second source that drifts.
 
   All seven exist, one module each: `Blazie.Fact`, `Blazie.Attribute`,
-  `Blazie.Ledger`, `Blazie.Snapshot`, `Blazie.Formula`,
+  `Blazie.World`, `Blazie.Snapshot`, `Blazie.Formula`,
   `Blazie.Symbol`, `Blazie.Job`.
 
-  Around them, and deliberately not vocabulary: a `Store` behind the ledger
-  seam with checkpointing, sort orders and resident bounds inside the ledger, a
+  Around them, and deliberately not vocabulary: a `Store` behind the world
+  seam with checkpointing, sort orders and resident bounds inside the world, a
   `Surface` of four operations with an `Authority` deciding which ledgers a
   caller may name, a `Job.Runner`, `Subscription`, `Formula.Engine`,
   `Formula.Sandbox` for code we do not trust, `Erasure` with its `Keyring`,
-  `Cluster` for one-ledger-one-owner, and `Vitals`.
+  `Cluster` for one-world-one-owner, and `Vitals`.
 
   ## What is not true yet, in one place
 
@@ -31,7 +31,7 @@ defmodule Blazie do
   declared can never be erased, which is a property of the design rather than a
   gap: subject is decided at write time or not at all.
 
-  Erasure itself is finished: a tombstone in the ledger, reconciled against
+  Erasure itself is finished: a tombstone in the world, reconciled against
   whenever the keyring opens, so a key store restored from before an erasure is
   corrected rather than trusted. What it needs from an operator is that
   `KEY_DIR` points at persistent storage — the release warns when it is unset,

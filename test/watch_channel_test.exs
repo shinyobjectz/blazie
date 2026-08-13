@@ -14,23 +14,23 @@ defmodule Blazie.Surface.WatchChannelTest do
   use ExUnit.Case, async: true
   import Phoenix.ChannelTest
 
-  alias Blazie.{Attribute, Authority, Ledger, Snapshot}
+  alias Blazie.{Attribute, Authority, World, Snapshot}
 
   @endpoint Blazie.Surface.Endpoint
 
   setup do
     token = "watch-token-#{System.unique_integer([:positive])}"
-    name = "watch-ledger-#{System.unique_integer([:positive])}"
-    {:ok, ledger} = Ledger.open(name)
-    on_exit(fn -> Ledger.close(name) end)
+    name = "watch-world-#{System.unique_integer([:positive])}"
+    {:ok, world} = World.open(name)
+    on_exit(fn -> World.close(name) end)
 
     Authority.grant(token, name)
-    {:ok, _} = Ledger.append(ledger, Attribute.seed())
-    {:ok, _} = Ledger.append(ledger, Attribute.define("height", answers: "integer"))
-    {:ok, _} = Ledger.append(ledger, Attribute.define("colour"))
+    {:ok, _} = World.append(world, Attribute.seed())
+    {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+    {:ok, _} = World.append(world, Attribute.define("colour"))
 
     {:ok, socket} = connect(Blazie.Surface.Socket, %{"token" => token})
-    %{socket: socket, ledger: ledger, name: name, token: token}
+    %{socket: socket, world: world, name: name, token: token}
   end
 
   describe "connecting" do
@@ -41,32 +41,32 @@ defmodule Blazie.Surface.WatchChannelTest do
   end
 
   describe "joining a watch" do
-    test "a granted ledger joins", ctx do
+    test "a granted world joins", ctx do
       assert {:ok, %{"watching" => watching}, _socket} =
                subscribe_and_join(ctx.socket, "watch:heights", %{
-                 "ledgers" => [ctx.name],
+                 "worlds" => [ctx.name],
                  "source" => "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
                })
 
       assert watching == [ctx.name]
     end
 
-    test "an ungranted ledger is refused, even holding a socket", ctx do
-      other = "watch-ledger-#{System.unique_integer([:positive])}"
-      {:ok, _} = Ledger.open(other)
-      on_exit(fn -> Ledger.close(other) end)
+    test "an ungranted world is refused, even holding a socket", ctx do
+      other = "watch-world-#{System.unique_integer([:positive])}"
+      {:ok, _} = World.open(other)
+      on_exit(fn -> World.close(other) end)
 
       assert {:error, %{"problem" => "not_granted"}} =
                subscribe_and_join(ctx.socket, "watch:x", %{
-                 "ledgers" => [other],
+                 "worlds" => [other],
                  "source" => "return 1"
                })
     end
 
     test "naming nothing is refused rather than watching everything", ctx do
-      assert {:error, %{"problem" => "no_ledgers"}} =
+      assert {:error, %{"problem" => "no_worlds"}} =
                subscribe_and_join(ctx.socket, "watch:x", %{
-                 "ledgers" => [],
+                 "worlds" => [],
                  "source" => "return 1"
                })
     end
@@ -76,7 +76,7 @@ defmodule Blazie.Surface.WatchChannelTest do
     setup ctx do
       {:ok, _, socket} =
         subscribe_and_join(ctx.socket, "watch:heights", %{
-          "ledgers" => [ctx.name],
+          "worlds" => [ctx.name],
           "source" => "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
         })
 
@@ -84,7 +84,7 @@ defmodule Blazie.Surface.WatchChannelTest do
     end
 
     test "a matching write pushes what the chunk returned", ctx do
-      {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
+      {:ok, _} = World.append(ctx.world, [{42, "height", 180}])
 
       assert_push("answer", %{"value" => value}, 2_000)
       assert value == [180]
@@ -93,22 +93,22 @@ defmodule Blazie.Surface.WatchChannelTest do
     test "the chunk that is pushed is the chunk you would have run", ctx do
       # Not a resemblance — the same source, against the name it was answered
       # at, has to give the same thing the socket pushed.
-      {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
+      {:ok, _} = World.append(ctx.world, [{42, "height", 180}])
       assert_push("answer", %{"name" => name, "value" => pushed}, 2_000)
 
       source = "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
       reopened = Snapshot.reopen(%{ctx.name => name[ctx.name]})
 
-      assert {:ok, ^pushed, _} = Blazie.Lua.World.run(source, reopened)
+      assert {:ok, ^pushed, _} = Blazie.Lua.Binding.run(source, reopened)
     end
 
     test "everything pushed can actually cross a wire", ctx do
-      {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
+      {:ok, _} = World.append(ctx.world, [{42, "height", 180}])
 
       assert_push("answer", payload, 2_000)
 
       # assert_push compares terms; a socket encodes them. A snapshot name is
-      # keyed by ledger reference inside, and pushing one raw crashed the
+      # keyed by world reference inside, and pushing one raw crashed the
       # channel in production with nothing here to catch it.
       assert {:ok, json} = Jason.encode(payload)
       assert %{"name" => %{}} = Jason.decode!(json)
@@ -116,29 +116,29 @@ defmodule Blazie.Surface.WatchChannelTest do
     end
 
     test "the answer carries a name that still answers", ctx do
-      {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
+      {:ok, _} = World.append(ctx.world, [{42, "height", 180}])
 
       assert_push("answer", %{"name" => name, "value" => value}, 2_000)
 
       # The name is the contract: running it again gives the same answer.
       reopened = Snapshot.reopen(%{ctx.name => name[ctx.name]})
-      assert {:ok, ^value, _} = Blazie.Lua.World.run("local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out", reopened)
+      assert {:ok, ^value, _} = Blazie.Lua.Binding.run("local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out", reopened)
     end
 
     test "a write outside the question is silent", ctx do
-      {:ok, _} = Ledger.append(ctx.ledger, [{42, "colour", "blue"}])
+      {:ok, _} = World.append(ctx.world, [{42, "colour", "blue"}])
 
       refute_push("answer", %{}, 50)
     end
 
     test "each matching write pushes again", ctx do
-      # A push crosses three processes — ledger, subscription, channel — and
+      # A push crosses three processes — world, subscription, channel — and
       # `assert_push` waits 100ms by default, which is a coin flip when the
       # whole suite is running. The timeout is not the property under test.
-      {:ok, _} = Ledger.append(ctx.ledger, [{42, "height", 180}])
+      {:ok, _} = World.append(ctx.world, [{42, "height", 180}])
       assert_push("answer", %{"value" => first}, 2_000)
 
-      {:ok, _} = Ledger.append(ctx.ledger, [{43, "height", 190}])
+      {:ok, _} = World.append(ctx.world, [{43, "height", 190}])
       assert_push("answer", %{"value" => second}, 2_000)
 
       assert length(first) == 1
@@ -150,7 +150,7 @@ defmodule Blazie.Surface.WatchChannelTest do
     test "leaving stops the pushes", ctx do
       {:ok, _, socket} =
         subscribe_and_join(ctx.socket, "watch:heights", %{
-          "ledgers" => [ctx.name],
+          "worlds" => [ctx.name],
           "source" => "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
         })
 

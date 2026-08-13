@@ -2,13 +2,13 @@ defmodule Blazie.Surface.WatchChannel do
   @moduledoc """
   `watch` — a run, kept.
 
-  Joining names a ledger and the Lua to keep answering. Every time something
+  Joining names a world and the Lua to keep answering. Every time something
   lands inside what that chunk read, it runs again and the value is pushed with
   the snapshot name it was answered at — so a client caches on that name, and
   running the same source at it later gives the same answer.
 
       channel.join("watch:heights", {
-        ledger: "tenant-7",
+        world: "tenant-7",
         source: "local n = 0 for p in each { height = true } do n = n + 1 end return n"
       })
 
@@ -19,7 +19,7 @@ defmodule Blazie.Surface.WatchChannel do
 
   Authorization happens here rather than only at connect, because naming is what
   is authorized and a join is where naming happens. A caller may hold a socket
-  and still be refused a ledger.
+  and still be refused a world.
 
   The subscription is owned by the channel process, so it dies when the client
   goes — there is nothing to clean up and nothing left pushing into the void.
@@ -27,17 +27,17 @@ defmodule Blazie.Surface.WatchChannel do
 
   use Phoenix.Channel
 
-  alias Blazie.{Authority, Ledger, Subscription}
+  alias Blazie.{Authority, World, Subscription}
 
   @impl true
   def join("watch:" <> _name, params, socket) do
-    with {:ok, ledgers} <- ledgers(params),
+    with {:ok, worlds} <- worlds(params),
          {:ok, source} <- source(params),
-         :ok <- may_name_all(socket.assigns.caller, ledgers),
-         {:ok, opened} <- open_all(ledgers) do
+         :ok <- may_name_all(socket.assigns.caller, worlds),
+         {:ok, opened} <- open_all(worlds) do
       {:ok, ref} = Subscription.watch(opened, {:lua, source})
 
-      {:ok, %{"watching" => ledgers}, assign(socket, :ref, ref)}
+      {:ok, %{"watching" => worlds}, assign(socket, :ref, ref)}
     else
       {:error, refusal} -> {:error, refusal_payload(refusal)}
     end
@@ -63,19 +63,19 @@ defmodule Blazie.Surface.WatchChannel do
 
   # ── plumbing ───────────────────────────────────────────────────────────────
 
-  # `ledger` for one, `ledgers` for several — the same two spellings `run` takes,
+  # `world` for one, `ledgers` for several — the same two spellings `run` takes,
   # because a client that learned one should not discover the socket wants the
   # other.
-  defp ledgers(%{"ledger" => name}) when is_binary(name), do: {:ok, [name]}
+  defp worlds(%{"world" => name}) when is_binary(name), do: {:ok, [name]}
 
-  defp ledgers(%{"ledgers" => names}) when is_list(names) and names != [], do: {:ok, names}
+  defp worlds(%{"worlds" => names}) when is_list(names) and names != [], do: {:ok, names}
 
-  defp ledgers(_params),
+  defp worlds(_params),
     do:
       {:error,
        %{
-         problem: :no_ledgers,
-         repair: "Name the ledger to watch. Watching none is not watching everything."
+         problem: :no_worlds,
+         repair: "Name the world to watch. Watching none is not watching everything."
        }}
 
   defp source(%{"source" => source}) when is_binary(source) and source != "", do: {:ok, source}
@@ -90,8 +90,8 @@ defmodule Blazie.Surface.WatchChannel do
              "would send to run."
        }}
 
-  defp may_name_all(caller, ledgers) do
-    case Enum.reject(ledgers, &Authority.may_name?(caller, &1)) do
+  defp may_name_all(caller, worlds) do
+    case Enum.reject(worlds, &Authority.may_name?(caller, &1)) do
       [] ->
         :ok
 
@@ -106,7 +106,7 @@ defmodule Blazie.Surface.WatchChannel do
 
   defp open_all(names) do
     Enum.reduce_while(names, {:ok, []}, fn name, {:ok, acc} ->
-      case Ledger.open(name) do
+      case World.open(name) do
         {:ok, ref} -> {:cont, {:ok, [ref | acc]}}
         {:error, refusal} -> {:halt, {:error, refusal}}
       end
