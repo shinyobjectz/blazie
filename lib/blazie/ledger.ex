@@ -154,6 +154,27 @@ defmodule Blazie.Ledger do
   end
 
   @doc """
+  Whether anything is already keeping facts under this name.
+
+  Opening a ledger creates it, which is the right default everywhere inside the
+  node and the wrong one at the door: a caller claiming a name needs to know
+  whether it is taking somebody's ledger or making its own, and `open/1` cannot
+  tell it apart because both look like success.
+
+  Open covers a ledger in memory; the file covers one that exists but has not
+  been opened since the node booted. A memory store has no file, so an unopened
+  ledger is unrecoverable there and correctly reads as absent.
+  """
+  @spec exists?(name()) :: boolean()
+  def exists?(name) do
+    name in open_ledgers() or
+      case Application.get_env(:blazie, :ledger_dir) do
+        nil -> false
+        dir -> File.exists?(Path.join(dir, Store.File.filename(name)))
+      end
+  end
+
+  @doc """
   Where a ledger keeps its facts when nobody said.
 
   Memory when nothing is configured, which is right for a test and wrong for

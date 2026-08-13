@@ -13,7 +13,7 @@ defmodule Blazie.Surface.Controller do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias Blazie.{Attribute, Ledger, Snapshot, Wire}
+  alias Blazie.{Attribute, Authority, Ledger, Snapshot, Wire}
 
   def open(conn, %{"ledgers" => []}) do
     refuse(conn, %{
@@ -31,6 +31,41 @@ defmodule Blazie.Surface.Controller do
   end
 
   def open(conn, _params), do: refuse(conn, missing("ledgers"))
+
+  @doc """
+  Claim a ledger name, and hold what you claimed.
+
+  Opening a ledger already creates it, so this adds no storage concept — what it
+  adds is the grant, which is the part a caller could not write for itself. That
+  is the whole reason a caller could not previously make one: every operation is
+  checked against the ledgers it may name, so naming a new one was refused
+  before anything could be created, and the only way a ledger came to exist was
+  somebody with a shell writing a grant by hand.
+
+  Names are global on a cluster, so this is first-come. A name already in use is
+  refused rather than joined — quietly handing over somebody else's ledger
+  because the name matched is the one outcome that must not happen here.
+  """
+  def claim(conn, %{"ledger" => name}) when is_binary(name) do
+    token = conn.assigns.caller
+
+    with {:ok, name} <- claimable(name),
+         {:ok, _ref} <- Ledger.open(name),
+         {:ok, _tx} <- Authority.grant_checked(token, name) do
+      conn
+      |> put_status(:created)
+      |> json(%{"ledger" => name, "name" => %{name => 0}})
+    else
+      {:error, refusal} -> refuse(conn, refusal)
+    end
+  end
+
+  def claim(conn, _params),
+    do:
+      refuse(conn, %{
+        problem: :incomplete_request,
+        repair: "Claiming a ledger needs `ledger`: the name to take."
+      })
 
   def ask(conn, %{"name" => sent, "pattern" => pattern}) when is_map(sent) do
     with {:ok, name} <- Wire.snapshot_name(sent),
@@ -62,6 +97,38 @@ defmodule Blazie.Surface.Controller do
   def write(conn, _params), do: refuse(conn, missing("ledger and facts"))
 
   # ── plumbing ───────────────────────────────────────────────────────────────
+
+  # `$` is how the node's own ledgers are spelled — `$vitals`, `$authority`,
+  # `$identities`. Reserving the prefix rather than listing the names means a
+  # ledger added later is covered without anybody remembering to add it here.
+  defp claimable("$" <> _ = name),
+    do:
+      {:error,
+       %{
+         problem: :reserved_name,
+         repair:
+           "Names beginning with `$` belong to the node itself, so #{inspect(name)} cannot be " <>
+             "claimed. Pick a name that does not start with `$`."
+       }}
+
+  defp claimable(name) when byte_size(name) == 0,
+    do:
+      {:error,
+       %{problem: :empty_name, repair: "A ledger needs a name. The empty string is not one."}}
+
+  defp claimable(name) do
+    if Ledger.exists?(name) do
+      {:error,
+       %{
+         problem: :name_taken,
+         repair:
+           "#{inspect(name)} already holds facts, so it was not claimed. Pick another name, or " <>
+             "ask whoever holds it to grant it to this caller."
+       }}
+    else
+      {:ok, name}
+    end
+  end
 
   defp open_all(names) do
     Enum.reduce_while(names, {:ok, []}, fn name, {:ok, acc} ->

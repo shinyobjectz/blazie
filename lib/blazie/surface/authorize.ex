@@ -29,9 +29,9 @@ defmodule Blazie.Surface.Authorize do
   def init(opts), do: opts
 
   @impl true
-  def call(conn, _opts) do
+  def call(conn, opts) do
     case token(conn) do
-      {:ok, token} -> authorize(conn, token, named(conn))
+      {:ok, token} -> authorize(conn, token, named(conn, opts))
       :error -> deny(conn, 401, :no_token, "Present a token: Authorization: Bearer <token>.")
     end
   end
@@ -55,6 +55,14 @@ defmodule Blazie.Surface.Authorize do
 
   # Every place a ledger can be named, in one list — so adding an operation
   # that names one and forgetting to check it is a change here, not an omission.
+  # Claiming a name is the one operation whose whole point is to name a ledger
+  # this caller does not hold yet, so checking the grant first would refuse
+  # every request it is meant to serve. It still needs a valid token — the
+  # check that is dropped is authorization, never authentication — and the
+  # operation itself is responsible for refusing a name already taken.
+  defp named(_conn, names: false), do: []
+  defp named(conn, _opts), do: named(conn)
+
   defp named(%{params: params}) do
     [
       names(Map.get(params, "ledgers")),
