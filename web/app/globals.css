@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+/* blazie is dark. There is no light mode to swap to — the shader hero and the
+   flame both assume black behind them, and a database console is a thing you
+   look at for a long time. */
+:root {
+  --background: #000000;
+  --foreground: #ededed;
+
+  --muted: #0d0d0d;
+  --muted-foreground: #8a8a8a;
+  --border: #1f1f1f;
+
+  /* Straight off the flame, so the interface and the mark agree. */
+  --flame: #f4442e;
+  --ember: #f58b34;
+  --spark: #fbeb92;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-flame: var(--flame);
+  --color-ember: var(--ember);
+  --color-spark: var(--spark);
+
+  --font-pixel: var(--font-pixel);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* The mark is pixel art. Never let a browser smooth it. */
+img[src*="blazie-mark"] {
+  image-rendering: pixelated;
+}
