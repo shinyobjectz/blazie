@@ -31,6 +31,15 @@ export type Opening = {
   plan: string
   /** Connects the machine to the tunnel that fronts it. */
   tunnelToken: string
+  /**
+   * What signs this cluster's own cookies. Generated per cluster, written once.
+   *
+   * The release refuses to boot without it, deliberately — so the first machine
+   * this ever made would have come up dead. Caught by the gate in the image
+   * workflow before any of it ran, which is the entire reason that gate starts a
+   * container and asks it a question rather than trusting a successful build.
+   */
+  secret: string
 }
 
 /**
@@ -175,6 +184,7 @@ write_files:
     permissions: "0600"
     content: |
       BLAZIE_CLUSTER=${opening.hostname}
+      SECRET_KEY_BASE=${opening.secret}
 
 runcmd:
   # Inbound: nothing. The tunnel dials out, so denying everything costs the

@@ -87,7 +87,7 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
 
   const opened = await upcloud.open(
     { username: env.UPCLOUD_USERNAME!, password: env.UPCLOUD_PASSWORD! },
-    { name: asked.name, hostname, zone, plan, tunnelToken: made.made.token },
+    { name: asked.name, hostname, zone, plan, tunnelToken: made.made.token, secret: mintToken() },
   )
 
   if (!opened.ok) {

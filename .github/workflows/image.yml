@@ -54,7 +54,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          # A throwaway secret, because the release refuses to boot without one
+          # and a probe that skipped it would be probing a different program
+          # than the one a cluster runs.
           docker run -d --name probe -p 4000:4000 \
+            -e SECRET_KEY_BASE="$(head -c 48 /dev/urandom | base64)" \
             ghcr.io/${{ github.repository }}:${{ github.sha }}
 
           # The same question the healthcheck asks, for the same reason: a
