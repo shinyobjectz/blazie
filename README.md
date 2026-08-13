@@ -1,23 +1,53 @@
 # blazie
 
-An immutable fact-log database. Seven things it is made of:
+**The backend agents run on.**
 
-**fact** · **attribute** · **ledger** · **snapshot** · **formula** · **symbol** · **job**
+Durable memory that records where every fact came from, a graph nobody had to
+model, sandboxes to run agent code in, and one line that touches the outside
+world.
 
-Four things you do to them:
+- **Memory that keeps being wrong.** Nothing is rewritten. A correction is a
+  later fact and the earlier one still answers where it was written, so "what
+  did it believe on Tuesday" is a question rather than a log search.
+- **Every fact knows what made it.** Provenance is a slot in the row, not a
+  convention: an answer either came from outside or names the code that
+  produced it, and there is no third option to forget.
+- **A graph you did not have to model.** An edge is a fact whose value is
+  another id. No node type, no edge type, no second store to keep in step.
+- **Code runs where it cannot reach.** Agent code runs in Lua (Luerl, inside
+  the BEAM) or WebAssembly with no clock, no network and no filesystem.
+  Isolation is the absence of anything to reach, so there is no rule to
+  misconfigure.
+- **One line touches the outside world.** A job is the only thing handed the
+  network and the only thing a schedule attaches to, so what an agent did is a
+  list you can read, with its failures on it.
+- **It tells you when something changed.** `watch` is the same question asked
+  again as facts land, not a second mechanism.
 
-**open** · **ask** · **write** · **watch**
+Fourteen words, and nothing else:
 
-And three words those need: a fact's **value**, a snapshot's **name**, and the
-**question** an ask puts to one. Fourteen in total, and nothing else — the
-authoring language is Lua, so grammar is Lua's twenty-two keywords and none of
-it is ours to teach.
+**fact** · **attribute** · **ledger** · **snapshot** · **formula** · **symbol**
+· **job** — seven things it is made of.
 
-Facts accumulate in ledgers. A snapshot is one or more ledgers read at a
-transaction, and it is a value — the answer at a named snapshot is the same
-answer forever. Formulas declare facts that follow from facts and say what,
-never when. Jobs are the only thing that reaches the outside world, and the
-only thing a schedule can attach to.
+**open** · **ask** · **write** · **watch** — four things you do to them.
+
+A fact's **value**, a snapshot's **name**, and the **question** an ask puts to
+one. The authoring language is Lua, so the grammar is Lua's twenty-two keywords
+and none of it is ours to teach.
+
+## Signing in
+
+GitHub OAuth, both ways round. A browser gets a redirect and a code; a terminal
+gets a device flow. Both end at the same door, so the rule about who may hold a
+token is written once.
+
+    POST /auth/github        code            -> token
+    POST /auth/device                        -> a code a human types
+    POST /auth/device/token  device_code     -> token, once they have
+    GET  /me                                 -> who you are, and what you may name
+
+`GITHUB_LOGINS` is the whole access policy. An empty one admits nobody, which
+is the right failure for a setting somebody forgot.
 
 The vocabulary lives in `.monty/ontology.db` and is enforced by `just check`.
 There are no design documents: claims are doctrine in that database, choices
@@ -62,6 +92,8 @@ artefact runs anywhere and carries no secret.
 | `KEY_DIR` | Where key-encryption keys live. **Must be persistent storage.** |
 | `KMS_KEY` | A Cloud KMS key. Setting it selects the KMS-backed keyring. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | A service account key, for the KMS. |
+| `GITHUB_CLIENT_ID` | With `GITHUB_CLIENT_SECRET`. Absent means nobody can sign in. |
+| `GITHUB_LOGINS` | Comma-separated logins allowed a token. **Empty admits nobody.** |
 | `BACKUP_BUCKET` | With `BACKUP_ENDPOINT`, `BACKUP_ACCESS_KEY_ID`, `BACKUP_SECRET_ACCESS_KEY`, and optionally `BACKUP_REGION` and `BACKUP_PREFIX`. |
 | `BACKUP_DIR` | A directory to copy into instead — a second disk, or a test. |
 | `BACKUP_EVERY` | Seconds between runs. Defaults to 900. |
