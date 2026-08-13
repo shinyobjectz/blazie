@@ -175,5 +175,23 @@ defmodule LazyRiver.SurfaceTest do
       assert %{"error" => error} = json_response(conn, 422)
       assert error["problem"] == "bad_transaction"
     end
+
+    test "a redeclaration the facts contradict is refused, with the dance that fixes it",
+         %{conn: conn, ledger: ledger} do
+      post(conn, "/write", %{
+        "ledger" => ledger,
+        "facts" => [%{"id" => 42, "attribute" => "height", "value" => 180}]
+      })
+
+      conn =
+        post(conn, "/write", %{
+          "ledger" => ledger,
+          "facts" => [%{"id" => "height", "attribute" => "answers", "value" => "name"}]
+        })
+
+      assert %{"error" => error} = json_response(conn, 422)
+      assert error["problem"] == "contradicted"
+      assert error["repair"] =~ "narrow in three steps"
+    end
   end
 end

@@ -25,6 +25,36 @@ defmodule LazyRiver.Attribute do
 
       known = Attribute.known(snapshot)
       Ledger.append(ledger, assertions, check: &Attribute.check(&1, known))
+
+  Hand it the snapshot rather than the names taken from one, and the same
+  check also asks what a redeclaration would do to the facts already written:
+
+      Ledger.append(ledger, assertions, check: &Attribute.check(&1, snapshot))
+
+  ## Redeclaring
+
+  A declaration is facts, so changing one is a later fact and the earlier one
+  still answers at the snapshot it was written into. What the later fact may
+  not do is change an answer that has already been given.
+
+  Widening what an attribute answers is free: a value that satisfied the
+  narrower shape satisfies the wider one, so nothing answers differently.
+  Narrowing is refused while any current answer fails the new shape, and the
+  repair is the additive one — write a later fact for each id whose answer does
+  not fit, then narrow again. That is widen, backfill, narrow, with corrections
+  where another database would rewrite rows.
+
+  Cardinality has no such dance. Under `one` only the latest fact answers;
+  under `many` every distinct value does. So flipping it on an attribute whose
+  ids have been corrected either resurrects superseded answers or silences live
+  ones, and there is nothing to backfill because the history *is* the data. It
+  is refused in both directions, and the repair is a second attribute. Where no
+  id has been corrected the two readings agree, so both directions are free.
+
+  The limit, said out loud: this checks a declaration against the facts, never
+  the facts against the declaration. An ordinary write is not shape-checked
+  here, so a narrowing that passes today can be contradicted by tomorrow's
+  fact. `satisfies?/2` is the predicate that check would be built from.
   """
 
   alias LazyRiver.Snapshot
@@ -90,12 +120,35 @@ defmodule LazyRiver.Attribute do
   def defined?(%Snapshot{} = snapshot, name), do: MapSet.member?(known(snapshot), name)
 
   @doc """
-  Check assertions against a vocabulary.
+  Check assertions against a vocabulary, or against a whole snapshot.
+
+  Given the names a snapshot knows, this asks only whether every attribute
+  named is one of them. Given the snapshot itself, it also asks what any
+  redeclaration in the write would do to the facts already there — the
+  vocabulary check first, because a redeclaration of an attribute nobody has
+  defined is a spelling mistake and should be named as one.
 
   Returns `:ok`, or every refusal with what would repair it. A boundary that
   rejects without saying how to comply produces loops, not compliance.
   """
-  @spec check([tuple()], MapSet.t(String.t())) :: :ok | {:error, [refusal()]}
+  @spec check([tuple()], Snapshot.t() | MapSet.t(String.t())) :: :ok | {:error, [refusal()]}
+  def check(assertions, %Snapshot{} = snapshot) do
+    # The snapshot is read here, outside the ledger, and the append happens
+    # after — so a write landing in between is checked against a ledger one
+    # transaction stale. Serialising the whole check inside the writer would
+    # close that, at the cost of every scan running there; until a redeclaration
+    # race is measured rather than imagined, the cheaper reading stands.
+    with :ok <- check(assertions, known(snapshot)) do
+      assertions
+      |> redeclarations(snapshot)
+      |> Enum.flat_map(&contradicted(snapshot, &1))
+      |> case do
+        [] -> :ok
+        refusals -> {:error, refusals}
+      end
+    end
+  end
+
   def check(assertions, known) do
     assertions
     |> Enum.map(&attribute_of/1)
@@ -106,6 +159,21 @@ defmodule LazyRiver.Attribute do
       undefined -> {:error, Enum.map(undefined, &refusal/1)}
     end
   end
+
+  @doc """
+  Does this value satisfy a declared shape?
+
+  Four shapes have a predicate here. Anything else is a name the engine has no
+  way to evaluate, and a value cannot contradict a shape nobody can decide — so
+  it satisfies. That is worth stating rather than hiding: `answers: "email"`
+  records what a caller meant and constrains nothing.
+  """
+  @spec satisfies?(term(), String.t()) :: boolean()
+  def satisfies?(_value, "any"), do: true
+  def satisfies?(value, "integer"), do: is_integer(value)
+  def satisfies?(value, "name"), do: is_binary(value) and value != ""
+  def satisfies?(value, "symbol"), do: is_struct(value, LazyRiver.Symbol)
+  def satisfies?(_value, _shape), do: true
 
   @doc """
   The cardinality declared for an attribute, defaulting to `:one`.
@@ -122,6 +190,130 @@ defmodule LazyRiver.Attribute do
   @spec answers(Snapshot.t(), String.t()) :: String.t()
   def answers(%Snapshot{} = snapshot, name) do
     Snapshot.value(snapshot, name, @answers) || "any"
+  end
+
+  # ── redeclaring ────────────────────────────────────────────────────────────
+  #
+  # A redeclaration is a fact that says something different about an attribute
+  # from what this snapshot already says about it. Saying the same thing again
+  # is not one, which is why re-running a seed costs nothing and why the
+  # defaults `define/2` always restates are only ever checked when they differ.
+
+  defp redeclarations(assertions, snapshot) do
+    assertions
+    |> Enum.flat_map(&declaration_in/1)
+    |> Enum.uniq()
+    |> Enum.reject(fn {name, key, declared} -> declared(snapshot, key, name) == declared end)
+  end
+
+  defp declaration_in({name, key, declared}), do: declaration_in(name, key, declared)
+  defp declaration_in({name, key, declared, _by}), do: declaration_in(name, key, declared)
+
+  defp declaration_in(name, key, declared)
+       when key in [@answers, @cardinality] and is_binary(declared),
+       do: [{name, key, declared}]
+
+  defp declaration_in(_name, _key, _declared), do: []
+
+  defp declared(snapshot, @answers, name), do: answers(snapshot, name)
+  defp declared(snapshot, @cardinality, name), do: cardinality(snapshot, name)
+
+  # What an attribute answers can be narrowed as soon as every live answer fits
+  # the narrower shape — and a later fact is how this database changes a live
+  # answer at all, so the backfill other systems do by rewriting is done here
+  # by writing.
+  defp contradicted(snapshot, {name, @answers, shape}) do
+    snapshot
+    |> answered_now(name)
+    |> Enum.reject(fn {_id, value} -> satisfies?(value, shape) end)
+    |> case do
+      [] -> []
+      refused -> [narrower_than_the_facts(name, shape, answers(snapshot, name), refused)]
+    end
+  end
+
+  # Cardinality is not a shape. It says which of an id's facts count as answers,
+  # so changing it changes answers rather than constraining them — and the ids
+  # it changes nothing for are exactly the ones nobody has corrected.
+  defp contradicted(snapshot, {name, @cardinality, declared}) do
+    case corrected(snapshot, name) do
+      [] -> []
+      ids -> [reread_of_the_facts(name, cardinality(snapshot, name), declared, ids)]
+    end
+  end
+
+  # Which values answer now, read the way the attribute is declared today: under
+  # `one` a later fact supersedes an earlier one, under `many` it joins it.
+  defp answered_now(snapshot, name) do
+    reading = cardinality(snapshot, name)
+
+    snapshot
+    |> by_id(name)
+    |> Enum.flat_map(fn {id, values} -> Enum.map(live(values, reading), &{id, &1}) end)
+  end
+
+  defp live(values, "many"), do: Enum.uniq(values)
+  defp live(values, _one), do: [List.last(values)]
+
+  # The ids the two readings disagree about, which is the whole of what a
+  # cardinality change would move.
+  defp corrected(snapshot, name) do
+    snapshot
+    |> by_id(name)
+    |> Enum.filter(fn {_id, values} -> length(Enum.uniq(values)) > 1 end)
+    |> Enum.map(fn {id, _values} -> id end)
+  end
+
+  defp by_id(snapshot, name) do
+    snapshot
+    |> Snapshot.find(attribute: name)
+    |> Enum.group_by(& &1.id, & &1.value)
+  end
+
+  defp narrower_than_the_facts(name, shape, was, refused) do
+    %{
+      attribute: name,
+      problem: :contradicted,
+      repair:
+        "#{inspect(name)} is answered by #{count(refused, "value")} that #{inspect(shape)} " <>
+          "refuses, across ids #{listing(Enum.map(refused, &elem(&1, 0)))}. Nothing here is " <>
+          "rewritten, so narrow in three steps: leave it answering #{inspect(was)}, write a " <>
+          "later fact for each of those ids whose answer fits, then declare #{inspect(shape)} " <>
+          "again. Find them with Snapshot.find(snapshot, attribute: #{inspect(name)})."
+    }
+  end
+
+  defp reread_of_the_facts(name, was, declared, ids) do
+    %{
+      attribute: name,
+      problem: :would_change_answers,
+      repair:
+        "#{inspect(name)} answers #{inspect(was)}, and #{count(ids, "id")} already hold more " <>
+          "than one value for it: #{listing(ids)}. Reading it as #{inspect(declared)} would " <>
+          "#{effect(declared)}, and a correction cannot be un-written, so there is nothing to " <>
+          "backfill. Define a second attribute with cardinality #{inspect(declared)} and write " <>
+          "there what each id should hold. Find them with " <>
+          "Snapshot.find(snapshot, attribute: #{inspect(name)})."
+    }
+  end
+
+  defp effect("many"), do: "make every superseded correction answer again"
+  defp effect(_one), do: "silence every answer but the latest"
+
+  defp count(things, noun) do
+    case length(things) do
+      1 -> "1 #{noun}"
+      many -> "#{many} #{noun}s"
+    end
+  end
+
+  # Enough ids to go and look at, never all of them — a refusal that pastes ten
+  # thousand is a wall, and the question that finds the rest is in the repair.
+  defp listing(ids) do
+    case ids |> Enum.uniq() |> Enum.split(3) do
+      {shown, []} -> Enum.map_join(shown, ", ", &inspect/1)
+      {shown, rest} -> Enum.map_join(shown, ", ", &inspect/1) <> " and #{length(rest)} more"
+    end
   end
 
   defp attribute_of({_id, attribute, _answer}), do: attribute

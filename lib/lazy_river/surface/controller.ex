@@ -47,8 +47,11 @@ defmodule LazyRiver.Surface.Controller do
   def write(conn, %{"ledger" => name, "facts" => sent}) when is_list(sent) do
     with {:ok, assertions} <- assertions(sent),
          {:ok, ledger} <- Ledger.open(name),
-         known = Attribute.known(Snapshot.open([ledger])),
-         {:ok, tx} <- Ledger.append(ledger, assertions, check: &Attribute.check(&1, known)) do
+         # The snapshot rather than the names in it: a caller can write a
+         # declaration like any other fact, so the boundary has to ask what a
+         # redeclaration would do to the facts already there.
+         snapshot = Snapshot.open([ledger]),
+         {:ok, tx} <- Ledger.append(ledger, assertions, check: &Attribute.check(&1, snapshot)) do
       json(conn, %{"name" => %{name => tx}})
     else
       {:error, [refusal | _]} -> refuse(conn, refusal)
