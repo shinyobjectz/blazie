@@ -29,11 +29,8 @@ export const onRequestDelete: PagesFunction<Control> = async ({ env, request, pa
   const destroy = new URL(request.url).searchParams.get("destroy") === "1"
 
   if (destroy) {
-    if (cluster.host?.vendor === "upcloud" && env.UPCLOUD_USERNAME && env.UPCLOUD_PASSWORD) {
-      await upcloud.close(
-        { username: env.UPCLOUD_USERNAME, password: env.UPCLOUD_PASSWORD },
-        cluster.host.uuid,
-      )
+    if (cluster.host?.vendor === "upcloud" && env.UPCLOUD_TOKEN) {
+      await upcloud.close({ token: env.UPCLOUD_TOKEN }, cluster.host.uuid)
     }
 
     if (env.CLOUDFLARE_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_ZONE_ID) {

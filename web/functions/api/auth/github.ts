@@ -16,7 +16,11 @@ export const onRequestGet: PagesFunction<Control> = async ({ env, request }) => 
 
   const to = new URL("https://github.com/login/oauth/authorize")
   to.searchParams.set("client_id", env.GITHUB_CLIENT_ID)
-  to.searchParams.set("redirect_uri", `${here.origin}/api/auth/callback`)
+  // `/callback/github`, because that is what this OAuth app has registered and
+  // github matches the redirect against it. A tidier `/api/auth/callback` would
+  // have been refused on every sign-in — github allows a subpath of the
+  // registered URL and that is not one.
+  to.searchParams.set("redirect_uri", `${here.origin}/callback/github`)
   // Nothing is read from github but who you are, so nothing is asked for.
   to.searchParams.set("scope", "read:user")
 

@@ -95,9 +95,9 @@ export default function Clusters() {
       {!who.can.open_clusters ? (
         <p className="font-mono mb-10 max-w-2xl rounded-lg border border-ember/30 bg-ember/5 p-4 text-xs leading-relaxed text-ember">
           this deployment cannot open clusters yet — it has no credentials to
-          make a machine with. set UPCLOUD_USERNAME, UPCLOUD_PASSWORD,
-          CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_ZONE_ID with
-          `wrangler pages secret put`. clusters already open still work.
+          make a machine with. set UPCLOUD_TOKEN, CLOUDFLARE_API_TOKEN,
+          CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_ZONE_ID with `wrangler pages
+          secret put`. clusters already open still work.
         </p>
       ) : (
         <form onSubmit={open} className="mb-12 flex flex-wrap items-end gap-4">

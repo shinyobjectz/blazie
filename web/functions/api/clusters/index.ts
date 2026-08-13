@@ -26,8 +26,7 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
   if (!session) return unauthenticated()
 
   for (const [name, value] of [
-    ["UPCLOUD_USERNAME", env.UPCLOUD_USERNAME],
-    ["UPCLOUD_PASSWORD", env.UPCLOUD_PASSWORD],
+    ["UPCLOUD_TOKEN", env.UPCLOUD_TOKEN],
     ["CLOUDFLARE_API_TOKEN", env.CLOUDFLARE_API_TOKEN],
     ["CLOUDFLARE_ACCOUNT_ID", env.CLOUDFLARE_ACCOUNT_ID],
     ["CLOUDFLARE_ZONE_ID", env.CLOUDFLARE_ZONE_ID],
@@ -87,7 +86,7 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
   const token = mintToken()
 
   const opened = await upcloud.open(
-    { username: env.UPCLOUD_USERNAME!, password: env.UPCLOUD_PASSWORD! },
+    { token: env.UPCLOUD_TOKEN! },
     { name: asked.name, hostname, zone, plan, tunnelToken: made.made.token, secret: mintToken() },
   )
 

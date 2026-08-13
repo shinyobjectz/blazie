@@ -1,6 +1,11 @@
 /**
  * Where github lands, and the only place a github secret is used.
  *
+ * At `/callback/github` rather than under `/api`, because that is the address
+ * this OAuth app already has registered — reusing it means nothing has to be
+ * changed in a dashboard for sign-in to work, and github matches a redirect
+ * against the registered URL rather than merely warning about it.
+ *
  * The exchange happens here rather than in the browser because it needs the
  * client secret, and a secret a static page can reach is not one. What the
  * browser gets back is a session cookie it cannot read.

@@ -85,8 +85,8 @@ export type Control = {
   GITHUB_CLIENT_ID?: string
   GITHUB_CLIENT_SECRET?: string
 
-  UPCLOUD_USERNAME?: string
-  UPCLOUD_PASSWORD?: string
+  /** An UpCloud API token (`ucat_…`), presented as a bearer. */
+  UPCLOUD_TOKEN?: string
 
   /** Needs Account:Cloudflare Tunnel:Edit — and Zone:DNS:Edit unless the next one is set. */
   CLOUDFLARE_API_TOKEN?: string

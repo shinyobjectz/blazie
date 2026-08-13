@@ -18,8 +18,7 @@ export const onRequestGet: PagesFunction<Control> = async ({ env, request }) => 
     can: {
       sign_in: Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
       open_clusters: Boolean(
-        env.UPCLOUD_USERNAME &&
-          env.UPCLOUD_PASSWORD &&
+        env.UPCLOUD_TOKEN &&
           env.CLOUDFLARE_API_TOKEN &&
           env.CLOUDFLARE_ACCOUNT_ID &&
           env.CLOUDFLARE_ZONE_ID,

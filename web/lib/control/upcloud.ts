@@ -58,7 +58,14 @@ export type Opening = {
  * be wrong, and it is one of the reasons it is not.
  */
 
-export type Credentials = { username: string; password: string }
+/**
+ * An UpCloud API token, presented as a bearer.
+ *
+ * Not the username and password the API's Basic auth also accepts — a token can
+ * be scoped and revoked without touching the login that can see the invoices,
+ * which is the right shape for a credential a web service holds.
+ */
+export type Credentials = { token: string }
 
 /**
  * The plans offered, and nothing else.
@@ -85,10 +92,15 @@ export function known(list: readonly { id: string }[], id: string): boolean {
 }
 
 /**
- * Debian 12, because the image is built on bookworm and a host that matches it
- * is one fewer thing that can differ between what was tested and what runs.
+ * Debian 12 Bookworm, because the image is built on bookworm and a host that
+ * matches it is one fewer thing that can differ between what was tested and what
+ * runs.
+ *
+ * Read off `/1.3/storage/template` rather than trusted: the uuid written here
+ * first was not a template at all, and nothing would have said so until a
+ * machine failed to clone four minutes into an otherwise successful provision.
  */
-const TEMPLATE = "01000000-0000-4000-8000-000020050100"
+const TEMPLATE = "01000000-0000-4000-8000-000020070100"
 
 export async function open(
   credentials: Credentials,
@@ -209,8 +221,8 @@ runcmd:
 `
 }
 
-function basic({ username, password }: Credentials): string {
-  return `Basic ${btoa(`${username}:${password}`)}`
+function basic({ token }: Credentials): string {
+  return `Bearer ${token}`
 }
 
 // UpCloud says why in a shape of its own, and the operator needs the why rather
@@ -230,5 +242,5 @@ async function said(response: Response): Promise<string> {
     // Not JSON.
   }
 
-  return `UpCloud answered ${response.status} without saying why. Check the credentials in UPCLOUD_USERNAME and UPCLOUD_PASSWORD, and that the account is permitted to create servers.`
+  return `UpCloud answered ${response.status} without saying why. Check UPCLOUD_TOKEN, and that the account is permitted to create servers and has cores and memory left within its resource limits.`
 }
