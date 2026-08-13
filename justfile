@@ -2,7 +2,17 @@
 # PATH — outside `just`, elixir fails with `exec: erl: not found`.
 export PATH := "/opt/homebrew/opt/erlang/bin:" + env_var('PATH')
 
-monty := "uvx --from " + justfile_directory() + "/../montology/.monty/cli monty"
+# The same montology CI runs, so the gate says the same thing in both places.
+# It used to point at the sibling submodule, which is right until that checkout
+# is ahead of what CI can fetch — and then the two versions render different
+# surface hashes for the same repo, no single words skill satisfies both, and
+# the gate is red somewhere no matter what you do. Measured: montology sat two
+# commits ahead, local said the render was stale and CI said the opposite, with
+# the two hashes exactly swapped.
+#
+# To develop montology against this repo, point MONTY at the checkout:
+#   just --set monty "uvx --from ../montology/.monty/cli monty" check
+monty := "uvx --from 'git+https://github.com/socialite-ml/montology@main#subdirectory=.monty/cli' monty"
 
 _default:
     @just --list
