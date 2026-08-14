@@ -567,7 +567,7 @@ ${backupEnv(opening)}
       scrub() {
         sed ${scrubbing(opening)
           .map((secret) => `-e 's|${secret.value}|<${secret.called}>|g'`)
-          .join(" \\\\\n          ")}
+          .join(" \\\n          ")}
       }
 
       say() {
@@ -584,7 +584,18 @@ ${backupEnv(opening)}
 
       # The whole point. Without this a failure is indistinguishable from a slow
       # install, which is exactly how the first provision was lost.
+      #
+      # Entered once. This handler calls say, and if anything inside say fails
+      # the trap fires again from inside the handler — a broken scrub produced
+      # nine identical reports in four seconds and no detail in any of them,
+      # which says nothing about what went wrong and buries the one line that
+      # would. A failure handler that can fail into itself reports its own
+      # recursion instead of the failure.
+      dying=""
       died() {
+        [ -n "$dying" ] && return 0
+        dying=yes
+        trap - ERR
         say failed "line $1: $(tail -c 1200 /var/log/blazie-open.log 2>/dev/null)"
       }
       trap 'died $LINENO' ERR

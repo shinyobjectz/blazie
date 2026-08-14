@@ -809,6 +809,38 @@ describe("what the machine is told to do", () => {
     execFileSync("bash", ["-n", path])
   })
 
+  it("actually redacts, when the function is run rather than parsed", () => {
+    // `bash -n` parses without running, and that is exactly how this shipped
+    // broken: the rendered `scrub` joined its `sed` expressions with TWO
+    // backslashes, which is an escaped literal backslash rather than a line
+    // continuation. Perfectly valid bash. `sed` got a stray argument, every
+    // following line ran as its own command, and the failure handler that calls
+    // `scrub` tripped the ERR trap that calls the failure handler — nine
+    // identical reports in four seconds, with no detail in any of them.
+    //
+    // So this one runs it. A redaction that is never executed in a test is a
+    // redaction whose first execution is on a machine holding real credentials.
+    const dir = mkdtempSync(join(tmpdir(), "blazie-"))
+    const path = join(dir, "scrub")
+
+    const at = script.indexOf("scrub() {")
+    const scrub = script.slice(at, script.indexOf("\n}", at) + 2)
+
+    writeFileSync(path, `set -Eeuo pipefail\n${scrub}\nscrub\n`)
+
+    const out = String(
+      execFileSync("bash", [path], {
+        input: "tunnel=TUNNEL secret=SECRET master=MASTER hello=HELLO and some log\n",
+      }),
+    )
+
+    for (const secret of ["TUNNEL", "SECRET", "MASTER", "HELLO"]) {
+      assert.equal(out.includes(secret), false, `${secret} survived the scrub`)
+    }
+
+    assert.match(out, /and some log/)
+  })
+
   it("writes an upgrade script that is also valid bash", () => {
     // A script inside a heredoc inside a script inside YAML. Checking only the
     // outer one would leave the inner one exactly as unchecked as the whole
