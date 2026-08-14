@@ -24,6 +24,19 @@ export type Held = {
   state: State
   /** What went wrong, with how to comply. Set only when `state` is unreachable. */
   refusal?: { problem: string; repair: string }
+
+  /**
+   * What the machine presents when it calls home. Server-side only.
+   *
+   * Not the cluster's token: this one is good for exactly one endpoint, saying
+   * how the install is going, and it is the only credential a machine holds. A
+   * machine that has been taken over can lie about its own progress and nothing
+   * else, which is the smallest useful thing to be able to say.
+   */
+  hello: string
+
+  /** The last thing the machine said about becoming a cluster. */
+  saying?: Said
   host?: Host
   opened: string
 }
@@ -48,18 +61,42 @@ export type Host = {
 }
 
 /**
+ * What a machine says while it is becoming a cluster.
+ *
+ * A closed set rather than free text, so the console can say how far along
+ * something is rather than printing a log line. The order is the order they
+ * happen in, which is what makes "stuck at `pulled`" a sentence.
+ */
+export const STEPS = ["booted", "packages", "docker", "pulled", "serving", "tunnelled"] as const
+
+export type Step = (typeof STEPS)[number]
+
+export type Said = {
+  /** A step reached, or `failed` — which carries what went wrong. */
+  step: Step | "failed"
+  at: string
+  /** Set on `failed`: the command, and what it printed. */
+  detail?: string
+}
+
+export function isStep(value: unknown): value is Step | "failed" {
+  return value === "failed" || (STEPS as readonly string[]).includes(String(value))
+}
+
+/**
  * A cluster as the browser is allowed to see it.
  *
  * The token is not in it and cannot be added by forgetting to remove it —
  * `shown/1` is the only way a cluster crosses the wire.
  */
-export type Shown = Omit<Held, "token">
+export type Shown = Omit<Held, "token" | "hello">
 
 export function shown(cluster: Held): Shown {
-  // Destructured out rather than deleted, so the type says the token is gone
-  // instead of a cast promising it. `void` marks it as dropped on purpose.
-  const { token, ...rest } = cluster
+  // Destructured out rather than deleted, so the type says they are gone
+  // instead of a cast promising it. `void` marks them as dropped on purpose.
+  const { token, hello, ...rest } = cluster
   void token
+  void hello
   return rest
 }
 
@@ -101,4 +138,14 @@ export type Control = {
 export const keys = {
   session: (id: string) => `session:${id}`,
   clusters: (login: string) => `clusters:${login}`,
+
+  /**
+   * Which login holds a cluster, so a cluster can be found by its id alone.
+   *
+   * A machine calling home has no session and does not know whose it is — it
+   * knows what it is. Without this the only way to find the record would be to
+   * read every login's list, which is a scan that grows with the customer base
+   * on the hot path of every provision.
+   */
+  owner: (cluster: string) => `owner:${cluster}`,
 }

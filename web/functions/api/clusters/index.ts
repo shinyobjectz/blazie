@@ -84,10 +84,23 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
   if (!made.ok) return refuse(made.problem, made.repair, 502)
 
   const token = mintToken()
+  const hello = mintToken()
 
   const opened = await upcloud.open(
     { token: env.UPCLOUD_TOKEN! },
-    { name: asked.name, hostname, zone, plan, tunnelToken: made.made.token, secret: mintToken() },
+    {
+      name: asked.name,
+      hostname,
+      zone,
+      plan,
+      tunnelToken: made.made.token,
+      secret: mintToken(),
+      // Where to report, taken from the request rather than written down, so a
+      // preview deployment provisions machines that call the preview back.
+      home: new URL(request.url).origin,
+      id: made.made.id,
+      hello,
+    },
   )
 
   if (!opened.ok) {
@@ -102,6 +115,7 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
     name: asked.name,
     address: made.made.address,
     token,
+    hello,
     state: "opening",
     host: opened.host,
     opened: new Date().toISOString(),

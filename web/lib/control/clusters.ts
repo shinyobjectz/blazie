@@ -14,6 +14,31 @@ export async function held(
 
 export async function keep(control: Control, login: string, all: Held[]) {
   await control.CONTROL.put(keys.clusters(login), JSON.stringify(all))
+
+  // The index that lets a machine be found by what it knows about itself. Kept
+  // beside the list rather than derived from it, because the machine calls home
+  // before anybody has asked the console anything.
+  await Promise.all(all.map((c) => control.CONTROL.put(keys.owner(c.id), login)))
+}
+
+/** Who holds this cluster, from its id alone. */
+export async function ownerOf(control: Control, id: string): Promise<string | null> {
+  return await control.CONTROL.get(keys.owner(id))
+}
+
+/**
+ * Whether two secrets match, without leaking which character differed.
+ *
+ * A plain `===` on strings short-circuits at the first difference, and the time
+ * that takes is measurable across enough requests. This is the one comparison
+ * here that an attacker controls one side of.
+ */
+export function same(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+
+  let differing = 0
+  for (let i = 0; i < a.length; i++) differing |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return differing === 0
 }
 
 export async function one(

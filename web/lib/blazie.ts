@@ -37,6 +37,8 @@ export type Cluster = {
   address: string
   state: "opening" | "open" | "unreachable"
   refusal?: { problem: string; repair: string }
+  /** The last thing the machine said while becoming a cluster. */
+  saying?: { step: string; at: string; detail?: string }
   host?: { vendor: string; uuid: string; plan: string; zone: string }
   opened: string
 }

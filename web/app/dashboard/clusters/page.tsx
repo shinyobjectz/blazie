@@ -237,7 +237,11 @@ function Card({
           leaves the machine running; destroying takes the machine and every
           world on it. A console where those are one button is a console that
           deletes a database by mis-click. */}
-      {cluster.state === "unreachable" && cluster.refusal ? (
+      {cluster.saying?.step === "failed" && cluster.saying.detail ? (
+        <pre className="font-mono mt-4 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-flame/30 bg-flame/5 p-3 text-[11px] leading-relaxed text-flame">
+          {cluster.saying.detail}
+        </pre>
+      ) : cluster.state === "unreachable" && cluster.refusal ? (
         <p className="font-mono mt-4 rounded-md border border-flame/30 bg-flame/5 p-3 text-[11px] leading-relaxed text-flame">
           {cluster.refusal.repair}
         </p>
@@ -246,10 +250,23 @@ function Card({
   )
 }
 
+/**
+ * How far along, said by the machine rather than guessed from silence.
+ *
+ * A machine reports each step as it reaches it, so "opening" can say WHERE it
+ * is. Before this, one answer — nothing at that address — covered "still
+ * installing", "cloud-init died" and "the tunnel never dialled", which are three
+ * states needing three different responses.
+ */
+const STEPS = ["booted", "packages", "docker", "pulled", "serving", "tunnelled"]
+
 function State({ cluster }: { cluster: Cluster }) {
   if (cluster.state === "open") {
     return <span className="font-mono text-xs text-spark">open</span>
   }
+
+  const step = cluster.saying?.step
+  const reached = step ? STEPS.indexOf(step) : -1
 
   return (
     <span
@@ -261,12 +278,12 @@ function State({ cluster }: { cluster: Cluster }) {
       {cluster.state === "opening" ? (
         <>
           <CircleDashed className="size-3" />
-          opening — a few minutes
+          {reached >= 0 ? `${step} — ${reached + 1}/${STEPS.length}` : "opening"}
         </>
       ) : (
         <>
           <TriangleAlert className="size-3" />
-          unreachable
+          {step === "failed" ? "failed while installing" : "unreachable"}
         </>
       )}
     </span>

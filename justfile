@@ -30,10 +30,17 @@ _default:
 # order. `format` was missing, so a green `just check` never implied a green CI:
 # the build had been failing on formatting for long enough that nobody was
 # reading it, which is how a gate stops being one.
-check: format-check test onto-scan
+check: format-check test control-test onto-scan
 
 format-check:
     mix format --check-formatted
+
+# The control plane, which holds every credential and creates billable
+# infrastructure. It had no tests while the cluster had six hundred, and both
+# bugs found in it were found by running it against live vendors and then
+# checking the vendors. These assert on what gets SENT.
+control-test:
+    cd web && pnpm test
 
 test:
     mix test

@@ -31,6 +31,10 @@ export type Opening = {
   plan: string
   /** Connects the machine to the tunnel that fronts it. */
   tunnelToken: string
+  /** Where to say how it is getting on, and what to present when it does. */
+  home: string
+  id: string
+  hello: string
   /**
    * What signs this cluster's own cookies. Generated per cluster, written once.
    *
@@ -229,11 +233,20 @@ async function stateOf(credentials: Credentials, uuid: string): Promise<string |
  * that could only be opened from a particular laptop would not be a product.
  */
 function cloudInit(opening: Opening): string {
+  const said = `${opening.home}/api/clusters/${opening.id}/said`
+
   return `#cloud-config
 package_update: true
 packages:
   - docker.io
   - ufw
+  - curl
+  # Debian 12 has AppArmor in the kernel and \`docker.io\` does not depend on the
+  # thing that loads its profiles, so every \`docker run\` fails with
+  # "docker-default profile could not be loaded" and \`apparmor_parser: not
+  # found". The machine boots, docker starts, and nothing runs — which is
+  # exactly the silence the first provision died in.
+  - apparmor
 
 write_files:
   - path: /etc/blazie.env
@@ -242,26 +255,80 @@ write_files:
       BLAZIE_CLUSTER=${opening.hostname}
       SECRET_KEY_BASE=${opening.secret}
 
+  - path: /usr/local/bin/blazie-open
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
+
+      # Every step is announced before and after, so a machine that dies mid-step
+      # is stuck at a named place rather than simply silent.
+      say() {
+        detail=$(printf '%s' "\${2-}" | tr -d '"\\\\' | tr '\\n\\r\\t' '   ' | cut -c1-1500)
+        curl -fsS -m 15 -X POST '${said}' \\
+          -H 'content-type: application/json' \\
+          --data "{\\"hello\\":\\"${opening.hello}\\",\\"step\\":\\"$1\\",\\"detail\\":\\"$detail\\"}" \\
+          >/dev/null 2>&1 || true
+      }
+
+      # The whole point. Without this a failure is indistinguishable from a slow
+      # install, which is exactly how the first provision was lost.
+      died() {
+        say failed "line $1: $(tail -c 1200 /var/log/blazie-open.log 2>/dev/null)"
+      }
+      trap 'died $LINENO' ERR
+
+      say booted
+      say packages
+
+      # Inbound: nothing. The tunnel dials out, so denying everything costs no
+      # reachability and takes away every port a scan could find.
+      ufw --force default deny incoming
+      ufw --force default allow outgoing
+      ufw --force enable
+
+      systemctl enable --now docker
+      for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 2; done
+      docker info >/dev/null
+      say docker
+
+      docker pull ghcr.io/shinyobjectz/blazie:latest
+      docker pull cloudflare/cloudflared:latest
+      say pulled
+
+      mkdir -p /var/lib/blazie
+      docker run -d --name blazie --restart always \\
+        --env-file /etc/blazie.env \\
+        -v /var/lib/blazie:/data \\
+        -p 127.0.0.1:4000:4000 \\
+        ghcr.io/shinyobjectz/blazie:latest
+
+      # Refuses without a token, which is the cheapest proof it is serving
+      # rather than merely running — the same question the healthcheck asks.
+      for i in $(seq 1 60); do
+        code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:4000/run \\
+          -H 'content-type: application/json' -d '{}' --max-time 5 || true)
+        [ "$code" = "401" ] && break
+        sleep 2
+      done
+      [ "\${code-}" = "401" ] || { say failed "blazie answered $code where 401 was expected: $(docker logs --tail 40 blazie 2>&1)"; exit 1; }
+      say serving
+
+      docker run -d --name tunnel --restart always --network host \\
+        cloudflare/cloudflared:latest tunnel --no-autoupdate run \\
+        --token ${opening.tunnelToken}
+
+      sleep 8
+      docker ps --filter name=tunnel --filter status=running -q | grep -q . \\
+        || { say failed "cloudflared did not stay up: $(docker logs --tail 40 tunnel 2>&1)"; exit 1; }
+      say tunnelled
+
 runcmd:
-  # Inbound: nothing. The tunnel dials out, so denying everything costs the
-  # machine no reachability at all and takes away every port a scan could find.
-  - ufw --force default deny incoming
-  - ufw --force default allow outgoing
-  - ufw --force enable
-
-  - systemctl enable --now docker
-  - mkdir -p /var/lib/blazie
-
-  - docker run -d --name blazie --restart always
-      --env-file /etc/blazie.env
-      -v /var/lib/blazie:/data
-      -p 127.0.0.1:4000:4000
-      ghcr.io/shinyobjectz/blazie:latest
-
-  # Reaches Cloudflare from the inside. Nothing is opened for it.
-  - docker run -d --name tunnel --restart always --network host
-      cloudflare/cloudflared:latest tunnel --no-autoupdate run
-      --token ${opening.tunnelToken}
+  # One entry, and a file rather than folded lines. The previous version put
+  # multi-line \`docker run\` invocations directly in \`runcmd\`, which relies on
+  # YAML plain-scalar folding and gives no way to set -e, no way to trap, and no
+  # log to read afterwards. A script is a thing that can report.
+  - bash -c '/usr/local/bin/blazie-open >>/var/log/blazie-open.log 2>&1'
 `
 }
 
