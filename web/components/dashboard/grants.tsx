@@ -3,6 +3,7 @@
 import { Bot, Copy, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import { Section } from "@/components/dashboard/section"
 import { RefusalNote } from "@/components/ui/refusal-note"
 import {
   Select,
@@ -112,19 +113,15 @@ export function Grants() {
   const live = held.filter((one) => !one.revoked)
 
   return (
-    <section className="mt-14">
-      <h2 className="mb-2 text-lg font-medium tracking-tight text-white">agents</h2>
-      <p className="mb-8 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        an agent talks to this control plane, not to a cluster — so it holds a
-        grant and never a credential. anything it reads can instruct it, so what
-        it may do is bounded here rather than trusted: opening a cluster spends
-        money and removing one destroys every world on it, which is why they are
-        two permissions and not one.
-      </p>
+    <Section
+      icon={Bot}
+      title="agents"
+      says="an agent talks to this control plane, not to a cluster — so it holds a grant and never a credential. anything it reads can instruct it, so what it may do is bounded here rather than trusted: opening a cluster spends money and removing one destroys every world on it, which is why they are two permissions and not one."
+    >
 
       {/* What the grant may do, shared by both ways of making one — the remit is
           the same thing whether a code or a key carries it. */}
-      <div className="mb-6 flex flex-wrap items-end gap-4">
+      <div className="mb-5 flex flex-wrap items-end gap-4">
         <label className="block">
           <span className="font-mono mb-1.5 block text-xs text-muted-foreground">
             what it may do
@@ -161,7 +158,7 @@ export function Grants() {
         ) : null}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
         <Way
           title="approve a code"
           says="the agent shows a short code. approving it here sends the token straight to it — nothing secret is typed or pasted."
@@ -256,7 +253,7 @@ export function Grants() {
           </div>
         )}
       </div>
-    </section>
+    </Section>
   )
 }
 

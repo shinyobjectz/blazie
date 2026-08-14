@@ -1,22 +1,29 @@
 "use client"
 
-import { Grants } from "@/components/dashboard/grants"
-
-import { KeyRound } from "lucide-react"
+import { Globe, LogOut, Server, UserRound } from "lucide-react"
 import { useRouter } from "next/navigation"
 
-import { Detail, Nothing, PageHead } from "@/components/dashboard/page-shell"
+import { Grants } from "@/components/dashboard/grants"
+import { PageHead } from "@/components/dashboard/page-shell"
+import { Fact, Section } from "@/components/dashboard/section"
 import { Copyable } from "@/components/ui/copyable"
+import { WorldAvatar } from "@/components/ui/world-avatar"
 import { signOut } from "@/lib/blazie"
 
 import { useCluster } from "../cluster"
 
 /**
- * What this caller is and how far it reaches.
+ * Who you are, what the console is pointed at, and what may act for you.
  *
- * There is nothing to edit here, and that is the design rather than a missing
- * feature: authorization is a list of worlds a caller may name, written on the
- * cluster. No page that a token can reach may widen the reach of that token.
+ * Four questions, and until this had sections they were one column of prose in
+ * which the only thing telling them apart was how far down you had scrolled.
+ * They are also asked in an order: you, then the cluster you are looking at,
+ * then what your token may name on it, then what an agent may do with all of
+ * that. Signing out is last because it is the one that ends the page.
+ *
+ * Most of this is not editable, and that is the design rather than a gap.
+ * Authorization is a list of worlds a caller may name, written on the cluster —
+ * no page a token can reach may widen the reach of that token.
  */
 export default function Settings() {
   const router = useRouter()
@@ -25,84 +32,95 @@ export default function Settings() {
   return (
     <>
       <PageHead title="settings">
-        a caller is a fingerprint and a list of worlds. that list is the whole of
-        its reach — not row rules, not predicates, and readable in one glance,
-        which is the point of it being a list.
+        who you are, what this console is pointed at, and what may act on your
+        behalf.
       </PageHead>
 
-      <div className="flex flex-wrap items-start gap-x-14 gap-y-7">
-        <Detail label="github">
-          <p className="font-mono py-2 text-sm text-white/85">
-            {who.login ?? "not recorded"}
-          </p>
-        </Detail>
-
-        <Detail label="cluster">
-          <p className="font-mono py-2 text-sm text-white/85">
-            {cluster?.name ?? "none chosen"}
-          </p>
-        </Detail>
-
-        <Detail label="address">
-          <Copyable text={cluster?.address ?? "—"} />
-        </Detail>
-      </div>
-
-      <p className="mt-5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        the token this cluster answers to is not shown here and is not held by
-        this browser. it lives in the control plane, which is why a cluster needs
-        no port open to the internet — the only thing that can present it is the
-        thing that made it.
-      </p>
-
-      <section className="mt-14">
-        <h2 className="mb-2 text-lg font-medium tracking-tight text-white">
-          worlds this caller may name
-        </h2>
-        <p className="mb-6 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          naming one it was not granted is refused at the door, before anything
-          is read. there is no partial answer and nothing underneath to filter.
-        </p>
-
-        {worlds.length === 0 ? (
-          <Nothing icon={KeyRound} title="granted nothing">
-            a caller is granted, never registered — signing in proves who you
-            are and grants nothing on its own. quote the caller fingerprint
-            above to whoever runs this cluster.
-          </Nothing>
-        ) : (
-          <div className="overflow-hidden rounded-lg border border-border">
-            {worlds.map((world) => (
-              <p
-                key={world}
-                className="font-mono border-b border-border px-4 py-3 text-sm text-white/85 last:border-b-0"
-              >
-                {world}
-              </p>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="mt-14 border-t border-border pt-8">
-        <button
-          type="button"
-          onClick={async () => {
-            await signOut()
-            router.refresh()
-          }}
-          className="rounded-md border border-border px-4 py-2 text-sm text-white transition-colors hover:border-flame/50 hover:bg-flame/5"
+      <div className="mt-10 space-y-12">
+        <Section
+          icon={UserRound}
+          title="you"
+          says="github says who you are. what you hold is kept here rather than on any cluster, which is why this works before you have opened one."
         >
-          sign out
-        </button>
-        <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
-          the session is given back and this browser holds nothing. your clusters
-          keep running — signing out of a console is not a thing that should be
-          able to stop a database.
-        </p>
-      </section>
+          <div className="max-w-xl">
+            <Fact label="github">
+              <span className="font-mono">{who.login ?? "not recorded"}</span>
+            </Fact>
+            <Fact label="may open">
+              {who.can.open_clusters
+                ? "clusters, on this deployment"
+                : "nothing — this deployment has no credentials to make a machine with"}
+            </Fact>
+          </div>
+        </Section>
 
-      <Grants />
+        <Section
+          icon={Server}
+          title="this cluster"
+          says="the token it answers to is not shown here and is not held by this browser. it lives in the control plane, which is why a cluster needs no port open to the internet — the only thing that can present it is the thing that made it."
+        >
+          <div className="max-w-xl">
+            <Fact label="name">
+              <span className="font-mono">{cluster?.name ?? "none chosen"}</span>
+            </Fact>
+            <Fact label="address">
+              <Copyable text={cluster?.address ?? "—"} />
+            </Fact>
+            {cluster?.host ? (
+              <Fact label="machine">
+                <span className="font-mono">
+                  {cluster.host.plan} · {cluster.host.zone}
+                </span>
+              </Fact>
+            ) : null}
+          </div>
+        </Section>
+
+        <Section
+          icon={Globe}
+          title="worlds this caller may name"
+          says="naming one it was not granted is refused at the door, before anything is read. there is no partial answer and nothing underneath to filter, which is the whole of authorization here."
+        >
+          {worlds.length === 0 ? (
+            <p className="font-mono max-w-2xl rounded-lg border border-border p-4 text-xs leading-relaxed text-muted-foreground">
+              granted nothing yet. a caller is granted, never registered —
+              signing in proves who you are and grants nothing on its own.
+            </p>
+          ) : (
+            <div className="flex max-w-xl flex-wrap gap-2">
+              {worlds.map((world) => (
+                <span
+                  key={world}
+                  className="flex items-center gap-2 rounded-md border border-border bg-muted/40 py-1.5 pl-1.5 pr-3"
+                >
+                  <WorldAvatar size="sm" world={world} />
+                  <span className="font-mono text-xs text-white/85">{world}</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </Section>
+
+        <Grants />
+
+        <Section
+          icon={LogOut}
+          title="sign out"
+          tone="grave"
+          says="the session is given back and this browser holds nothing. your clusters keep running — signing out of a console is not a thing that should be able to stop a database."
+        >
+          <button
+            type="button"
+            onClick={async () => {
+              await signOut()
+              router.refresh()
+            }}
+            className="rounded-md border border-flame/40 px-4 py-2 text-sm text-flame transition-colors hover:bg-flame/10"
+          >
+            sign out
+          </button>
+        </Section>
+      </div>
     </>
   )
 }
