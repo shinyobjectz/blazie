@@ -365,6 +365,15 @@ defmodule Blazie.World do
          by_id: %{},
          by_attribute: %{},
          by_value: %{},
+         # Who each entity belongs to, for ALL time. Deliberately not the
+         # fact index: subject ownership decides whether a write is sealed,
+         # and the index holds only what is resident — so looking ownership
+         # up there meant that once an entity's subject fact was evicted,
+         # everything written about it after went down in PLAINTEXT, and
+         # destroying the key did not erase it (C4, reproduced). This map is
+         # one entry per entity that has a subject, built from the whole
+         # replay and never trimmed.
+         subjects: subjects_of(replayed),
          oldest: oldest_of(replayed),
          resident: Keyword.get(opts, :resident, :unbounded),
          store: store,
@@ -402,7 +411,8 @@ defmodule Blazie.World do
       | tx: tx,
         store: store,
         facts: Enum.reverse(facts) ++ state.facts,
-        count: state.count + length(facts)
+        count: state.count + length(facts),
+        subjects: remember_subjects(state.subjects, facts)
     }
 
     {:reply, {:ok, tx}, state |> index(facts) |> trim()}
@@ -570,15 +580,18 @@ defmodule Blazie.World do
     end
   end
 
-  defp owner_of(state, id) do
-    state
-    |> Map.get(:by_id, %{})
-    |> Map.get(id, [])
-    |> Enum.find(&(&1.attribute == @subject))
-    |> case do
-      nil -> nil
-      fact -> fact.value
-    end
+  # Answered from the subjects map, never the fact index: ownership is a
+  # property of the entity for all time, and the index forgets what eviction
+  # takes. The one reader of this decides whether a write is encrypted.
+  defp owner_of(state, id), do: Map.get(state.subjects, id)
+
+  defp subjects_of(facts), do: remember_subjects(%{}, facts)
+
+  defp remember_subjects(subjects, facts) do
+    Enum.reduce(facts, subjects, fn
+      %Fact{attribute: @subject} = fact, acc -> Map.put(acc, fact.id, fact.value)
+      _fact, acc -> acc
+    end)
   end
 
   defp oldest_of([]), do: nil

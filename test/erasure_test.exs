@@ -171,4 +171,86 @@ defmodule Blazie.ErasureTest do
       assert :binary.match(cipher, wrapped) == :nomatch
     end
   end
+
+  describe "ownership survives eviction, or erasure is theater" do
+    # C4 in .research/failure-modes.md, reproduced: sealing looked ownership
+    # up in the fact index, trim rebuilds the index from resident facts only,
+    # so once an entity's subject fact was evicted everything written about it
+    # after went down in PLAINTEXT — silent at write, silent at read, and
+    # observable only after telling a regulator the data was deleted.
+    defp bounded_world(resident) do
+      name = {:test, System.unique_integer([:positive])}
+      {:ok, world} = World.open(name, resident: resident)
+      ExUnit.Callbacks.on_exit(fn -> World.close(name) end)
+      world
+    end
+
+    defp sealed?(world, id, attribute) do
+      world
+      |> World.raw_at(World.tx(world))
+      |> Enum.filter(&(&1.id == id and &1.attribute == attribute))
+      |> Enum.all?(&match?({:sealed, _, _, _, _, _}, &1.value))
+    end
+
+    test "a fact written long after its subject was evicted is still sealed", ctx do
+      # `resident:` generated across the range that used to decide the
+      # outcome: below, at, and above the filler count.
+      for resident <- [2, 3, 5, 8] do
+        world = bounded_world(resident)
+        {:ok, _} = World.append(world, Attribute.seed() ++ Erasure.seed())
+        {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+        {:ok, _} = World.append(world, [{42, "subject", ctx.subject}])
+
+        # Enough filler that the subject fact is long gone from residence.
+        for i <- 1..(resident * 3) do
+          {:ok, _} = World.append(world, [{"filler-#{i}", "height", i}])
+        end
+
+        {:ok, _} = World.append(world, [{42, "height", 999}])
+
+        assert sealed?(world, 42, "height"),
+               "with resident: #{resident}, a fact written after eviction went down in plaintext"
+      end
+    end
+
+    test "and erasure then actually reaches it", ctx do
+      world = bounded_world(3)
+      {:ok, _} = World.append(world, Attribute.seed() ++ Erasure.seed())
+      {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+      {:ok, _} = World.append(world, [{42, "subject", ctx.subject}])
+
+      for i <- 1..9, do: {:ok, _} = World.append(world, [{"filler-#{i}", "height", i}])
+      {:ok, _} = World.append(world, [{42, "height", 999}])
+
+      :ok = Erasure.erase(ctx.subject)
+      assert Snapshot.value(Snapshot.open([world]), 42, "height") == :erased
+    end
+
+    test "ownership is rebuilt from the whole replay, not the resident tail", ctx do
+      # Close and reopen: the replay path builds the subjects map from
+      # everything the store holds, and the `oldest`/`resident` interaction
+      # differs there — which is why the ticket asks for this cycle.
+      dir = Path.join(System.tmp_dir!(), "c4-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      name = {:test, System.unique_integer([:positive])}
+      store = {Blazie.Store.File, dir: dir}
+
+      {:ok, world} = World.open(name, store: store, resident: 3)
+      {:ok, _} = World.append(world, Attribute.seed() ++ Erasure.seed())
+      {:ok, _} = World.append(world, Attribute.define("height", answers: "integer"))
+      {:ok, _} = World.append(world, [{42, "subject", ctx.subject}])
+      for i <- 1..9, do: {:ok, _} = World.append(world, [{"filler-#{i}", "height", i}])
+
+      :ok = World.close(name)
+      {:ok, world} = World.open(name, store: store, resident: 3)
+      on_exit(fn -> World.close(name) end)
+
+      {:ok, _} = World.append(world, [{42, "height", 999}])
+
+      assert sealed?(world, 42, "height"),
+             "after a reopen, a fact about an owned entity went down in plaintext"
+    end
+  end
 end
