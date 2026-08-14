@@ -509,13 +509,6 @@ defmodule Blazie.Store.File do
     end
   end
 
-  defp file_size(path) do
-    case File.stat(path) do
-      {:ok, %{size: size}} -> size
-      {:error, :enoent} -> 0
-    end
-  end
-
   # Is this checkpoint describing THIS log?
   #
   # Three ways it cannot be, each found the hard way. It reaches past the end
