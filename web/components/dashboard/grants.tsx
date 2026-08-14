@@ -13,10 +13,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  type Cluster,
   type Grant,
   type Remit,
   approvePairing,
   grants as askGrants,
+  clusters as askClusters,
   makeGrant,
   revokeGrant,
 } from "@/lib/blazie"
@@ -41,6 +43,16 @@ const CLUSTERS: { id: Remit["clusters"]; label: string; hint: string }[] = [
   { id: "open+remove", label: "may open and remove", hint: "destroys data" },
 ]
 
+/** Every Studio on every cluster, flat, so a picker can list them. */
+function studiosOf(all: Cluster[]): { id: string; label: string }[] {
+  return all.flatMap((cluster) =>
+    (cluster.studios ?? []).map((one) => ({
+      id: one.id,
+      label: `${cluster.name} / ${one.name}`,
+    })),
+  )
+}
+
 export function Grants() {
   const [held, setHeld] = useState<Grant[]>([])
   const [error, setError] = useState<unknown>(null)
@@ -49,12 +61,15 @@ export function Grants() {
   const [name, setName] = useState("")
   const [clusters, setClusters] = useState<Remit["clusters"]>("none")
   const [most, setMost] = useState(1)
+  const [studio, setStudio] = useState("")
+  const [studios, setStudios] = useState<{ id: string; label: string }[]>([])
   const [code, setCode] = useState("")
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
     try {
       setHeld((await askGrants()).grants)
+      setStudios(studiosOf((await askClusters()).clusters))
     } catch (thrown) {
       setError(thrown)
     }
@@ -71,9 +86,13 @@ export function Grants() {
   }, [load])
 
   const remit = (): Remit => ({
-    clusters,
-    most: clusters === "none" ? 0 : most,
+    // A Studio grant is a tenant's: the cluster enforces its worlds, and the
+    // machine permissions are off — the server forces this too, but the form
+    // should not offer what will be clamped away.
+    clusters: studio ? "none" : clusters,
+    most: studio || clusters === "none" ? 0 : most,
     worlds: [],
+    ...(studio ? { studio } : {}),
     until: new Date(Date.now() + 30 * 86_400_000).toISOString(),
   })
 
@@ -122,26 +141,53 @@ export function Grants() {
       {/* What the grant may do, shared by both ways of making one — the remit is
           the same thing whether a code or a key carries it. */}
       <div className="mb-5 flex flex-wrap items-end gap-4">
-        <label className="block">
-          <span className="font-mono mb-1.5 block text-xs text-muted-foreground">
-            what it may do
-          </span>
-          <Select value={clusters} onValueChange={(one) => setClusters(one as Remit["clusters"])}>
-            <SelectTrigger className="font-mono h-auto min-w-56 rounded-md border-border bg-muted px-3 py-2 text-sm text-white">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="font-mono">
-              {CLUSTERS.map((one) => (
-                <SelectItem key={one.id} value={one.id} className="text-sm">
-                  {one.label}
-                  <span className="ml-2 text-xs text-muted-foreground">{one.hint}</span>
+        {studios.length > 0 ? (
+          <label className="block">
+            <span className="font-mono mb-1.5 block text-xs text-muted-foreground">
+              acting as
+            </span>
+            <Select value={studio || "account"} onValueChange={(one) => setStudio(one === "account" ? "" : one)}>
+              <SelectTrigger className="font-mono h-auto min-w-56 rounded-md border-border bg-muted px-3 py-2 text-sm text-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="font-mono">
+                <SelectItem value="account" className="text-sm">
+                  the whole account
+                  <span className="ml-2 text-xs text-muted-foreground">every cluster it holds</span>
                 </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </label>
+                {studios.map((one) => (
+                  <SelectItem key={one.id} value={one.id} className="text-sm">
+                    {one.label}
+                    <span className="ml-2 text-xs text-muted-foreground">that studio&apos;s worlds only</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+        ) : null}
 
-        {clusters !== "none" ? (
+        {!studio ? (
+          <label className="block">
+            <span className="font-mono mb-1.5 block text-xs text-muted-foreground">
+              what it may do
+            </span>
+            <Select value={clusters} onValueChange={(one) => setClusters(one as Remit["clusters"])}>
+              <SelectTrigger className="font-mono h-auto min-w-56 rounded-md border-border bg-muted px-3 py-2 text-sm text-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="font-mono">
+                {CLUSTERS.map((one) => (
+                  <SelectItem key={one.id} value={one.id} className="text-sm">
+                    {one.label}
+                    <span className="ml-2 text-xs text-muted-foreground">{one.hint}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+        ) : null}
+
+        {!studio && clusters !== "none" ? (
           <label className="block">
             <span className="font-mono mb-1.5 block text-xs text-muted-foreground">
               at most, running at once
@@ -226,7 +272,9 @@ export function Grants() {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-white">{grant.name}</span>
                   <span className="font-mono block truncate text-[11px] text-muted-foreground">
-                    {CLUSTERS.find((one) => one.id === grant.remit.clusters)?.label}
+                    {grant.remit.studio
+                      ? `studio ${studios.find((one) => one.id === grant.remit.studio)?.label ?? grant.remit.studio}`
+                      : CLUSTERS.find((one) => one.id === grant.remit.clusters)?.label}
                     {grant.remit.clusters !== "none" ? ` · at most ${grant.remit.most}` : ""}
                     {" · until "}
                     {when(grant.remit.until)}

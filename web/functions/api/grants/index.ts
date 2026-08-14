@@ -9,7 +9,7 @@
  */
 
 import { answer, refuse, unauthenticated } from "@/lib/control/answer"
-import { mintToken } from "@/lib/control/clusters"
+import { held, mintToken, studioHeld } from "@/lib/control/clusters"
 import type { Control } from "@/lib/control/model"
 import {
   type Grant,
@@ -56,13 +56,34 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
     )
   }
 
+  const remit = asRemit(asked?.remit as never)
+
+  // A grant naming a Studio is checked against what exists NOW, so a typo is
+  // refused here with the list — not minted, handed to an agent, and failed on
+  // every call with nothing anybody can read back to the mistake.
+  if (remit.studio) {
+    const found = await studioHeld(env, session.login, remit.studio)
+
+    if (!found) {
+      const all = (await held(env, session.login)).flatMap((cluster) =>
+        (cluster.studios ?? []).map((s) => `${cluster.name}/${s.name} (${s.id})`),
+      )
+
+      return refuse(
+        "no_such_studio",
+        `No cluster you hold has a Studio with id ${JSON.stringify(remit.studio)}. ` +
+          `The Studios you hold: ${all.join(", ") || "none — make one on a cluster first"}.`,
+      )
+    }
+  }
+
   const token = `blz_${mintToken()}`
   const grant: Grant = {
     id: crypto.randomUUID(),
     name,
     owner: session.login,
     fingerprint: await fingerprint(token),
-    remit: asRemit(asked?.remit as never),
+    remit,
     made: new Date().toISOString(),
   }
 

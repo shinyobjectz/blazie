@@ -16,7 +16,7 @@
  */
 
 import { answer, refuse, unauthenticated } from "@/lib/control/answer"
-import { mintToken } from "@/lib/control/clusters"
+import { mintToken, studioHeld } from "@/lib/control/clusters"
 import type { Control } from "@/lib/control/model"
 import {
   type Grant,
@@ -119,8 +119,20 @@ async function approved({ env, request }: Parameters<PagesFunction<Control>>[0])
     )
   }
 
+  const remit = asRemit(said?.remit as never)
+
+  // The same check the key path makes, for the same reason: an approval is
+  // where a person is looking, so a Studio that does not exist is refused to
+  // their face rather than to an agent that can only retry.
+  if (remit.studio && !(await studioHeld(env, session.login, remit.studio))) {
+    return refuse(
+      "no_such_studio",
+      `No cluster you hold has a Studio with id ${JSON.stringify(remit.studio)}. Make one on a cluster first, or approve without a Studio.`,
+    )
+  }
+
   held.owner = session.login
-  held.remit = asRemit(said?.remit as never)
+  held.remit = remit
 
   await env.CONTROL.put(pairing(code), JSON.stringify(held), {
     expirationTtl: PAIRING_SECONDS,

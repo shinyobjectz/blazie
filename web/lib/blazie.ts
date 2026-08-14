@@ -49,6 +49,8 @@ export type Cluster = {
     /** What the vendor last said it was doing — `maintenance` while it clones. */
     state?: string
   }
+  /** The tenant boundaries it holds. Names only — a Studio's token never crosses the wire. */
+  studios?: { id: string; name: string; opened: string }[]
   opened: string
 }
 
@@ -307,6 +309,8 @@ export type Remit = {
   clusters: "none" | "open" | "open+remove"
   most: number
   worlds: string[]
+  /** A Studio to act as, by id. Set, the grant is a tenant's: one cluster, that Studio's worlds, no machines. */
+  studio?: string
   until: string
 }
 

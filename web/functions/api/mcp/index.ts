@@ -81,6 +81,9 @@ async function dispatch(doing: Doing, call: Call) {
             `held by ${doing.grant.owner}. Its remit: clusters=${doing.grant.remit.clusters}, ` +
             `at most ${doing.grant.remit.most} running, ` +
             `worlds=${doing.grant.remit.worlds.length ? doing.grant.remit.worlds.join(",") : "any it is granted"}, ` +
+            (doing.grant.remit.studio
+              ? `acting as Studio ${doing.grant.remit.studio} — you see one cluster and that Studio's worlds, and the cluster itself refuses anything past that, `
+              : "") +
             `until ${doing.grant.remit.until}. Refusals carry a repair — read it, it says how to comply.`,
         },
       }

@@ -1,4 +1,4 @@
-import { held, keep, mintToken, reach } from "./clusters"
+import { held, holdsStudio, keep, mintToken, presenting, reach } from "./clusters"
 import { type Control, type Held, shown } from "./model"
 import { type Asked, openFor, removeFor } from "./opening"
 import {
@@ -77,21 +77,58 @@ function must(verdict: { ok: true } | { ok: false; problem: string; repair: stri
   if (!verdict.ok) throw new Refused(verdict.problem, verdict.repair)
 }
 
-/** The cluster by that name, from the ones this grant's owner holds. */
-async function clusterNamed(doing: Doing, name: unknown): Promise<Held> {
+/**
+ * The clusters this grant can see at all.
+ *
+ * A Studio-scoped grant sees exactly the cluster holding its Studio. Scoped in
+ * the listing rather than refused per call, for the same reason `worlds`
+ * narrows by the remit: an agent shown a cluster it cannot act on will try it.
+ */
+async function withinReach(doing: Doing): Promise<Held[]> {
   const all = await held(doing.env, doing.grant.owner)
+  const studio = doing.grant.remit.studio
+
+  return studio ? all.filter((one) => holdsStudio(one, studio)) : all
+}
+
+/** The cluster by that name, from the ones this grant can see. */
+async function clusterNamed(doing: Doing, name: unknown): Promise<Held> {
+  const all = await withinReach(doing)
   const found = all.find((one) => one.name === name)
 
   if (!found) {
     throw new Refused(
       "no_such_cluster",
-      `There is no cluster called ${JSON.stringify(String(name))}. The ones you hold are: ${
-        all.map((one) => one.name).join(", ") || "none"
-      }.`,
+      `There is no cluster called ${JSON.stringify(String(name))}${
+        doing.grant.remit.studio ? " within this grant's Studio" : ""
+      }. The ones you hold are: ${all.map((one) => one.name).join(", ") || "none"}.`,
     )
   }
 
   return found
+}
+
+/**
+ * The token this grant presents to a cluster.
+ *
+ * The founding token owns everything on the cluster, so it is the right thing
+ * to present only when the grant was not narrowed to a Studio. Narrowed, the
+ * Studio's own token goes instead — and a Studio that has vanished since the
+ * grant was made is a refusal, never a quiet fallback to the token that owns
+ * everything, because that is the single worst way for this to fail.
+ */
+function tokenFor(doing: Doing, cluster: Held): string {
+  const token = presenting(cluster, doing.grant.remit.studio)
+
+  if (!token) {
+    throw new Refused(
+      "no_such_studio",
+      `This grant acts as a Studio that ${JSON.stringify(cluster.name)} no longer holds. ` +
+        `The Studio was removed or the cluster rebuilt — make a new grant in the console under settings.`,
+    )
+  }
+
+  return token
 }
 
 /**
@@ -103,13 +140,14 @@ async function clusterNamed(doing: Doing, name: unknown): Promise<Held> {
  */
 async function askCluster(
   cluster: Held,
+  token: string,
   path: string,
   body: unknown,
 ): Promise<unknown> {
   const said = await fetch(`${cluster.address}${path}`, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${cluster.token}`,
+      authorization: `Bearer ${token}`,
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
@@ -154,7 +192,7 @@ export const TOOLS: Tool[] = [
     description: `List the clusters this grant's owner holds, with whether each is answering. ${says("clu")}`,
     inputSchema: { type: "object", properties: {} },
     run: async (doing) => {
-      const all = await held(doing.env, doing.grant.owner)
+      const all = await withinReach(doing)
       return { clusters: all.map(shown) }
     },
   },
@@ -170,8 +208,12 @@ export const TOOLS: Tool[] = [
     },
     run: async (doing, args) => {
       const cluster = await clusterNamed(doing, args.cluster)
+
+      // Asked AS the Studio when the grant names one, so the answer is already
+      // that Studio's holdings — the cluster's own account of the boundary,
+      // not this control plane's filter over the founding token's view.
       const said = await fetch(`${cluster.address}/me`, {
-        headers: { authorization: `Bearer ${cluster.token}` },
+        headers: { authorization: `Bearer ${tokenFor(doing, cluster)}` },
         signal: AbortSignal.timeout(15_000),
       }).catch(() => null)
 
@@ -219,7 +261,7 @@ export const TOOLS: Tool[] = [
       must(mayName(doing.grant.remit, String(args.world)))
       const cluster = await clusterNamed(doing, args.cluster)
 
-      return askCluster(cluster, "/run", {
+      return askCluster(cluster, tokenFor(doing, cluster), "/run", {
         world: String(args.world),
         source: String(args.source),
         ...(args.as === "job" ? { as: "job" } : {}),
@@ -242,7 +284,7 @@ export const TOOLS: Tool[] = [
     run: async (doing, args) => {
       must(mayName(doing.grant.remit, String(args.world)))
       const cluster = await clusterNamed(doing, args.cluster)
-      return askCluster(cluster, "/worlds", { world: String(args.world) })
+      return askCluster(cluster, tokenFor(doing, cluster), "/worlds", { world: String(args.world) })
     },
   },
 

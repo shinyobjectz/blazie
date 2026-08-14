@@ -33,6 +33,19 @@ export type Remit = {
   most: number
   /** Which worlds it may name. Empty means every world the cluster grants it. */
   worlds: string[]
+  /**
+   * A Studio to act as, by id. Set, every call to a cluster presents that
+   * Studio's token instead of the founding one — so the boundary is the
+   * cluster's own `$authority`, which refuses a world the Studio does not hold
+   * at the door, rather than a filter this control plane runs and could get
+   * wrong. This is how a tenant is given an agent: the grant reaches exactly
+   * one Studio on exactly one cluster, and the cluster enforces it.
+   *
+   * A Studio-scoped grant may not touch machines. Opening and removing are the
+   * account's acts, not a tenant's, so `clusters` is forced to `none` however
+   * it was asked for.
+   */
+  studio?: string
   /** ISO 8601. Past it, nothing is permitted and the repair says to make another. */
   until: string
 }
@@ -108,8 +121,14 @@ export function asRemit(asked: Partial<Remit> | undefined): Remit {
   const held = modest()
   if (!asked) return held
 
+  // A tenant's credential, so the machine permissions are off whatever was
+  // asked. Not a refusal, for the same reason as the clamp: the ceiling on a
+  // Studio grant is "your Studio's worlds", and asking for more should come
+  // back as what will actually apply.
+  const studio = typeof asked.studio === "string" && asked.studio.trim() ? asked.studio.trim() : undefined
+
   const clusters =
-    asked.clusters === "open" || asked.clusters === "open+remove"
+    !studio && (asked.clusters === "open" || asked.clusters === "open+remove")
       ? asked.clusters
       : "none"
 
@@ -120,6 +139,7 @@ export function asRemit(asked: Partial<Remit> | undefined): Remit {
     clusters,
     most: clusters === "none" ? 0 : Math.max(0, Math.min(CEILING.most, Math.floor(asked.most ?? 1))),
     worlds: Array.isArray(asked.worlds) ? asked.worlds.filter((one) => typeof one === "string") : [],
+    ...(studio ? { studio } : {}),
     until: new Date(Number.isFinite(until) ? until : Date.parse(held.until)).toISOString(),
   }
 }

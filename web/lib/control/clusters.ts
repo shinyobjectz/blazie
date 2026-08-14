@@ -2,7 +2,7 @@
  * Whose clusters are whose, and what it takes to reach one.
  */
 
-import { type Control, type Held, keys } from "./model"
+import { type Control, type Held, type Studio, keys } from "./model"
 
 export async function held(
   control: Control,
@@ -80,6 +80,31 @@ export function presenting(cluster: Held, studio?: string | null): string | null
   if (!studio) return cluster.token
 
   return (cluster.studios ?? []).find((s) => s.id === studio)?.token ?? null
+}
+
+/** Does this cluster hold this Studio? The scoping question, asked of a list. */
+export function holdsStudio(cluster: Held, studio: string): boolean {
+  return (cluster.studios ?? []).some((s) => s.id === studio)
+}
+
+/**
+ * The Studio by that id, from everything this login holds.
+ *
+ * What a grant naming a Studio is checked against when it is MADE — so a typo
+ * is refused at creation with what exists, rather than becoming a credential
+ * that fails on every call with no way to say why.
+ */
+export async function studioHeld(
+  control: Control,
+  login: string,
+  studio: string,
+): Promise<{ cluster: Held; studio: Studio } | null> {
+  for (const cluster of await held(control, login)) {
+    const found = (cluster.studios ?? []).find((s) => s.id === studio)
+    if (found) return { cluster, studio: found }
+  }
+
+  return null
 }
 
 /**
