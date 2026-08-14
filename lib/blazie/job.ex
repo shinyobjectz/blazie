@@ -59,7 +59,9 @@ defmodule Blazie.Job do
   @doc "Declare a job. Nothing runs."
   @spec new(
           term(),
-          (Snapshot.t() -> [assertion()]) | (Snapshot.t(), pos_integer() -> [assertion()])
+          (Snapshot.t() -> [assertion()])
+          | (Snapshot.t(), pos_integer() -> [assertion()])
+          | (Snapshot.t(), pos_integer(), [map()] -> [assertion()])
         ) ::
           t()
   def new(id, work) when is_function(work, 1), do: %__MODULE__{id: id, work: work}
@@ -69,6 +71,11 @@ defmodule Blazie.Job do
   # nothing else about it changes, so it is the same constructor rather than a
   # second kind of job.
   def new(id, work) when is_function(work, 2), do: %__MODULE__{id: id, work: work}
+
+  # Arity three is told WHY the last attempt was refused, which is the
+  # difference between a retry and a repair. Still the same job: what varies is
+  # how much of its own history it wants to see.
+  def new(id, work) when is_function(work, 3), do: %__MODULE__{id: id, work: work}
 
   @doc """
   The facts that declare a job and its cadence.

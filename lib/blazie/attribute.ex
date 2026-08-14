@@ -137,7 +137,17 @@ defmodule Blazie.Attribute do
 
     [
       {name, @is, "attribute"}
-      | Enum.map(described, fn {key, value} -> {name, Atom.to_string(key), to_string(value)} end)
+      # A list becomes one fact per member, which is what `cardinality: "many"`
+      # already means everywhere else — `Agent.declare` was spelling this out by
+      # hand for `watches`. It is what lets `one_of:` be a closed set rather than
+      # a stringified list nobody can read back.
+      | Enum.flat_map(described, fn
+          {key, values} when is_list(values) ->
+            Enum.map(values, fn value -> {name, Atom.to_string(key), to_string(value)} end)
+
+          {key, value} ->
+            [{name, Atom.to_string(key), to_string(value)}]
+        end)
     ]
   end
 
@@ -377,6 +387,24 @@ defmodule Blazie.Attribute do
   @spec cardinality(Snapshot.t(), String.t()) :: String.t()
   def cardinality(source, name) do
     value_in(facts_of(source), name, @cardinality) || "one"
+  end
+
+  @doc """
+  The closed set an attribute's values must come from, or `[]`.
+
+  A shape says a value is a string; this says it is one of three strings. Both
+  are shapes — "one of these" constrains no more loosely than "of this type" —
+  and the distinction matters because a provider can enforce an `enum` and
+  cannot enforce a sentence. Measured: asked for a severity with the set named
+  only in `describe`, glm-4.7-flash and gemma-4-26b both answered with a
+  paragraph; named as `one_of`, both answered `high`.
+  """
+  @spec one_of(Snapshot.t(), String.t()) :: [String.t()]
+  def one_of(source, name) do
+    source
+    |> facts_of()
+    |> Enum.filter(&(&1.id == name and &1.attribute == "one_of"))
+    |> Enum.map(& &1.value)
   end
 
   @doc "The shape an attribute's answers take, defaulting to `:any`."

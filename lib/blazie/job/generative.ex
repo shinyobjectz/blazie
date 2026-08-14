@@ -74,8 +74,8 @@ defmodule Blazie.Job.Generative do
     {:unmet, tx, []}
   end
 
-  defp attempt(job, world, snapshot, now, try_number, tries, _last) do
-    produced = produce(job, snapshot, try_number)
+  defp attempt(job, world, snapshot, now, try_number, tries, last) do
+    produced = produce(job, snapshot, try_number, last)
 
     case produced do
       {:error, reason} ->
@@ -134,8 +134,8 @@ defmodule Blazie.Job.Generative do
     {:ok, tx, %{tries: try_number}}
   end
 
-  defp produce(job, snapshot, try_number) do
-    {:ok, apply_work(job, snapshot, try_number)}
+  defp produce(job, snapshot, try_number, last) do
+    {:ok, apply_work(job, snapshot, try_number, last)}
   rescue
     error -> {:error, Exception.message(error)}
   catch
@@ -143,10 +143,25 @@ defmodule Blazie.Job.Generative do
   end
 
   # A job's work takes a snapshot. One that wants to know which attempt this is
-  # takes two arguments, and both shapes are supported so an ordinary job can
-  # be sampled without being rewritten.
-  defp apply_work(%{work: work}, snapshot, try_number) do
-    if is_function(work, 2), do: work.(snapshot, try_number), else: work.(snapshot)
+  # takes two arguments, and one that wants to REPAIR takes three — the
+  # requirements the last sample failed, with the reason each gave.
+  #
+  # That third argument is the whole of rejection sampling and it was missing.
+  # The reasons were computed, carried into the next attempt as `last`, and
+  # dropped unread at the point of use, so every retry asked the identical
+  # question and the loop was three chances at the same coin rather than a
+  # repair. `Attribute.judge/3` takes the trouble to return WHY a requirement
+  # refused precisely so this could hand it back; its own comment says a judge
+  # that only said no "would cost the repair loop the thing that makes it work".
+  #
+  # All three shapes are supported, so an ordinary job is still sampleable
+  # without being rewritten.
+  defp apply_work(%{work: work}, snapshot, try_number, last) do
+    cond do
+      is_function(work, 3) -> work.(snapshot, try_number, last)
+      is_function(work, 2) -> work.(snapshot, try_number)
+      true -> work.(snapshot)
+    end
   end
 
   defp stamp({id, attribute, value}, by), do: {id, attribute, value, by}

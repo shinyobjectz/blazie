@@ -73,6 +73,44 @@ defmodule Blazie.Job.GenerativeTest do
       assert Snapshot.value(snapshot(world), "n", "score") == 7
     end
 
+    test "the next attempt is TOLD why the last one failed", %{world: world} do
+      # The whole of rejection sampling, and it was missing. The reasons were
+      # computed by `Attribute.judge/3`, carried into the next attempt, and then
+      # dropped unread — so every retry asked the identical question and the
+      # loop was three chances at the same coin rather than a repair.
+      #
+      # A three-arity work function takes them. This asserts the repair ARRIVES,
+      # which is the part no test covered: the previous ones only proved that a
+      # second attempt happened.
+      seen = :ets.new(:seen, [:public, :set])
+
+      job =
+        Job.new("guess", fn _snap, try_number, last ->
+          :ets.insert(seen, {try_number, last})
+          if try_number == 1, do: [{"n", "score", -1}], else: [{"n", "score", 7}]
+        end)
+
+      assert {:ok, _tx, %{tries: 2}} = Generative.sample(job, world, snapshot(world), 1000)
+
+      # Nothing has failed yet on the first attempt, so it is told nothing.
+      assert [{1, []}] = :ets.lookup(seen, 1)
+
+      # The second is told what the first broke, and why — the reason a judge
+      # goes to the trouble of returning one.
+      assert [{2, [unmet | _]}] = :ets.lookup(seen, 2)
+      assert unmet.attribute == "score"
+      assert unmet.problem == :unmet
+      assert is_binary(unmet.repair) and unmet.repair != ""
+    end
+
+    test "a work function that does not want them still runs", %{world: world} do
+      # Two-arity and one-arity are unchanged, so an ordinary job is sampleable
+      # without being rewritten for a feature it does not use.
+      job = Job.new("guess", fn _snap -> [{"n", "score", 7}] end)
+
+      assert {:ok, _tx, %{tries: 1}} = Generative.sample(job, world, snapshot(world), 1000)
+    end
+
     test "the rejected sample is NOT written", %{world: world} do
       job =
         Job.new("guess", fn _snap, try_number ->

@@ -62,9 +62,29 @@ defmodule Blazie.Model.Schema do
   defp shape(_other, spec), do: described(%{}, spec)
 
   defp described(shape, spec) do
-    case Keyword.get(spec, :describe) do
-      nil -> shape
-      words -> Map.put(shape, "description", words)
-    end
+    shape
+    |> closed(Keyword.get(spec, :one_of))
+    |> then(fn shape ->
+      case Keyword.get(spec, :describe) do
+        nil -> shape
+        words -> Map.put(shape, "description", words)
+      end
+    end)
   end
+
+  # A closed set is a SHAPE, and this is where that claim earns its keep.
+  #
+  # The module says above that a schema constrains the shape and a requirement
+  # constrains the value. That holds for open constraints; it is wrong for
+  # enumerable ones, and the difference is not philosophical — a provider
+  # enforces `enum` by construction, so a wrong answer becomes unrepresentable
+  # rather than merely discouraged.
+  #
+  # Measured before this was written: the same model, prompt and endpoint, asked
+  # for a severity with the set in `description`, answered "If this is a literal
+  # emergency, evacuate the building"; with the set as `enum`, answered
+  # `{"value": "medium"}`. Two models, both ways round.
+  defp closed(shape, nil), do: shape
+  defp closed(shape, []), do: shape
+  defp closed(shape, values), do: Map.put(shape, "enum", Enum.map(values, &to_string/1))
 end
