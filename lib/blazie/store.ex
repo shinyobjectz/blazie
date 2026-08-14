@@ -26,6 +26,21 @@ defmodule Blazie.Store do
 
   @doc "Release whatever was held. Not erasure — erasure destroys a key."
   @callback close(state()) :: :ok
+
+  @doc "The facts matching a pattern at or before `upto`, off the store's own index."
+  @callback seek(state(), keyword(), non_neg_integer()) :: [Fact.t()]
+
+  @doc "The last `count` transactions' facts, oldest first — a world's resident tail."
+  @callback tail(state(), pos_integer()) :: [Fact.t()]
+
+  @doc "The transaction this store has reached."
+  @callback last_tx(state()) :: non_neg_integer()
+
+  # A store that can SEEK changes what a world holds: the world keeps a
+  # resident tail and asks the store for anything older, by pattern. A store
+  # without these is replayed whole and held — correct, and the memory bill
+  # is the world's.
+  @optional_callbacks seek: 3, tail: 2, last_tx: 1
 end
 
 defmodule Blazie.Store.Memory do
@@ -137,18 +152,12 @@ defmodule Blazie.Store.File do
   # factors — the point is that neither grows with the length of the log.
   @growth 0.5
 
-  # A file written from here on begins with this and a random per-file
-  # generation, and every record's CRC covers the generation, the record's own
-  # byte offset, and the payload. That is SQLite's WAL-salt idea, and it is
-  # what makes three different corruptions invalid at once: a zero-filled tail
-  # (crc32 of empty is 0, so eight zero bytes used to be a VALID record whose
-  # empty payload then raised — C12), a record duplicated or moved to another
-  # offset (which is how an overlapping restore corrupts silently — C8), and
-  # a record from a previous life of the file. A file without the magic is
-  # read under the old rules forever — nothing is rewritten, including the
-  # storage encoding of what was already written.
-  @magic "BLZ2"
-  @header_bytes 12
+  # The byte format — the BLZ2 header, the offset-and-generation CRC that is
+  # SQLite's WAL-salt idea, the size-zero refusal, the :safe-and-conformant
+  # decode — lives in `Blazie.Store.Record`, once, because two stores read
+  # these files and the backup already proved what a second copy of a scan
+  # costs when the format moves.
+  alias Blazie.Store.Record
 
   @impl true
   def open(name, opts) do
@@ -162,7 +171,7 @@ defmodule Blazie.Store.File do
         {:error, :enoent} -> <<>>
       end
 
-    mode = mode_of(binary)
+    mode = Record.mode_of(binary)
 
     {checkpoint, at, offset} =
       (path <> ".checkpoint") |> read_checkpoint() |> describing(binary)
@@ -224,7 +233,7 @@ defmodule Blazie.Store.File do
   # at all: scanning from the wrong place fails the first record instead of
   # misparsing it.
   defp read(binary, mode, checkpoint, at, offset) do
-    base = base_of(mode)
+    base = Record.base_of(mode)
     start = max(offset, base)
     {tail, scanned, consumed} = scan_from(binary, start, mode)
 
@@ -238,21 +247,13 @@ defmodule Blazie.Store.File do
     end
   end
 
-  defp base_of({:v2, _generation}), do: @header_bytes
-  defp base_of(_mode), do: 0
-
   # Which rules this file is read and written under. Decided once, by the
   # file's first bytes: the magic means v2, anything else means the shape
   # every deployed ledger already has. An empty or absent file is born v2.
-  defp mode_of(<<>>), do: :new
-  defp mode_of(<<@magic, generation::64, _::binary>>), do: {:v2, generation}
-  defp mode_of(_existing), do: :legacy
-
   defp ensure_header(io, :new, _binary, _valid_end) do
-    generation = :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
-    header = <<@magic, generation::64>>
+    {header, generation} = Record.header()
     :ok = :file.write(io, header)
-    {{:v2, generation}, @header_bytes, :erlang.crc32(header)}
+    {{:v2, generation}, Record.header_bytes(), :erlang.crc32(header)}
   end
 
   defp ensure_header(_io, mode, binary, valid_end),
@@ -275,7 +276,7 @@ defmodule Blazie.Store.File do
     payload = :erlang.term_to_binary(facts)
 
     record =
-      <<byte_size(payload)::32, crc(state.mode, state.bytes, payload)::32, payload::binary>>
+      Record.encode(state.mode, state.bytes, payload)
 
     :ok = :file.write(state.io, record)
     if state.sync, do: :ok = :file.sync(state.io)
@@ -316,8 +317,8 @@ defmodule Blazie.Store.File do
   def readable(path, from) do
     case File.read(path) do
       {:ok, binary} ->
-        mode = mode_of(binary)
-        start = max(from, base_of(mode))
+        mode = Record.mode_of(binary)
+        start = max(from, Record.base_of(mode))
         {_records, _count, consumed} = scan_from(binary, start, mode)
 
         # From zero the header is part of what must travel — a restored v2
@@ -340,84 +341,6 @@ defmodule Blazie.Store.File do
     # up, and the data was simply invisible. A filename is storage layout.
     name |> :erlang.term_to_binary() |> Base.url_encode64(padding: false) |> Kernel.<>(".ledger")
   end
-
-  # The record's CRC. Under v2 it covers the file's generation and the
-  # record's own byte offset, so the same bytes at a different place — or in a
-  # different life of the file — are not a record.
-  defp crc({:v2, generation}, offset, payload),
-    do: :erlang.crc32([<<generation::64, offset::64>>, payload])
-
-  defp crc(_legacy, _offset, payload), do: :erlang.crc32(payload)
-
-  # `size > 0` before anything else: crc32 of the empty binary is 0, so eight
-  # zero bytes — the tail ext4's delayed allocation is famous for leaving —
-  # used to parse as a VALID empty record whose decode then raised, and the
-  # ledger would not open at all (C12). A zero-size record is not a record.
-  # Answers the accepted transactions and the byte position reading stopped
-  # at, which is where the log validly ENDS — whatever damage lies past it.
-  defp scan(<<size::32, crc::32, payload::binary-size(size), rest::binary>>, mode, at, acc)
-       when size > 0 do
-    with true <- crc(mode, at, payload) == crc,
-         {:ok, transaction} <- decode_transaction(payload) do
-      scan(rest, mode, at + 8 + size, [transaction | acc])
-    else
-      # A torn record. Everything past it is unreadable, so this is the end.
-      _ -> {Enum.reverse(acc), at}
-    end
-  end
-
-  defp scan(_incomplete_tail, _mode, at, acc), do: {Enum.reverse(acc), at}
-
-  # A payload is one transaction: a list of facts, in a shape some version of
-  # this code wrote. Decoded with `:safe` and then checked against that shape,
-  # because these bytes can arrive from a backup bucket: without `:safe` a
-  # crafted record minted atoms during open — 50k from one record, node-killing
-  # from twenty-one — and `:safe` alone still decodes function terms, so the
-  # real assertion is conformance (C7). A payload that is not a list of facts
-  # whose terms are data is not a transaction, it is damage, and damage is
-  # where reading stops.
-  defp decode_transaction(payload) do
-    rows = :erlang.binary_to_term(payload, [:safe])
-
-    with true <- is_list(rows),
-         facts = Enum.map(rows, &Fact.from_stored/1),
-         true <- Enum.all?(facts, &stored_fact?/1) do
-      {:ok, facts}
-    else
-      _ -> :torn
-    end
-  rescue
-    # Anything a hostile payload can make raise — an unknown atom under
-    # `:safe`, an improper list under the walk — is the same answer: damage.
-    _error -> :torn
-  end
-
-  defp stored_fact?(%Fact{} = fact) do
-    is_binary(fact.attribute) and is_integer(fact.tx) and
-      harmless?(fact.id) and harmless?(fact.value) and harmless?(fact.by)
-  end
-
-  defp stored_fact?(_other), do: false
-
-  # Data, all the way down. A fun decodes under `:safe` and executes when
-  # somebody calls it; a pid or port names something alive on this node. None
-  # of them is a value a fact was ever legitimately written with, and all of
-  # them are what a crafted payload smuggles.
-  defp harmless?(term)
-       when is_function(term) or is_pid(term) or is_port(term) or is_reference(term),
-       do: false
-
-  defp harmless?([head | tail]), do: harmless?(head) and harmless?(tail)
-  defp harmless?([]), do: true
-
-  defp harmless?(tuple) when is_tuple(tuple),
-    do: tuple |> Tuple.to_list() |> Enum.all?(&harmless?/1)
-
-  defp harmless?(map) when is_map(map) do
-    Enum.all?(map, fn {key, value} -> harmless?(key) and harmless?(value) end)
-  end
-
-  defp harmless?(_term), do: true
 
   # ── checkpoints ────────────────────────────────────────────────────────────
 
@@ -480,7 +403,7 @@ defmodule Blazie.Store.File do
          # shapes too — and it crosses the same trust boundary the log does,
          # so it clears the same conformance bar (C7).
          mapped = Enum.map(facts, &Fact.from_stored/1),
-         true <- Enum.all?(mapped, &stored_fact?/1) do
+         true <- Enum.all?(mapped, &Record.stored_fact?/1) do
       {mapped, at, offset, prefix_crc}
     else
       # No checkpoint, or one that did not survive. The log is whole either
@@ -535,14 +458,13 @@ defmodule Blazie.Store.File do
       else: {[], 0, 0}
   end
 
-  defp scan_from(binary, start, mode) when byte_size(binary) >= start do
+  defp scan_from(binary, start, mode) do
     {records, ended} =
-      binary
-      |> binary_part(start, byte_size(binary) - start)
-      |> scan(mode, start, [])
+      Record.walk(binary, start, mode, [], fn transaction, _offset, _bytes, acc ->
+        [transaction | acc]
+      end)
 
+    records = Enum.reverse(records)
     {records, length(records), ended - start}
   end
-
-  defp scan_from(_binary, _start, _mode), do: {[], 0, 0}
 end

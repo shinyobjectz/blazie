@@ -359,8 +359,33 @@ defmodule Blazie.World do
     {module, store_opts} = Keyword.get(opts, :store, default_store())
     {:ok, store} = module.open(name, store_opts)
 
-    replayed = module.replay(store)
-    resumed = replayed |> Enum.map(& &1.tx) |> Enum.max(fn -> 0 end)
+    # A store that can seek changes what the world holds: the resident tail
+    # and the indexes over it, never everything — the store answers for the
+    # rest, by pattern, off its own index. A store that cannot is replayed
+    # whole, exactly as before.
+    paged? = function_exported?(module, :seek, 3)
+    residency = Keyword.get(opts, :resident, :unbounded)
+
+    {replayed, resumed, subjects, oldest} =
+      if paged? do
+        tail = module.tail(store, tail_of(residency))
+        last = module.last_tx(store)
+
+        oldest =
+          case tail do
+            [] -> if last == 0, do: nil, else: last + 1
+            [first | _rest] -> first.tx
+          end
+
+        # Who each entity belongs to, for ALL time — asked of the store's
+        # index rather than rebuilt from a replay the world no longer does.
+        # The C4 rule unchanged: this map is never trimmed.
+        {tail, last, subjects_of(module.seek(store, [attribute: @subject], last)), oldest}
+      else
+        replayed = module.replay(store)
+        resumed = replayed |> Enum.map(& &1.tx) |> Enum.max(fn -> 0 end)
+        {replayed, resumed, subjects_of(replayed), oldest_of(replayed)}
+      end
 
     {:ok,
      index(
@@ -380,12 +405,11 @@ defmodule Blazie.World do
          # and the index holds only what is resident — so looking ownership
          # up there meant that once an entity's subject fact was evicted,
          # everything written about it after went down in PLAINTEXT, and
-         # destroying the key did not erase it (C4, reproduced). This map is
-         # one entry per entity that has a subject, built from the whole
-         # replay and never trimmed.
-         subjects: subjects_of(replayed),
-         oldest: oldest_of(replayed),
-         resident: Keyword.get(opts, :resident, :unbounded),
+         # destroying the key did not erase it (C4, reproduced).
+         subjects: subjects,
+         oldest: oldest,
+         paged?: paged?,
+         resident: residency,
          store: store,
          module: module
        },
@@ -393,6 +417,13 @@ defmodule Blazie.World do
      )
      |> trim()}
   end
+
+  # How many transactions a paged world keeps warm. `resident:` when given —
+  # the same knob it always was — and a bound rather than everything when
+  # not, because holding everything is the exact behaviour a seeking store
+  # exists to end.
+  defp tail_of(:unbounded), do: 1_000
+  defp tail_of(count) when is_integer(count), do: count
 
   @impl true
   # The serialized check: run here, on the facts this write is about to land
@@ -432,7 +463,10 @@ defmodule Blazie.World do
   def handle_call(:resident, _from, state), do: {:reply, state.count, state}
 
   def handle_call({:raw_at, tx}, _from, state) do
-    {:reply, state.facts |> Enum.drop_while(&(&1.tx > tx)) |> Enum.reverse(), state}
+    # Through `matching/3` with the empty pattern, so a paged world's evicted
+    # transactions answer too — reading only the resident tail silently
+    # shortened history the day the world stopped holding all of it.
+    {:reply, matching(state, tx, []), state}
   end
 
   def handle_call(:store_stats, _from, state) do
@@ -462,9 +496,8 @@ defmodule Blazie.World do
 
   def handle_call({:facts_at, tx}, _from, state) do
     facts =
-      state.facts
-      |> Enum.drop_while(&(&1.tx > tx))
-      |> Enum.reverse()
+      state
+      |> matching(tx, [])
       |> Enum.map(&Erasure.reveal_fact(&1, state.name))
 
     {:reply, facts, state}
@@ -510,12 +543,18 @@ defmodule Blazie.World do
     evicted(state, tx, pattern) ++ resident
   end
 
-  # Anything older than what is resident has to come from the store. This is a
-  # full re-read: honest rather than good, and exactly what compaction and a
-  # segmented store are for.
+  # Anything older than what is resident has to come from the store.
   defp evicted(%{oldest: nil}, _tx, _pattern), do: []
   defp evicted(%{oldest: oldest}, _tx, _pattern) when oldest <= 1, do: []
 
+  # A seeking store answers by pattern off its own index — one pread per
+  # candidate transaction, never a rescan.
+  defp evicted(%{paged?: true} = state, tx, pattern) do
+    state.module.seek(state.store, pattern, min(tx, state.oldest - 1))
+  end
+
+  # A store that cannot seek is re-read whole and filtered here: honest
+  # rather than good — the measured thousand-x path the paged store closes.
   defp evicted(state, tx, pattern) do
     state.module.replay(state.store)
     |> Enum.filter(&(&1.tx < state.oldest and &1.tx <= tx and Fact.matches?(&1, pattern)))
