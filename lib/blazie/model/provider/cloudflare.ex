@@ -71,6 +71,12 @@ defmodule Blazie.Model.Provider.Cloudflare do
 
   defp ours(opts) do
     opts
+    # The measured default for THIS vendor: a Workers AI model took over a
+    # minute on a single proposal, and the hosted reasoning models behind
+    # this door think in minutes where instruct models answer in seconds. A
+    # caller's explicit `timeout:` still wins; this is the provider saying
+    # what it measured about its own models, once.
+    |> Keyword.put_new(:default_timeout, 180_000)
     |> Keyword.put_new_lazy(:base_url, fn ->
       base(System.get_env("CLOUDFLARE_ACCOUNT_ID"), System.get_env("CLOUDFLARE_AI_GATEWAY"))
     end)

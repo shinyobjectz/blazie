@@ -122,10 +122,20 @@ defmodule Blazie.Formula.Generated do
 
     It sets `#{produces}` on every entity that has #{Enum.join(given, " and ")}.
 
-    The language is Lua. An entity is a table: `ada.age` reads a field and
-    `ada.#{produces} = x` writes one. `each { age = true }` iterates every entity
-    that has an age. There is no clock, no network and no io — a formula that
-    reaches for one will not run.
+    The language is Lua 5.x — Lua's `for ... in ... do ... end`, never any
+    other language's block syntax. An entity is a table: `ada.age` reads a
+    field and `ada.#{produces} = x` writes one. Iteration looks exactly like
+    this:
+
+        for e in each { age = true } do
+          e.adult = e.age >= 18
+        end
+
+    There is no clock, no network and no io — a formula that reaches for one
+    will not run. (The first live authoring attempt answered Ruby-shaped
+    blocks because this brief showed `each` without the loop around it; a
+    brief that under-specifies the idiom measures the model's guess, not its
+    ability.)
 
     Answer with the body only. No markdown fence, no explanation.
 

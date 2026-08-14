@@ -51,7 +51,17 @@ defmodule Blazie.Model.Provider do
   @spec post(String.t(), [{String.t(), String.t()}], map(), keyword()) ::
           {:ok, map()} | {:error, refusal()}
   def post(url, headers, body, opts \\ []) do
-    timeout = Keyword.get(opts, :timeout, 60_000)
+    # The default is a per-provider decision, made from measurements rather
+    # than one number for everybody: instruct models answer judgment-with-
+    # schema tasks in ~2.4s while reasoning models think for minutes (378s
+    # was measured before a timeout ended it), and a Workers AI model took
+    # over a minute on a single proposal. A caller's explicit `timeout:`
+    # always wins; a provider that knows its models are slow says so once,
+    # in `default_timeout:` at ITS call site, instead of every caller
+    # rediscovering the measurement.
+    timeout =
+      Keyword.get(opts, :timeout) || Keyword.get(opts, :default_timeout) || 60_000
+
     payload = Jason.encode!(body)
 
     request =
