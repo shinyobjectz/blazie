@@ -28,6 +28,7 @@ export const onRequestDelete: PagesFunction<Control> = async ({ env, request, pa
 
   const destroy = new URL(request.url).searchParams.get("destroy") === "1"
   let machineGone = true
+  let tunnelGone = true
 
   if (destroy) {
     if (cluster.host?.vendor === "upcloud" && env.UPCLOUD_TOKEN) {
@@ -36,7 +37,7 @@ export const onRequestDelete: PagesFunction<Control> = async ({ env, request, pa
 
     if (env.CLOUDFLARE_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_ZONE_ID) {
       const hostname = new URL(cluster.address).hostname
-      await tunnel.unmake(
+      tunnelGone = await tunnel.unmake(
         {
           accountId: env.CLOUDFLARE_ACCOUNT_ID,
           zoneId: env.CLOUDFLARE_ZONE_ID,
@@ -54,6 +55,14 @@ export const onRequestDelete: PagesFunction<Control> = async ({ env, request, pa
   // still bills. The tunnel and the name are already gone by here, so the
   // cluster is unreachable either way; what must not happen is losing the only
   // record of which UpCloud server it was.
+  if (destroy && !tunnelGone) {
+    return refuse(
+      "tunnel_remains",
+      `${cluster.name}'s machine is gone but its tunnel would not delete — Cloudflare refuses one that still has connections, and they can take a few minutes to drain. The record has been kept so the tunnel can still be found. Ask again shortly.`,
+      502,
+    )
+  }
+
   if (destroy && !machineGone) {
     return refuse(
       "machine_remains",

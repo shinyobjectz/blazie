@@ -127,8 +127,25 @@ export async function make(
   return { ok: true, made: { id, token, address: `https://${hostname}.${zone}` } }
 }
 
-/** Take the tunnel and its name away, so a forgotten cluster leaves nothing behind. */
-export async function unmake(reaching: Reaching, id: string, hostname: string) {
+/**
+ * Take the tunnel and its name away, so a forgotten cluster leaves nothing.
+ *
+ * The tunnel is retried, because Cloudflare refuses to delete one that still has
+ * connections: "stop all cloudflared replicas, or wait a few minutes for
+ * connections to close". Destroying a cluster kills the machine and the
+ * connections drain afterwards, so the first attempt lands inside exactly that
+ * window — measured, and it took 30 seconds to clear.
+ *
+ * Swallowing it left a healthy tunnel behind with four live connections while
+ * the record that named it was already gone. That is the same shape as the
+ * destroy that reported success while a machine kept billing, and it is worth
+ * saying twice: a cleanup whose failure nobody reads is not a cleanup.
+ */
+export async function unmake(
+  reaching: Reaching,
+  id: string,
+  hostname: string,
+): Promise<boolean> {
   const found = await call(
     reaching,
     `/zones/${reaching.zoneId}/dns_records?name=${encodeURIComponent(hostname)}`,
@@ -143,9 +160,19 @@ export async function unmake(reaching: Reaching, id: string, hostname: string) {
     }
   }
 
-  await call(reaching, `/accounts/${reaching.accountId}/cfd_tunnel/${id}`, {
-    method: "DELETE",
-  })
+  // The name goes first and the tunnel second: a record pointing at a tunnel
+  // that is gone is a 1033, and a tunnel with no record is invisible.
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const gone = await call(reaching, `/accounts/${reaching.accountId}/cfd_tunnel/${id}`, {
+      method: "DELETE",
+    })
+
+    if (gone.ok) return true
+
+    await new Promise((wake) => setTimeout(wake, 15_000))
+  }
+
+  return false
 }
 
 type Answered =

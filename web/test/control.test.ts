@@ -426,6 +426,21 @@ describe("the way in", () => {
     assert.equal(sent.length, 1)
   })
 
+  it("retries a tunnel cloudflare will not delete yet", async () => {
+    stub()
+    answering(
+      { ok: true, body: { success: true, result: [] } },
+      // "This tunnel has active connections. Please stop all cloudflared
+      // replicas, or wait a few minutes" — the window a destroy lands in,
+      // measured at 30 seconds.
+      { ok: false, status: 400, body: { success: false, errors: [{ message: "active connections" }] } },
+      { ok: true, body: { success: true, result: {} } },
+    )
+
+    assert.equal(await tunnel.unmake(reaching, "tunnel-1", "atlas.blazie.dev"), true)
+    assert.equal(sent.filter((one) => one.method === "DELETE").length, 2)
+  })
+
   it("unmaking removes the name before the tunnel", async () => {
     stub()
     answering(
