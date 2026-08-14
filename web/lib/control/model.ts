@@ -177,6 +177,12 @@ export type Control = {
    * default destination is a bucket nobody chose, but the console says so.
    */
   BACKUP_BUCKET?: string
+  /**
+   * Where blob bytes live. A different bucket from the backup, deliberately: a
+   * backup is a copy of this cluster and a blob is the cluster's data, and a
+   * restore that overwrote blobs with a copy of itself would be a bad day.
+   */
+  BLOB_BUCKET?: string
   BACKUP_ENDPOINT?: string
   BACKUP_ACCESS_KEY_ID?: string
   BACKUP_SECRET_ACCESS_KEY?: string

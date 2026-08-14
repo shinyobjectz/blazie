@@ -205,6 +205,7 @@ defmodule Blazie.Lua do
   defp grant(state, :job, _at) do
     state
     |> grant_http()
+    |> grant_blob()
   end
 
   defp frozen(value), do: fn _args, state -> {[value], state} end
@@ -221,6 +222,53 @@ defmodule Blazie.Lua do
     {_, state} = :luerl.set_table_keys(["http", "get"], {:erl_func, &http_get/2}, state)
     state
   end
+
+  # Storing bytes reaches the network, so it is a job's and a formula cannot be
+  # given it. Same argument as `http`: the fence is that a formula's world holds
+  # nothing that reaches, not that a rule says no.
+  defp grant_blob(state) do
+    {_, state} = :luerl.set_table_keys(["blob"], {:erl_func, &store_blob/2}, state)
+    state
+  end
+
+  # Bytes in, a reference out — key, hash, size — which is what gets written
+  # down. The bytes never become a fact: five megabytes in the log forever is
+  # the thing a blob exists to prevent.
+  defp store_blob([bytes | rest], state) when is_binary(bytes) do
+    case Application.get_env(:blazie, :blob_target) do
+      nil ->
+        {[
+           nil,
+           "This cluster has nowhere to put bytes. Set BLOB_BUCKET (with " <>
+             "BLOB_ENDPOINT and credentials) or BLOB_DIR."
+         ], state}
+
+      {target, opts} ->
+        media = with [m | _] <- rest, true <- is_binary(m), do: m, else: (_ -> nil)
+
+        case Blazie.Blob.store(bytes, target, Keyword.put(opts, :media_type, media)) do
+          {:ok, blob} ->
+            {encoded, state} =
+              :luerl.encode(
+                [
+                  {"key", blob.key},
+                  {"hash", blob.hash},
+                  {"bytes", blob.bytes},
+                  {"media_type", blob.media_type}
+                ],
+                state
+              )
+
+            {[encoded, nil], state}
+
+          {:error, refusal} ->
+            {[nil, refusal.repair], state}
+        end
+    end
+  end
+
+  defp store_blob(_args, state),
+    do: {[nil, "blob() takes the bytes to store, and optionally a media type."], state}
 
   # The one capability that makes a job a job. Deliberately small: a string in,
   # a string or nil out. A job that needs more should be given more one

@@ -777,6 +777,38 @@ describe("what the machine is told to do", () => {
     assert.match(yaml, /BACKUP_ACCESS_KEY_ID=AKI/)
   })
 
+  it("carries where blobs live, in a different bucket from the backup", async () => {
+    stub()
+    answering({ ok: true, body: { server: { uuid: "s" } } })
+
+    await upcloud.open(
+      { token: "t" },
+      {
+        name: "atlas", hostname: "atlas", zone: "us-nyc1", plan: "1xCPU-2GB",
+        tunnelToken: "T", secret: "S", masterKey: "M", home: "https://blazie.dev",
+        id: "CID", hello: "H",
+        backup: { bucket: "blazie-clusters", endpoint: "https://r2", accessKeyId: "AKI", secretAccessKey: "SAK", prefix: "clusters/CID/" },
+        blobs: { bucket: "blazie-blobs", endpoint: "https://r2", accessKeyId: "AKI", secretAccessKey: "SAK", prefix: "clusters/CID/" },
+      },
+    )
+
+    const yaml = bodyOf<ServerCreate>(sent[0]).server.user_data
+
+    assert.match(yaml, /BLOB_BUCKET=blazie-blobs/)
+    assert.match(yaml, /BACKUP_BUCKET=blazie-clusters/)
+    // Different buckets on purpose: a backup is a copy of this cluster and a
+    // blob is the cluster's data. A restore that overwrote blobs with a copy of
+    // itself would be a bad day.
+    assert.notEqual(
+      /BLOB_BUCKET=(\S+)/.exec(yaml)?.[1],
+      /BACKUP_BUCKET=(\S+)/.exec(yaml)?.[1],
+    )
+  })
+
+  it("omits blobs entirely when there is nowhere to put them", () => {
+    assert.equal(/BLOB_BUCKET=/.test(rendered), false)
+  })
+
   it("omits backup entirely rather than configuring an empty one", () => {
     // `runtime.exs` decides whether to back up by whether BACKUP_BUCKET is set.
     // A blank one configures a destination that does not exist and fails on the

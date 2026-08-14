@@ -93,6 +93,31 @@ if config_env() == :prod do
     drill_dir: System.get_env("DRILL_DIR"),
     drill_max_bytes: String.to_integer(System.get_env("DRILL_MAX_BYTES") || "536870912")
 
+  # Where blob bytes live. The same shape as a backup target and the same module
+  # behind it — `put/3` and `get/2` are all a blob needs, and `Backup.Target.S3`
+  # already speaks S3 to R2. A separate bucket rather than a prefix in the backup
+  # one: a backup is a copy of this cluster and a blob is the cluster's data, and
+  # a restore that overwrote blobs with a copy of itself would be a bad day.
+  blob_target =
+    cond do
+      bucket = System.get_env("BLOB_BUCKET") ->
+        {Blazie.Backup.Target.S3,
+         endpoint: System.fetch_env!("BLOB_ENDPOINT"),
+         bucket: bucket,
+         region: System.get_env("BLOB_REGION") || "auto",
+         access_key_id: System.fetch_env!("BLOB_ACCESS_KEY_ID"),
+         secret_access_key: System.fetch_env!("BLOB_SECRET_ACCESS_KEY"),
+         prefix: System.get_env("BLOB_PREFIX")}
+
+      dir = System.get_env("BLOB_DIR") ->
+        {Blazie.Backup.Target.Directory, root: dir}
+
+      true ->
+        nil
+    end
+
+  config :blazie, blob_target: blob_target
+
   if backup_target == nil do
     IO.warn(
       "No backup target is configured, so nothing is being copied anywhere. Losing /data loses every fact and every key. Set BACKUP_BUCKET (with BACKUP_ENDPOINT and credentials) or BACKUP_DIR."

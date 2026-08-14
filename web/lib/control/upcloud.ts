@@ -50,6 +50,8 @@ export type Opening = {
 
   /** Where this cluster copies itself to. Absent means it does not. */
   backup?: Backup
+  /** Where this cluster's blob bytes live. Absent means it cannot hold any. */
+  blobs?: Backup
   /**
    * What signs this cluster's own cookies. Generated per cluster, written once.
    *
@@ -413,17 +415,28 @@ async function stateOf(credentials: Credentials, uuid: string): Promise<string |
  * that does not exist and fail on the first cadence rather than at boot.
  */
 function backupEnv(opening: Opening): string {
-  if (!opening.backup) return ""
+  return [named("BACKUP", opening.backup), named("BLOB", opening.blobs)]
+    .filter(Boolean)
+    .join("\n")
+}
 
-  const b = opening.backup
+/**
+ * One block of settings, or nothing at all.
+ *
+ * Nothing rather than empty values: `runtime.exs` decides whether each is
+ * configured by whether its bucket is set, and a blank one configures a
+ * destination that does not exist and fails on first use rather than at boot.
+ */
+function named(prefix: string, where: Backup | undefined): string {
+  if (!where) return ""
 
   return [
-    `      BACKUP_BUCKET=${b.bucket}`,
-    `      BACKUP_ENDPOINT=${b.endpoint}`,
-    `      BACKUP_REGION=auto`,
-    `      BACKUP_ACCESS_KEY_ID=${b.accessKeyId}`,
-    `      BACKUP_SECRET_ACCESS_KEY=${b.secretAccessKey}`,
-    `      BACKUP_PREFIX=${b.prefix}`,
+    `      ${prefix}_BUCKET=${where.bucket}`,
+    `      ${prefix}_ENDPOINT=${where.endpoint}`,
+    `      ${prefix}_REGION=auto`,
+    `      ${prefix}_ACCESS_KEY_ID=${where.accessKeyId}`,
+    `      ${prefix}_SECRET_ACCESS_KEY=${where.secretAccessKey}`,
+    `      ${prefix}_PREFIX=${where.prefix}`,
   ].join("\n")
 }
 

@@ -162,6 +162,16 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
               prefix: `clusters/${made.made.id}/`,
             }
           : undefined,
+      blobs:
+        env.BLOB_BUCKET && env.BACKUP_ENDPOINT && env.BACKUP_ACCESS_KEY_ID && env.BACKUP_SECRET_ACCESS_KEY
+          ? {
+              bucket: env.BLOB_BUCKET,
+              endpoint: env.BACKUP_ENDPOINT,
+              accessKeyId: env.BACKUP_ACCESS_KEY_ID,
+              secretAccessKey: env.BACKUP_SECRET_ACCESS_KEY,
+              prefix: `clusters/${made.made.id}/`,
+            }
+          : undefined,
     },
   )
 

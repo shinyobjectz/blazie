@@ -108,6 +108,45 @@ defmodule Blazie.Blob do
        }}
 
   @doc """
+  Store the bytes, and hand back the reference to write down.
+
+  The other half of `describing/2`, which names without storing. Content-
+  addressed, so storing the same bytes twice stores them once — the key comes
+  from the hash, and an object already under it IS the same object. That is why
+  this looks before it writes: not an optimisation but the reason a blob read at
+  an old transaction cannot have changed underneath it.
+
+  Reaches the network, so it belongs to a job. A formula has no target to reach
+  and no way to be handed one, which is the fence doing its work rather than a
+  rule being enforced.
+  """
+  @spec store(binary(), module(), keyword()) :: {:ok, t()} | {:error, refusal()}
+  def store(bytes, target, opts) when is_binary(bytes) do
+    blob = describing(bytes, opts)
+
+    if present?(blob, target, opts) do
+      {:ok, blob}
+    else
+      case target.put(opts, blob.key, bytes) do
+        :ok ->
+          {:ok, blob}
+
+        {:ok, _} ->
+          {:ok, blob}
+
+        {:error, why} ->
+          {:error,
+           %{
+             problem: :would_not_store,
+             repair:
+               "The bytes were not stored: #{inspect(why)}. Nothing was written down, so no " <>
+                 "fact references bytes that are not there."
+           }}
+      end
+    end
+  end
+
+  @doc """
   Fetch the bytes this names, and refuse them if they are not what it claimed.
 
   Reaching outside, so this belongs to a job — and the hash is checked on the
