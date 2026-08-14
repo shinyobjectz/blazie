@@ -102,9 +102,9 @@ export type Backup = {
  * running on: below 2GB the BEAM and a build both fit badly.
  */
 export const PLANS = [
-  { id: "1xCPU-2GB", label: "1 CPU · 2 GB", monthly: 9 },
-  { id: "2xCPU-4GB", label: "2 CPU · 4 GB", monthly: 18 },
-  { id: "4xCPU-8GB", label: "4 CPU · 8 GB", monthly: 44 },
+  { id: "1xCPU-2GB", label: "1 CPU · 2 GB", monthly: 9, cores: 1, memory: 2048 },
+  { id: "2xCPU-4GB", label: "2 CPU · 4 GB", monthly: 18, cores: 2, memory: 4096 },
+  { id: "4xCPU-8GB", label: "4 CPU · 8 GB", monthly: 44, cores: 4, memory: 8192 },
 ] as const
 
 export const ZONES = [
@@ -177,6 +177,43 @@ export async function limits(
     cores: trial.trial_total_server_cores ?? null,
     memory: trial.trial_total_server_memory ?? null,
   }
+}
+
+/**
+ * What the account is already spending, so what is left can be worked out.
+ *
+ * Asked of the machines rather than of a number kept somewhere: a count of
+ * cores that is maintained is a second account of the servers and can be wrong,
+ * and the servers are right by construction.
+ */
+export async function spent(
+  credentials: Credentials,
+): Promise<{ cores: number; memory: number }> {
+  const said = await fetch(`${API}/server`, {
+    headers: { authorization: basic(credentials) },
+    signal: AbortSignal.timeout(20_000),
+  }).catch(() => null)
+
+  if (!said?.ok) return { cores: 0, memory: 0 }
+
+  const body = (await said.json().catch(() => null)) as {
+    servers?: { server?: { plan?: string }[] }
+  } | null
+
+  let cores = 0
+  let memory = 0
+
+  for (const server of body?.servers?.server ?? []) {
+    // A plan we do not sell is still a plan the account is paying for, so it is
+    // counted at whatever the name says rather than skipped.
+    const known = PLANS.find((p) => p.id === server.plan)
+    const named = /^(\d+)xCPU-(\d+)GB$/.exec(String(server.plan ?? ""))
+
+    cores += known?.cores ?? (named ? Number(named[1]) : 0)
+    memory += known?.memory ?? (named ? Number(named[2]) * 1024 : 0)
+  }
+
+  return { cores, memory }
 }
 
 export async function open(

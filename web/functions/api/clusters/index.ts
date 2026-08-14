@@ -86,11 +86,43 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
     )
   }
 
+  // Whether it fits, before anything is made. UpCloud refuses a machine that
+  // exceeds the account's cores or memory, and finding that out after a tunnel
+  // exists is finding it out too late — the same lesson as the name.
+  const wanted = upcloud.PLANS.find((p) => p.id === plan)!
+  const using = await upcloud.spent({ token: env.UPCLOUD_TOKEN! })
+
+  if (allowed.cores !== null && using.cores + wanted.cores > allowed.cores) {
+    return refuse(
+      "no_room",
+      `This account allows ${allowed.cores} cores and is using ${using.cores}. ${wanted.label} needs ${wanted.cores}, which does not fit — pick a smaller one, or take a cluster away first.`,
+      409,
+    )
+  }
+
+  if (allowed.memory !== null && using.memory + wanted.memory > allowed.memory) {
+    return refuse(
+      "no_room",
+      `This account allows ${allowed.memory}MB of memory and is using ${using.memory}. ${wanted.label} needs ${wanted.memory}MB, which does not fit — pick a smaller one, or take a cluster away first.`,
+      409,
+    )
+  }
+
   const reaching = {
     accountId: env.CLOUDFLARE_ACCOUNT_ID!,
     zoneId: env.CLOUDFLARE_ZONE_ID!,
     token: env.CLOUDFLARE_API_TOKEN!,
     dnsToken: env.CLOUDFLARE_DNS_TOKEN,
+  }
+
+  // Asked of the zone, not of your own list. A cluster answers at
+  // `<name>.blazie.dev`, so the name is global — and finding that out from a
+  // failed DNS write, after a tunnel exists, is finding it out too late.
+  if (await tunnel.taken(reaching, `${hostname}.${env.CLUSTER_ZONE ?? "blazie.dev"}`)) {
+    return refuse(
+      "name_answered_for",
+      `${JSON.stringify(asked.name)} already answers on this zone. Cluster names are global rather than per account, because a cluster IS its name — pick another.`,
+    )
   }
 
   // The way in before the machine, so a machine is never made that cannot be

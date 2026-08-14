@@ -49,6 +49,28 @@ export type Made = {
   address: string
 }
 
+/**
+ * Whether a name is already answering on this zone.
+ *
+ * A cluster answers at `<name>.blazie.dev`, so names are unique across the whole
+ * zone rather than per account — and the check before opening only looks at the
+ * clusters YOU hold. A second person naming theirs `atlas` passes that check and
+ * fails four steps later at the DNS record, after a tunnel and possibly a
+ * machine have been made.
+ *
+ * Nobody has hit it because there is one account. That is a reason to fix it
+ * now, not a reason it is not real.
+ */
+export async function taken(reaching: Reaching, hostname: string): Promise<boolean> {
+  const found = await call(
+    reaching,
+    `/zones/${reaching.zoneId}/dns_records?name=${encodeURIComponent(hostname)}`,
+    { method: "GET" },
+  )
+
+  return found.ok && Array.isArray(found.result) && found.result.length > 0
+}
+
 export async function make(
   reaching: Reaching,
   hostname: string,

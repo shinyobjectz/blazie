@@ -63,11 +63,21 @@ export const onRequestGet: PagesFunction<Control> = async ({ env, request, param
 
   const stream = new ReadableStream({
     start(controller) {
-      let beating: number | undefined
       let beat = 2
 
+      // Phoenix drops a socket that stops talking, so this is not optional. It
+      // is started below and cleared here, and `close` is declared first
+      // because both the socket's own events and the stream's cancel reach it.
+      const beating = setInterval(() => {
+        try {
+          socket.send(heartbeat(beat++))
+        } catch {
+          close()
+        }
+      }, HEARTBEAT_MS) as unknown as number
+
       const close = () => {
-        if (beating !== undefined) clearInterval(beating)
+        clearInterval(beating)
         try {
           controller.close()
         } catch {
@@ -115,15 +125,6 @@ export const onRequestGet: PagesFunction<Control> = async ({ env, request, param
       })
 
       socket.send(joining(topic, world, source))
-
-      // Phoenix drops a socket that stops talking, so this is not optional.
-      beating = setInterval(() => {
-        try {
-          socket.send(heartbeat(beat++))
-        } catch {
-          close()
-        }
-      }, HEARTBEAT_MS) as unknown as number
     },
 
     cancel() {

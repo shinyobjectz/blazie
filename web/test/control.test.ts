@@ -209,6 +209,32 @@ describe("what the account will allow", () => {
   })
 })
 
+describe("what the account is already spending", () => {
+  it("counts the machines rather than trusting a tally", async () => {
+    stub()
+    answering({
+      ok: true,
+      body: { servers: { server: [{ plan: "1xCPU-2GB" }, { plan: "2xCPU-4GB" }] } },
+    })
+
+    assert.deepEqual(await upcloud.spent({ token: "t" }), { cores: 3, memory: 6144 })
+  })
+
+  it("counts a plan it does not sell, because the account still pays for it", async () => {
+    stub()
+    answering({ ok: true, body: { servers: { server: [{ plan: "8xCPU-32GB" }] } } })
+
+    assert.deepEqual(await upcloud.spent({ token: "t" }), { cores: 8, memory: 32768 })
+  })
+
+  it("counts nothing when there is nothing", async () => {
+    stub()
+    answering({ ok: true, body: { servers: {} } })
+
+    assert.deepEqual(await upcloud.spent({ token: "t" }), { cores: 0, memory: 0 })
+  })
+})
+
 describe("letting the tunnel out", () => {
   it("opens 7844 outbound, both protocols, both families", async () => {
     stub()
@@ -373,6 +399,20 @@ describe("the way in", () => {
     await tunnel.make(reaching, "atlas", "blazie.dev")
 
     assert.equal(sent[2].headers.authorization, "Bearer account-token")
+  })
+
+  it("knows a name already answering on the zone", async () => {
+    stub()
+    answering({ ok: true, body: { success: true, result: [{ id: "dns-1" }] } })
+
+    assert.equal(await tunnel.taken(reaching, "atlas.blazie.dev"), true)
+  })
+
+  it("and knows a free one", async () => {
+    stub()
+    answering({ ok: true, body: { success: true, result: [] } })
+
+    assert.equal(await tunnel.taken(reaching, "atlas.blazie.dev"), false)
   })
 
   it("stops at the first refusal rather than carrying on", async () => {
