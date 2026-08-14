@@ -251,18 +251,28 @@ defmodule Blazie.World do
   """
   @spec append(ref(), [assertion()], keyword()) :: {:ok, pos_integer()} | {:error, term()}
   def append(world, assertions, opts \\ []) when is_list(assertions) do
+    # `timeout:` is the CALL timeout, for callers whose batches are honestly
+    # large — a bulk import's five-thousand-fact append is not hung, it is
+    # working, and the default five seconds was sized for a conversation.
+    timeout = Keyword.get(opts, :timeout, 5_000)
+
     case Keyword.get(opts, :check) do
-      nil -> GenServer.call(world, {:append, assertions})
-      check when is_function(check, 2) -> GenServer.call(world, {:append, assertions, check})
-      check when is_function(check, 1) -> advisory_append(world, assertions, check)
+      nil ->
+        GenServer.call(world, {:append, assertions}, timeout)
+
+      check when is_function(check, 2) ->
+        GenServer.call(world, {:append, assertions, check}, timeout)
+
+      check when is_function(check, 1) ->
+        advisory_append(world, assertions, check, timeout)
     end
   end
 
   # Checked in the caller, then appended — so anything landing in between is
   # not accounted for. Named for what it is.
-  defp advisory_append(world, assertions, check) do
+  defp advisory_append(world, assertions, check, timeout) do
     case check.(assertions) do
-      :ok -> GenServer.call(world, {:append, assertions})
+      :ok -> GenServer.call(world, {:append, assertions}, timeout)
       {:error, refusals} -> {:error, refusals}
     end
   end

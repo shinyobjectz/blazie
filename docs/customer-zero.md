@@ -390,6 +390,51 @@ discovering them.
   chatty agent writing turn-by-turn shares that lane with a sweep writing
   thousands of facts. The ceiling is high (120k+/s) but per-world; the fix
   when it bites is more worlds, and tenant design should say so up front.
+  The topology rules below are that "up front".
+
+### Worlds topology — the rules a tenant designs by
+
+Stated here because every number in them is measured, and a topology chosen
+before the numbers is a topology chosen twice.
+
+**The measured constants.** Appends serialize per world at 2–5µs per
+transaction, flat to two million facts — a 120–200k txn/s ceiling *per
+world*, not per node (`.research/write-throughput.md`). A resident fact
+costs ~241 bytes of RAM, 87% of it the three sort orders; about a million
+facts per world before stalls bite, six million before a 4GB box does
+(`store.ex`). Until the paged store lands, `resident:` bounds the world's
+working set but the file store still holds everything, so it saves 63% of
+the bytes rather than 99%.
+
+**Rule 1 — split by writer, not by topic.** Two things that write at the
+same time belong in different worlds: an agent's turn-by-turn run and a
+sweep landing thousands of facts share nothing but the lane they would
+contend for. Reads compose across worlds for free (`Snapshot.open/1` takes
+a list; `also:` on the wire); writes never do. When in doubt, give the
+chatty writer its own world.
+
+**Rule 2 — split when the fact count has a different growth curve.**
+Holdings grow with the workspace (thousands); readings grow with time ×
+metrics (millions). A world mixing both inherits the worst curve's memory
+bill for the smaller set's queries. Time-series-shaped data gets its own
+world per shard — and until the paged store exists, readings-scale data
+should not land at all (§3).
+
+**Rule 3 — the tenant boundary is a world boundary, always.** Sovereignty
+is decided at write time by which world a fact went into. A world shared
+by two tenants "for efficiency" reintroduces the filter this design exists
+to not have. Efficiency comes from Rule 1, never from sharing.
+
+**Rule 4 — erasure granularity is subject granularity, but blast radius is
+world granularity.** Destroying a world (close + delete the file) is the
+only bulk deletion there is; anything finer is per-subject crypto-shredding.
+Data with a retention story different from its neighbours wants its own
+world so the retention story stays executable.
+
+**The shape socialite lands on under these rules:** one shared Graph world
+(one writer: the sweep pipeline), one Atlas world per org (writer: that
+org's jobs), one world per agent run or per Thread (writer: the run), and
+readings deferred to the paged store, then sharded by time window.
 
 ---
 
