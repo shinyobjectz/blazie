@@ -92,6 +92,12 @@ export const WORDS: Record<string, Word> = {
     "definition": "What is put to a snapshot: which facts are wanted, described rather than fetched. A question is data and not code — it names ids, attributes and answers to match — so the same question travels over the wire, is stored as a fact, and caches against a name. A formula is a question somebody kept.",
     "test": "Is this a description of which facts are wanted, containing no instructions?"
   },
+  "ref": {
+    "name": "refinement",
+    "code": "ref",
+    "definition": "A change to a declaration, proposed from what runs actually did and kept with the evidence that prompted it. A refinement is a fact like everything else, so adopting one is appending and undoing one is appending a later fact rather than restoring a backup — and because the trigger is written beside the edit, whether it helped is a query over the runs that came after it. What may be refined is deliberately narrow: what a thing SAYS about itself, never what it is allowed to do.",
+    "test": "Could you ask why this was changed, and whether it helped? Then it is a refinement. If it is a change nobody recorded a reason for, it is an edit."
+  },
   "run": {
     "name": "run",
     "code": "run",
