@@ -8,11 +8,20 @@
  */
 
 import { answer, refuse, unauthenticated, unconfigured } from "@/lib/control/answer"
-import { asHostname, held, keep, mintToken, reach } from "@/lib/control/clusters"
+import { asHostname, claimFirst, held, keep, mintToken, reach } from "@/lib/control/clusters"
 import { type Control, type Held, shown } from "@/lib/control/model"
 import { whoIs } from "@/lib/control/session"
 import * as tunnel from "@/lib/control/tunnel"
 import * as upcloud from "@/lib/control/upcloud"
+
+/**
+ * How long a machine gets to become a cluster before silence means failure.
+ *
+ * Measured runs reach `tunnelled` inside two minutes. Ten is deliberately far
+ * past that: the cost of waiting too long is a spinner, and the cost of giving
+ * up too early is telling somebody their cluster is broken while it installs.
+ */
+const OPENING_MS = 10 * 60 * 1000
 
 export const onRequestGet: PagesFunction<Control> = async ({ env, request }) => {
   const session = await whoIs(env, request)
@@ -182,11 +191,6 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
     return refuse(opened.problem, opened.repair, 502)
   }
 
-  // Before cloud-init gets as far as cloudflared, which takes a minute of apt.
-  // The machine is already booting, so this is a race worth winning early rather
-  // than a step that can wait.
-  await upcloud.letOut({ token: env.UPCLOUD_TOKEN! }, opened.host.uuid)
-
   const cluster: Held = {
     id: made.made.id,
     name: asked.name,
@@ -198,6 +202,8 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
     opened: new Date().toISOString(),
   }
 
+  // Written before the firewall, so a machine that reports a step has somewhere
+  // to report it to. The other order raced its own cloud-init.
   await keep(env, session.login, [...already, cluster])
 
   return answer({ cluster: shown(cluster) }, 201)
@@ -221,13 +227,49 @@ export const onRequestPatch: PagesFunction<Control> = async ({ env, request }) =
     all.map(async (cluster) => {
       const found = await reach(cluster)
 
-      return found.ok
-        ? { ...cluster, state: "open" as const, refusal: undefined }
-        : {
-            ...cluster,
-            state: "unreachable" as const,
-            refusal: { problem: found.problem, repair: found.repair },
-          }
+      if (found.ok) {
+        // The first time it answers, and only then. A cluster with no world the
+        // caller holds is a console where every page can only refuse, and this
+        // is the moment there is something to claim it on.
+        if (cluster.state !== "open") await claimFirst(cluster)
+
+        return { ...cluster, state: "open" as const, refusal: undefined }
+      }
+
+      // Not answering is not the same as not going to. A machine spends its
+      // first few minutes cloning a disk, installing docker and pulling an
+      // image, and during all of it the address returns 530 because the tunnel
+      // has nothing behind it yet. Calling that "unreachable" told somebody
+      // their brand new cluster was broken while it was, in fact, working.
+      //
+      // So the machine's own account wins over the guess: it stays opening
+      // until it says it failed, or until long enough has passed that it is not
+      // coming up.
+      const since = Date.now() - Date.parse(cluster.opened)
+      const failed = cluster.saying?.step === "failed"
+
+      if (!failed && since < OPENING_MS) {
+        // What the vendor says, while the machine cannot say anything. This is
+        // the disk-clone minute — the part that looks most like a hang and is
+        // the only part with nothing of its own to report.
+        const state =
+          env.UPCLOUD_TOKEN && cluster.host
+            ? await upcloud.stateOf({ token: env.UPCLOUD_TOKEN }, cluster.host.uuid)
+            : null
+
+        return {
+          ...cluster,
+          state: "opening" as const,
+          refusal: undefined,
+          host: cluster.host && state ? { ...cluster.host, state } : cluster.host,
+        }
+      }
+
+      return {
+        ...cluster,
+        state: "unreachable" as const,
+        refusal: { problem: found.problem, repair: found.repair },
+      }
     }),
   )
 

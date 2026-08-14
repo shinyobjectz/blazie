@@ -10,6 +10,6 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["**/*.ts", "../lib/control/**/*.ts"],
+  "include": ["**/*.ts", "../lib/control/**/*.ts", "../lib/path.ts"],
   "exclude": ["../node_modules"]
 }

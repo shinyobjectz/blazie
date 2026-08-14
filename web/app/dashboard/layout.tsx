@@ -1,8 +1,6 @@
 "use client"
 
 import { Check, ChevronDown } from "lucide-react"
-import { usePathname } from "next/navigation"
-import { useEffect } from "react"
 
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import {
@@ -27,6 +25,8 @@ import { Wordmark } from "@/components/ui/wordmark"
 import { SIGN_IN } from "@/lib/blazie"
 
 import { ClusterHeld, useClusterState } from "./cluster"
+import { Onboarding } from "./onboarding"
+import { WayOut } from "./way-out"
 
 /**
  * The console shell: sidebar, and a bar saying which world you are looking at.
@@ -38,7 +38,6 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const pathname = usePathname()
   const { held, error, retry } = useClusterState()
   const { width, setWidth, remember } = useSidebarWidth()
 
@@ -50,6 +49,7 @@ export default function DashboardLayout({
           the console could not read what you hold
         </h1>
         <RefusalNote error={error} retry={retry} />
+        <WayOut />
       </main>
     )
   }
@@ -67,11 +67,27 @@ export default function DashboardLayout({
   if (!held.who.login) return <SignIn can={held.who.can.sign_in} />
 
   // Signed in and holding nothing: there is exactly one useful thing to do and
-  // this is it. Every other page asks a cluster a question, so leaving somebody
-  // on the orbit with no cluster shows an empty sky and no way to read it as
-  // "open one" rather than "something is broken".
-  if (held.clusters.length === 0 && pathname !== "/dashboard/clusters") {
-    return <Onboarding />
+  // this is it. Every other page asks a cluster a question, so a console with
+  // no cluster is a set of pages that can only refuse.
+  //
+  // Shown rather than navigated to. It was a redirect to `/dashboard/clusters`,
+  // which put a navigation in the path of the one state that has nowhere to
+  // navigate from — and the pathname it compared against never matched, so it
+  // redirected to the page it had just arrived at and did it again. Rendering
+  // the screen here cannot loop, because nothing moves.
+  //
+  // Held until something is actually open, not merely until something exists.
+  // Handing over to the console the moment UpCloud accepts puts somebody in a
+  // set of pages that cannot answer for another two minutes, with the thing
+  // they are waiting on visible only as a word in the sidebar.
+  //
+  // Inside the provider, because the form needs what the layout already read.
+  if (!held.clusters.some((c) => c.state === "open")) {
+    return (
+      <ClusterHeld value={held}>
+        <Onboarding />
+      </ClusterHeld>
+    )
   }
 
   return (
@@ -178,24 +194,3 @@ function SignIn({ can }: { can: boolean }) {
   )
 }
 
-/**
- * The first screen anybody sees, and the only one that works with nothing.
- *
- * A redirect rather than a page of its own, because the clusters page already
- * IS this when it is empty — two screens saying "open one" would drift apart,
- * and the one you would keep is the one that can also show you the cluster
- * afterwards.
- */
-function Onboarding() {
-  useEffect(() => {
-    window.location.replace("/dashboard/clusters/")
-  }, [])
-
-  return (
-    <main className="px-6 py-20">
-      <p className="font-mono mx-auto max-w-3xl text-sm text-muted-foreground">
-        you hold no clusters yet — opening one…
-      </p>
-    </main>
-  )
-}

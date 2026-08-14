@@ -85,6 +85,16 @@ export type Host = {
   uuid: string
   plan: string
   zone: string
+  /**
+   * What the vendor last said the machine was doing — `maintenance` while its
+   * disk clones, then `started`.
+   *
+   * Kept because it is the only true thing there is to say during the longest
+   * part of opening. A machine that does not exist yet cannot report on itself,
+   * so before this the console had a full minute with nothing to show but a
+   * spinner on a step the machine had not reached.
+   */
+  state?: string
 }
 
 /**

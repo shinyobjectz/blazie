@@ -148,3 +148,36 @@ export function asHostname(name: string): string | null {
 
   return cleaned.length > 0 ? cleaned : null
 }
+
+/**
+ * The world a cluster's first caller gets, so the console is not empty.
+ *
+ * A cluster boots holding `$vitals` and `$authority` — the node's own, reserved
+ * behind the `$` prefix and created by the supervision tree. What it does NOT
+ * have is a world the caller holds: a blazie caller is a token's fingerprint,
+ * and a token holds nothing until it claims something. So a freshly opened
+ * cluster answered `/me` with an empty list, and the console it dropped you into
+ * said "no worlds yet" on every page and could only refuse.
+ *
+ * Claimed from here rather than seeded on the machine, because a grant belongs
+ * to a token and the machine is deliberately never told what the token is.
+ */
+export const FIRST_WORLD = "main"
+
+export async function claimFirst(
+  cluster: Pick<Held, "address" | "token">,
+): Promise<boolean> {
+  const said = await fetch(`${cluster.address}/worlds`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${cluster.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ world: FIRST_WORLD }),
+    signal: AbortSignal.timeout(8_000),
+  }).catch(() => null)
+
+  // A name already taken is not a failure here — it means this ran twice, and
+  // the second one found what the first one made.
+  return Boolean(said?.ok) || said?.status === 422
+}

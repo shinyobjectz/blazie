@@ -1,49 +1,28 @@
 "use client"
 
 import { CircleDashed, Server, Trash2, TriangleAlert } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 
+import { OpenCluster } from "@/components/dashboard/open-cluster"
 import { Nothing, PageHead } from "@/components/dashboard/page-shell"
-import { RefusalNote } from "@/components/ui/refusal-note"
 import { WorldAvatar } from "@/components/ui/world-avatar"
-import {
-  type Cluster,
-  forgetCluster,
-  look,
-  openCluster,
-} from "@/lib/blazie"
+import { type Cluster, forgetCluster, look } from "@/lib/blazie"
 import { cn } from "@/lib/utils"
 
 import { useCluster } from "../cluster"
 
 /**
- * The clusters you hold, and opening one.
+ * Managing the clusters you hold — opening another, and taking one away.
  *
- * This is the only page that works before you have anything, which is what it
- * is for. Everything else in the console asks a cluster a question.
+ * Not in the nav, and reached from the switcher instead. A cluster is what the
+ * console is pointed at rather than a thing it shows you, so this is a place
+ * you go when you are thinking about clusters, not one of the places you look
+ * at your data. Holding none never lands here at all: that is the onboarding
+ * screen, which is shown instead of the console rather than routed to.
  */
 
-const ZONES = [
-  { id: "uk-lon1", label: "London" },
-  { id: "de-fra1", label: "Frankfurt" },
-  { id: "us-nyc1", label: "New York" },
-  { id: "sg-sin1", label: "Singapore" },
-]
-
-const PLANS = [
-  { id: "1xCPU-2GB", label: "1 CPU · 2 GB", monthly: 9 },
-  { id: "2xCPU-4GB", label: "2 CPU · 4 GB", monthly: 18 },
-  { id: "4xCPU-8GB", label: "4 CPU · 8 GB", monthly: 44 },
-]
-
 export default function Clusters() {
-  const { clusters, cluster, chooseCluster, who, refresh } = useCluster()
-
-  const [name, setName] = useState("")
-  const [zone, setZone] = useState(ZONES[0].id)
-  const [plan, setPlan] = useState(PLANS[0].id)
-  const [opening, setOpening] = useState(false)
-  const [error, setError] = useState<unknown>(null)
+  const { clusters, cluster, chooseCluster, refresh } = useCluster()
 
   /**
    * A machine takes a few minutes to become a cluster, so this asks until one of
@@ -62,28 +41,6 @@ export default function Clusters() {
     return () => clearInterval(timer)
   }, [clusters, refresh])
 
-  const open = useCallback(
-    async (event: React.FormEvent) => {
-      event.preventDefault()
-      if (opening || !name.trim()) return
-
-      setOpening(true)
-      setError(null)
-
-      try {
-        const { cluster: made } = await openCluster({ name: name.trim(), zone, plan })
-        setName("")
-        await refresh()
-        chooseCluster(made.id)
-      } catch (thrown) {
-        setError(thrown)
-      } finally {
-        setOpening(false)
-      }
-    },
-    [name, zone, plan, opening, refresh, chooseCluster],
-  )
-
   return (
     <>
       <PageHead title="clusters">
@@ -92,48 +49,7 @@ export default function Clusters() {
         that can reach it is this console.
       </PageHead>
 
-      {!who.can.open_clusters ? (
-        <p className="font-mono mb-10 max-w-2xl rounded-lg border border-ember/30 bg-ember/5 p-4 text-xs leading-relaxed text-ember">
-          this deployment cannot open clusters yet — it has no credentials to
-          make a machine with. set UPCLOUD_TOKEN, CLOUDFLARE_API_TOKEN,
-          CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_ZONE_ID with `wrangler pages
-          secret put`. clusters already open still work.
-        </p>
-      ) : (
-        <form onSubmit={open} className="mb-12 flex flex-wrap items-end gap-4">
-          <label className="block">
-            <span className="font-mono mb-1.5 block text-xs text-muted-foreground">
-              name
-            </span>
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="atlas"
-              className="font-mono w-52 rounded-md border border-border bg-muted px-3 py-2 text-sm text-white placeholder:text-muted-foreground focus:border-white/30 focus:outline-none"
-            />
-          </label>
-
-          <Choice label="where" value={zone} onChange={setZone} options={ZONES} />
-
-          <Choice
-            label="size"
-            value={plan}
-            onChange={setPlan}
-            options={PLANS.map((p) => ({ id: p.id, label: `${p.label} · $${p.monthly}/mo` }))}
-          />
-
-          <button
-            type="submit"
-            disabled={opening || !name.trim()}
-            className="inline-flex items-center gap-2 rounded-md bg-white px-5 py-2 text-sm font-semibold tracking-tight text-black transition-transform hover:scale-[1.02] disabled:opacity-40"
-          >
-            <Server className="size-4" />
-            {opening ? "opening…" : "open"}
-          </button>
-        </form>
-      )}
-
-      {error ? <RefusalNote error={error} className="mb-10" /> : null}
+      <OpenCluster className="mb-12" />
 
       {clusters.length === 0 ? (
         <Nothing icon={Server} title="none yet">
@@ -306,36 +222,5 @@ function State({ cluster }: { cluster: Cluster }) {
         </>
       )}
     </span>
-  )
-}
-
-function Choice({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string
-  value: string
-  onChange: (next: string) => void
-  options: { id: string; label: string }[]
-}) {
-  return (
-    <label className="block">
-      <span className="font-mono mb-1.5 block text-xs text-muted-foreground">
-        {label}
-      </span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="font-mono rounded-md border border-border bg-muted px-3 py-2 text-sm text-white focus:border-white/30 focus:outline-none"
-      >
-        {options.map((option) => (
-          <option key={option.id} value={option.id} className="bg-muted">
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
   )
 }

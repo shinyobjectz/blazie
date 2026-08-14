@@ -23,8 +23,14 @@
 import { answer, refuse } from "@/lib/control/answer"
 import { amend, one, ownerOf, same } from "@/lib/control/clusters"
 import { type Control, SAID_KEPT, type Said, isStep } from "@/lib/control/model"
+import * as upcloud from "@/lib/control/upcloud"
 
-export const onRequestPost: PagesFunction<Control> = async ({ env, request, params }) => {
+export const onRequestPost: PagesFunction<Control> = async ({
+  env,
+  request,
+  params,
+  waitUntil,
+}) => {
   const id = String(params.id)
 
   const said = (await request.json().catch(() => null)) as {
@@ -63,11 +69,28 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request, para
     // Kept in order, so a failed provision carries the sequence up to it rather
     // than only the last line — which is most of the diagnosis.
     said: [...(cluster.said ?? []), heard].slice(-SAID_KEPT),
-    // Reaching the last step is not the same as answering, which is checked
-    // separately and is what actually decides `open`. What this does is stop a
-    // machine that has finished installing from being described as opening.
-    ...(said.step === "failed" ? { state: "unreachable" as const } : {}),
+    // Deliberately NOT touching `state`, including on `failed`.
+    //
+    // It used to set `unreachable` here, on the machine's say-so. Twice now a
+    // machine has reported `failed` having registered four tunnel connections
+    // and answered on its own name — the failure came from a step after the
+    // work was done — and the console, believing it, showed a working cluster
+    // as broken and offered to remove it. One was removed.
+    //
+    // What a machine says about itself is evidence. Whether the cluster answers
+    // is the verdict, and `look` decides that by asking the cluster. A report
+    // that contradicts a live connection loses.
   })
+
+  // The machine is made with its firewall off, because one made with it on and
+  // no rules cannot boot — it has no dns, no apt, no pull, and no way to say so.
+  // This is where it gets closed instead: the machine has just told us it is
+  // through the tunnel, which means it is out of `maintenance` and has finished
+  // needing anything. Short enough to finish after the answer, unlike waiting
+  // for a disk to clone, which is what killed the previous attempt.
+  if (said.step === "tunnelled" && env.UPCLOUD_TOKEN && cluster.host?.uuid) {
+    waitUntil(upcloud.wall({ token: env.UPCLOUD_TOKEN }, cluster.host.uuid))
+  }
 
   return answer({ heard: said.step })
 }

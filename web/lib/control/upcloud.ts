@@ -89,18 +89,26 @@ export type Opening = {
 export type Credentials = { token: string }
 
 /**
- * Where a cluster's copies go.
+ * Everything a machine is handed that must never come back out of it.
  *
- * One bucket, a prefix per cluster. The prefix is the cluster's id rather than
- * its name, because a name can be given up and taken by somebody else and a
- * backup must not follow the name to a different cluster.
- *
- * The credential is shared across clusters, which is the weak part and is worth
- * saying out loud: a cluster that was taken over could read every other
- * cluster's copies. R2's S3 tokens cannot be scoped to a prefix, so genuinely
- * isolating them means a bucket and a token per cluster. Recorded rather than
- * quietly accepted.
+ * Listed once, so adding a credential to `Opening` and forgetting to blank it
+ * is a change to this function rather than a silent leak in a log tail nobody
+ * reads until something breaks. Empty values are dropped: a `sed` matching the
+ * empty string replaces between every character.
  */
+export function scrubbing(opening: Opening): { called: string; value: string }[] {
+  return [
+    { called: "tunnel token", value: opening.tunnelToken },
+    { called: "secret key base", value: opening.secret },
+    { called: "master key", value: opening.masterKey },
+    { called: "hello", value: opening.hello },
+    { called: "backup key id", value: opening.backup?.accessKeyId ?? "" },
+    { called: "backup secret", value: opening.backup?.secretAccessKey ?? "" },
+    { called: "blob key id", value: opening.blobs?.accessKeyId ?? "" },
+    { called: "blob secret", value: opening.blobs?.secretAccessKey ?? "" },
+  ].filter((one) => one.value.length > 0)
+}
+
 export type Backup = {
   bucket: string
   endpoint: string
@@ -263,9 +271,25 @@ export async function open(
             },
           ],
         },
-        // Nothing inbound. The tunnel is outbound, so this closes the machine
-        // without closing what it needs.
-        firewall: "on",
+        // Off at birth, and switched on once the machine is up — see `wall`.
+        //
+        // On is what this wants to be, and on is what it was. But UpCloud's
+        // firewall denies everything in both directions until rules exist, and
+        // rules cannot be posted while the disk is still cloning. So a machine
+        // created with it on boots sealed: no dns, no apt, no pull, no tunnel,
+        // and no way to report any of that, because reporting is a request too.
+        //
+        // Trying to close that gap from the control plane failed twice — once
+        // by posting rules into `maintenance` and ignoring the refusals, once
+        // by waiting for the machine in `waitUntil`, which does not outlive the
+        // response by the minute a clone takes.
+        //
+        // What actually keeps this machine closed is not the firewall: blazie
+        // is published to `127.0.0.1:4000`, so it is not on the public
+        // interface at all, and the tunnel only ever dials out. The firewall is
+        // defence in depth, and defence in depth is not worth a machine that
+        // cannot boot.
+        firewall: "off",
       },
     }),
     signal: AbortSignal.timeout(30_000),
@@ -297,29 +321,52 @@ export async function open(
 }
 
 /**
- * Let the machine dial the tunnel out.
+ * Everything the machine has to be able to reach, and nothing else.
  *
- * Switching the firewall on applies UpCloud's default rule set, which permits
- * outbound 80, 443, 8080, 6443, 11550-11570, DNS, NTP and ICMP — and drops
- * everything else. cloudflared reaches Cloudflare's edge on 7844, which is not
- * on that list.
- *
- * So the machine could `apt-get`, could `docker pull` a hundred megabytes, and
- * could never connect: `dial tcp [2606:4700:a8::4]:7844: i/o timeout`. Every
- * step of the install worked and the one thing that makes a cluster reachable
- * did not, which is the failure this whole reporting apparatus exists to make
- * legible.
- *
- * Added rather than turning the firewall off, because "nothing listens" is the
- * property worth keeping and the fix is one port in one direction. Both
- * protocols, because cloudflared prefers QUIC on UDP and falls back to TCP, and
- * a rule set permitting only the fallback silently costs the faster path.
+ * Each of these is load-bearing, so the list is written with what needs it:
+ * lose any one and the install stops somewhere different.
  */
-export async function letOut(credentials: Credentials, uuid: string): Promise<boolean> {
-  const made: boolean[] = []
+const OUT = [
+  { protocol: "tcp", port: 53, needs: "dns" },
+  { protocol: "udp", port: 53, needs: "dns" },
+  { protocol: "udp", port: 123, needs: "ntp, or tls rejects every certificate" },
+  { protocol: "tcp", port: 80, needs: "apt" },
+  { protocol: "tcp", port: 443, needs: "docker pull, and saying how it is getting on" },
+  { protocol: "tcp", port: 7844, needs: "cloudflared to the edge" },
+  { protocol: "udp", port: 7844, needs: "cloudflared to the edge, over quic" },
+] as const
 
+/**
+ * Wall the machine in: say what may pass, then start enforcing.
+ *
+ * Called once the machine has said `tunnelled` — which is to say, once it has
+ * finished needing anything unusual and has proved it is alive. That timing is
+ * not a nicety. It is the only moment when the machine is certainly out of
+ * `maintenance` (rules are refused before that), the work is short enough to
+ * finish inside a request, and nothing is left to install if it goes wrong.
+ *
+ * The rule set is written out here rather than inherited from a vendor default.
+ * The previous version added one rule for 7844 and explained in a comment that
+ * UpCloud's default set already permits 80, 443, DNS and NTP outbound — but
+ * that was measured on a trial account, and what it described was the TRIAL
+ * firewall. On an ordinary account, `firewall: "on"` with no rules denies
+ * everything both ways. So taking the account out of trial, which was the fix
+ * for the previous failure, turned a machine that could do everything except
+ * dial the tunnel into one that could do nothing at all — and could not say so,
+ * because saying so is a request to 443.
+ *
+ * A default that changes underneath you is not a dependency you can see. This
+ * one changed for a reason that looked like unrelated progress.
+ */
+export async function wall(credentials: Credentials, uuid: string): Promise<boolean> {
+  const made: boolean[] = []
+  let position = 1
+
+  // Both families, because a machine reaching Cloudflare over IPv6 and denied
+  // over IPv4 fails the same way as one denied entirely, and which it prefers is
+  // not ours to decide.
   for (const family of ["IPv4", "IPv6"]) {
-    for (const protocol of ["tcp", "udp"]) {
+    for (const { protocol, port, needs } of OUT) {
       const said = await fetch(`${API}/server/${uuid}/firewall_rule`, {
         method: "POST",
         headers: { authorization: basic(credentials), "content-type": "application/json" },
@@ -329,21 +376,32 @@ export async function letOut(credentials: Credentials, uuid: string): Promise<bo
             action: "accept",
             family,
             protocol,
-            destination_port_start: "7844",
-            destination_port_end: "7844",
-            // Ahead of the default set's closing drop, which sits last.
-            position: "1",
-            comment: "cloudflared to the edge",
+            destination_port_start: String(port),
+            destination_port_end: String(port),
+            position: String(position),
+            comment: needs,
           },
         }),
         signal: AbortSignal.timeout(20_000),
       }).catch(() => null)
 
       made.push(Boolean(said?.ok))
+      position += 1
     }
   }
 
-  return made.every(Boolean)
+  if (!made.every(Boolean)) return false
+
+  // Only now. Switching it on with no rules is the sealed box, so the order
+  // here is the whole point: describe what may pass, then start enforcing.
+  const on = await fetch(`${API}/server/${uuid}`, {
+    method: "PUT",
+    headers: { authorization: basic(credentials), "content-type": "application/json" },
+    body: JSON.stringify({ server: { firewall: "on" } }),
+    signal: AbortSignal.timeout(20_000),
+  }).catch(() => null)
+
+  return Boolean(on?.ok)
 }
 
 /**
@@ -387,7 +445,16 @@ export async function close(credentials: Credentials, uuid: string): Promise<boo
   return Boolean(gone?.ok)
 }
 
-async function stateOf(credentials: Credentials, uuid: string): Promise<string | null> {
+/**
+ * What UpCloud says the machine is doing.
+ *
+ * `maintenance` for the minute or so a disk clone takes, then `started`. Used
+ * by `close` to know when a stop has landed, and exported because it is also
+ * the only true thing there is to say during the longest and least explicable
+ * part of opening a cluster: before the machine exists, nothing can report on
+ * itself, so the console had a full minute with nothing to show.
+ */
+export async function stateOf(credentials: Credentials, uuid: string): Promise<string | null> {
   const said = await fetch(`${API}/server/${uuid}`, {
     headers: { authorization: basic(credentials) },
     signal: AbortSignal.timeout(20_000),
@@ -473,12 +540,42 @@ ${backupEnv(opening)}
 
       # Every step is announced before and after, so a machine that dies mid-step
       # is stuck at a named place rather than simply silent.
+      # Tried more than once, because a step that does not land is a step that
+      # did not happen as far as anybody watching is concerned — and that is not
+      # a cosmetic loss. A provision reported ONLY \`failed\`, having in fact
+      # reached every step and connected its tunnel; the console showed a broken
+      # cluster, offered to remove it, and a working one was destroyed.
+      #
+      # The early ones are the ones that miss: this runs seconds into a boot,
+      # when dns may not answer yet. Still \`|| true\` at the end — saying so is
+      # not worth failing the install over — but no longer one attempt.
+      # Every secret this machine was given, blanked out of anything it says.
+      #
+      # \`died\` sends the tail of cloud-init's log, and that log is written by a
+      # script whose arguments include the tunnel token, the key everything is
+      # sealed under, and the credentials for the backup bucket. The console
+      # prints what comes back. So the one place a failure was most useful was
+      # also the one place every credential could leave the machine — and it is
+      # shown, by design, to whoever is watching a cluster open.
+      #
+      # Blanked here rather than in the console, because the console cannot know
+      # what a secret looks like and this script is holding them by name.
+      scrub() {
+        sed ${scrubbing(opening)
+          .map((secret) => `-e 's|${secret.value}|<${secret.called}>|g'`)
+          .join(" \\\\\n          ")}
+      }
+
       say() {
-        detail=$(printf '%s' "\${2-}" | tr -d '"\\\\' | tr '\\n\\r\\t' '   ' | tail -c 1500)
-        curl -fsS -m 15 -X POST '${said}' \\
-          -H 'content-type: application/json' \\
-          --data "{\\"hello\\":\\"${opening.hello}\\",\\"step\\":\\"$1\\",\\"detail\\":\\"$detail\\"}" \\
-          >/dev/null 2>&1 || true
+        detail=$(printf '%s' "\${2-}" | tr -d '"\\\\' | tr '\\n\\r\\t' '   ' | scrub | tail -c 1500)
+        for attempt in 1 2 3 4 5; do
+          curl -fsS -m 15 -X POST '${said}' \\
+            -H 'content-type: application/json' \\
+            --data "{\\"hello\\":\\"${opening.hello}\\",\\"step\\":\\"$1\\",\\"detail\\":\\"$detail\\"}" \\
+            >/dev/null 2>&1 && return 0
+          sleep "$attempt"
+        done
+        return 0
       }
 
       # The whole point. Without this a failure is indistinguishable from a slow

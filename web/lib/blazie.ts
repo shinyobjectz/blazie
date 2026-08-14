@@ -41,7 +41,14 @@ export type Cluster = {
   saying?: { step: string; at: string; detail?: string }
   /** Everything it said, oldest first — the sequence, not just the latest. */
   said?: { step: string; at: string; detail?: string }[]
-  host?: { vendor: string; uuid: string; plan: string; zone: string }
+  host?: {
+    vendor: string
+    uuid: string
+    plan: string
+    zone: string
+    /** What the vendor last said it was doing — `maintenance` while it clones. */
+    state?: string
+  }
   opened: string
 }
 

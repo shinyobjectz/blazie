@@ -33,6 +33,10 @@ export function ClusterSwitcher() {
   const { clusters, cluster, chooseCluster } = useCluster()
   const router = useRouter()
 
+  // Holding none never reaches this — the layout shows onboarding instead of
+  // the console, so there is no sidebar to be in. This is the narrower case of
+  // holding some and having chosen none, which resolves itself as soon as the
+  // list loads.
   if (!cluster) {
     return (
       <Link
@@ -40,7 +44,7 @@ export function ClusterSwitcher() {
         className="flex h-full items-center gap-2 px-2 text-sm text-muted-foreground transition-colors hover:text-white"
       >
         <CircleDashed className="size-4" />
-        no cluster yet
+        choose a cluster
       </Link>
     )
   }
@@ -84,12 +88,14 @@ export function ClusterSwitcher() {
 
         <DropdownMenuSeparator />
 
+        {/* The only way to the management surface, now that it is not in the
+            nav. Somebody thinking about clusters is already looking here. */}
         <DropdownMenuItem
           onSelect={() => router.push("/dashboard/clusters")}
           className="gap-2 text-muted-foreground"
         >
           <Plus className="size-3.5" />
-          open another
+          open another, or remove one
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

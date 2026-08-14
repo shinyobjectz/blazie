@@ -130,7 +130,7 @@ describe("making a machine", () => {
     assert.equal(storage.storage, "01000000-0000-4000-8000-000020070100")
   })
 
-  it("opens no port and creates no login", async () => {
+  it("creates no login, and publishes blazie only to loopback", async () => {
     stub()
     answering({ ok: true, body: { server: { uuid: "server-1" } } })
     await upcloud.open(credentials, opening)
@@ -139,10 +139,36 @@ describe("making a machine", () => {
 
     // The machine is not something anybody logs into. It runs one container and
     // dials out, and the whole security story rests on there being nothing to
-    // reach — so a password or an opened port here is the fence coming down.
-    assert.equal(server.firewall, "on")
+    // reach — so a password or a key here is the fence coming down.
     assert.equal(server.login_user.create_password, "no")
     assert.equal(server.login_user.ssh_keys, undefined)
+
+    // Which is where "nothing to reach" actually comes from, and it is worth
+    // asserting because it is what makes the line below survivable: blazie is
+    // bound to loopback, so it is not on the public interface whatever the
+    // firewall says.
+    assert.match(server.user_data, /-p 127\.0\.0\.1:4000:4000/)
+  })
+
+  it("makes the machine with its firewall off, and closes it later", async () => {
+    stub()
+    answering({ ok: true, body: { server: { uuid: "server-1" } } })
+    await upcloud.open(credentials, opening)
+
+    // This said "on" for as long as it was wrong, which was every provision.
+    //
+    // UpCloud denies everything both ways until rules exist, and rules are
+    // refused while the disk clones — so a machine created with the firewall on
+    // boots with no dns, no apt, no pull and no tunnel, and cannot report any of
+    // it, because reporting is a request too. Two attempts to close that gap
+    // from here failed: posting rules into `maintenance` and ignoring the
+    // refusals, then waiting for the machine in `waitUntil`, which does not
+    // outlive the response by the minute a clone takes.
+    //
+    // So it is off at birth and switched on by `wall` once the machine says it
+    // is through the tunnel. Defence in depth is worth having and is not worth
+    // a machine that cannot boot.
+    assert.equal(bodyOf<ServerCreate>(sent[0]).server.firewall, "off")
   })
 
   it("presents the token as a bearer, not basic auth", async () => {
@@ -236,39 +262,128 @@ describe("what the account is already spending", () => {
   })
 })
 
-describe("letting the tunnel out", () => {
-  it("opens 7844 outbound, both protocols, both families", async () => {
+describe("what a machine is allowed to say back", () => {
+  const opening = {
+    name: "atlas",
+    hostname: "atlas",
+    zone: "us-nyc1",
+    plan: "1xCPU-2GB",
+    tunnelToken: "TUNNEL-TOKEN",
+    secret: "SECRET-KEY-BASE",
+    masterKey: "MASTER-KEY",
+    home: "https://blazie.dev",
+    id: "CLUSTER",
+    hello: "HELLO-TOKEN",
+    backup: {
+      bucket: "b",
+      endpoint: "e",
+      accessKeyId: "BACKUP-KEY-ID",
+      secretAccessKey: "BACKUP-SECRET",
+      prefix: "p",
+    },
+    blobs: {
+      bucket: "b2",
+      endpoint: "e",
+      accessKeyId: "BLOB-KEY-ID",
+      secretAccessKey: "BLOB-SECRET",
+      prefix: "p",
+    },
+  }
+
+  it("blanks every credential it was given", () => {
+    // `died` sends the tail of cloud-init's log, and that log is written by a
+    // script holding all of these. The console prints what comes back. So the
+    // most useful thing a failing machine can say was also the way every secret
+    // could leave it — shown, by design, to whoever is watching it open.
+    const blanked = upcloud.scrubbing(opening).map((one) => one.value)
+
+    for (const secret of [
+      opening.tunnelToken,
+      opening.secret,
+      opening.masterKey,
+      opening.hello,
+      opening.backup.accessKeyId,
+      opening.backup.secretAccessKey,
+      opening.blobs.accessKeyId,
+      opening.blobs.secretAccessKey,
+    ]) {
+      assert.ok(blanked.includes(secret), `${secret} would have been sent as written`)
+    }
+  })
+
+  it("does not blank the empty string, which would match everywhere", () => {
+    const bare = { ...opening, backup: undefined, blobs: undefined }
+
+    // A `sed` for the empty string replaces between every character, so a
+    // cluster with no bucket would have turned its whole log into markers.
+    assert.equal(upcloud.scrubbing(bare).some((one) => one.value === ""), false)
+  })
+})
+
+describe("walling the machine in", () => {
+  const fine = { ok: true, body: {} }
+
+  it("opens everything the machine needs, not only the tunnel's port", async () => {
     stub()
-    const sent_ok = { ok: true, body: {} }
-    answering(sent_ok, sent_ok, sent_ok, sent_ok)
+    answering(...Array.from({ length: 15 }, () => fine))
 
-    assert.equal(await upcloud.letOut({ token: "t" }, "server-1"), true)
+    assert.equal(await upcloud.wall({ token: "t" }, "server-1"), true)
 
-    // UpCloud's default set permits 80, 443, 8080, 6443, DNS, NTP, ICMP out and
-    // drops the rest. cloudflared needs 7844, so the machine installed
-    // perfectly and never connected.
-    assert.equal(sent.length, 4)
+    // This used to send four rules, all for 7844, on the belief that switching
+    // the firewall on brings UpCloud's permissive default set. What was actually
+    // being described was the TRIAL firewall — and on an ordinary account,
+    // firewall on with no rules denies everything both ways. So taking the
+    // account out of trial turned a machine that could do everything except
+    // dial the tunnel into one that could not resolve a name, install anything,
+    // or report that it could not. This assertion is the difference.
+    const rules = sent.filter((one) => one.url.endsWith("/firewall_rule"))
+    assert.equal(rules.length, 14)
 
-    for (const one of sent) {
+    const ports = rules.map((one) => {
       const rule = bodyOf<FirewallRule>(one).firewall_rule
       assert.equal(rule.direction, "out")
       assert.equal(rule.action, "accept")
-      assert.equal(rule.destination_port_start, "7844")
-      // Ahead of the closing drop, or it never matches.
-      assert.equal(rule.position, "1")
-    }
+      return `${rule.family}/${rule.protocol}/${rule.destination_port_start}`
+    })
 
-    assert.deepEqual(
-      sent.map((one) => `${bodyOf<FirewallRule>(one).firewall_rule.family}/${bodyOf<FirewallRule>(one).firewall_rule.protocol}`).sort(),
-      ["IPv4/tcp", "IPv4/udp", "IPv6/tcp", "IPv6/udp"],
-    )
+    // Each of these is load-bearing: without 53 nothing resolves, without 123
+    // tls rejects every certificate, without 80 apt stops, without 443 neither
+    // docker pull nor saying how it is getting on works, and without 7844 the
+    // tunnel never registers.
+    for (const family of ["IPv4", "IPv6"]) {
+      for (const want of ["tcp/53", "udp/53", "udp/123", "tcp/80", "tcp/443", "tcp/7844", "udp/7844"]) {
+        assert.ok(ports.includes(`${family}/${want}`), `${family}/${want} was never opened`)
+      }
+    }
   })
 
-  it("says so when a rule would not take", async () => {
+  it("says what may pass before it starts enforcing", async () => {
     stub()
-    answering({ ok: true, body: {} }, { ok: false, status: 400, body: {} })
+    answering(...Array.from({ length: 15 }, () => fine))
 
-    assert.equal(await upcloud.letOut({ token: "t" }, "server-1"), false)
+    await upcloud.wall({ token: "t" }, "server-1")
+
+    // The order IS the fix. Switching the firewall on before the rules exist is
+    // the sealed box: no dns, no apt, no pull, no tunnel, and no way to report
+    // any of it, because reporting is a request too. A machine is therefore
+    // made with the firewall off and closed only once it is up.
+    const on = sent.at(-1)!
+    assert.equal(on.method, "PUT")
+    assert.match(on.url, /\/server\/server-1$/)
+    assert.equal(bodyOf<{ server: { firewall: string } }>(on).server.firewall, "on")
+
+    assert.equal(sent.slice(0, -1).every((one) => one.url.endsWith("/firewall_rule")), true)
+  })
+
+  it("does not start enforcing when a rule would not take", async () => {
+    stub()
+    answering({ ok: false, status: 400, body: {} })
+
+    assert.equal(await upcloud.wall({ token: "t" }, "server-1"), false)
+
+    // The half-applied case is the dangerous one: some rules on, the firewall
+    // switched on, and everything they do not cover silently dropped.
+    assert.equal(sent.some((one) => one.method === "PUT"), false)
   })
 })
 
