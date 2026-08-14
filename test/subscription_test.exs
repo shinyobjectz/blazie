@@ -40,7 +40,7 @@ defmodule Blazie.SubscriptionTest do
       assert answer.name == %{World.name_of(world) => tx}
 
       # And that name still answers the same forever.
-      assert Snapshot.reopen(answer.name) |> Snapshot.find(attribute: "height") == answer.facts
+      assert Snapshot.reopen!(answer.name) |> Snapshot.find(attribute: "height") == answer.facts
     end
 
     test "each matching write pushes again", %{world: world} do

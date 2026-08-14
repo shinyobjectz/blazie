@@ -75,7 +75,7 @@ defmodule Blazie.CompactionTest do
 
       reopened = on_disk(ctx.name, ctx.dir, checkpoint_every: 10)
       # Same transaction, after a reopen that went through a checkpoint.
-      at_ten = Snapshot.reopen(%{reopened => 10})
+      at_ten = Snapshot.reopen!(%{reopened => 10})
 
       assert length(Snapshot.find(early, attribute: "height")) == 10
       assert length(Snapshot.find(at_ten, attribute: "height")) == 10

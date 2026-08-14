@@ -408,8 +408,8 @@ defmodule Blazie.Lua.Binding do
     %Snapshot{at: at} = Process.get(:blazie_lua_snapshot)
 
     at
-    |> Map.new(fn {world, held} -> {world, min(held, trunc(tx))} end)
-    |> Snapshot.reopen()
+    |> Map.new(fn {world, held} -> {world, max(min(held, trunc(tx)), 0)} end)
+    |> Snapshot.reopen!()
   end
 
   defp at_snapshot(_), do: Process.get(:blazie_lua_snapshot)

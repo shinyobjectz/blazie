@@ -101,7 +101,7 @@ defmodule Blazie.Surface.WatchChannelTest do
       source =
         "local out = {} for p in each { height = true } do out[#out + 1] = p.height end return out"
 
-      reopened = Snapshot.reopen(%{ctx.name => name[ctx.name]})
+      reopened = Snapshot.reopen!(%{ctx.name => name[ctx.name]})
 
       assert {:ok, ^pushed, _} = Blazie.Lua.Binding.run(source, reopened)
     end
@@ -125,7 +125,7 @@ defmodule Blazie.Surface.WatchChannelTest do
       assert_push("answer", %{"name" => name, "value" => value}, 2_000)
 
       # The name is the contract: running it again gives the same answer.
-      reopened = Snapshot.reopen(%{ctx.name => name[ctx.name]})
+      reopened = Snapshot.reopen!(%{ctx.name => name[ctx.name]})
 
       assert {:ok, ^value, _} =
                Blazie.Lua.Binding.run(

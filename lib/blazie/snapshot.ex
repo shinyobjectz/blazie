@@ -19,6 +19,8 @@ defmodule Blazie.Snapshot do
   @enforce_keys [:at]
   defstruct [:at]
 
+  @type refusal :: %{problem: atom(), repair: String.t()}
+
   @typedoc """
   Which ledgers, at which transaction — keyed by **what each world is called**,
   never by where it currently lives.
@@ -51,13 +53,74 @@ defmodule Blazie.Snapshot do
   @doc """
   Reopen a snapshot from a name. The same name is the same snapshot.
 
-  A name arrives from outside here, so an address handed in where a name
-  belongs is normalised rather than trusted — otherwise it would be stored, and
-  the shape a snapshot promises would depend on who built it.
+  A name arrives from outside here, so nothing in it is trusted: an address
+  handed in where a name belongs is normalised, and every transaction is
+  checked against where its world actually is. A name pinned to a transaction
+  that has not happened yet is not a snapshot — it silently means "everything,
+  so far", which changes as the world moves, and a client that cached on it
+  per the documented advice would hold an answer that goes stale in a
+  direction whoever minted the name controls. Refused, never clamped:
+  clamping would reintroduce the same lie at the clamp.
+
+  A world this node cannot reach is refused for the same reason — a bound
+  nobody can check is not a bound.
   """
-  @spec reopen(name()) :: t()
+  @spec reopen(name()) :: {:ok, t()} | {:error, refusal()}
   def reopen(at) when is_map(at) do
-    %__MODULE__{at: Map.new(at, fn {world, tx} -> {World.name_of(world), tx} end)}
+    named = Map.new(at, fn {world, tx} -> {World.name_of(world), tx} end)
+
+    named
+    |> Enum.find_value(fn {world, tx} ->
+      case current(world) do
+        {:ok, now} when is_integer(tx) and tx >= 0 and tx <= now -> nil
+        {:ok, now} -> future(world, tx, now)
+        :closed -> closed(world)
+      end
+    end)
+    |> case do
+      nil -> {:ok, %__MODULE__{at: named}}
+      refusal -> {:error, refusal}
+    end
+  end
+
+  @doc """
+  `reopen/1` for a caller holding a name it derived from a live snapshot.
+
+  The check still runs — a raise here is a caller's bug, not input — so there
+  is no path around the bound, only a louder way to hit it.
+  """
+  @spec reopen!(name()) :: t()
+  def reopen!(at) do
+    case reopen(at) do
+      {:ok, snapshot} -> snapshot
+      {:error, refusal} -> raise ArgumentError, refusal.repair
+    end
+  end
+
+  defp current(world) do
+    {:ok, World.tx(World.via(world))}
+  catch
+    :exit, _ -> :closed
+  end
+
+  defp future(world, tx, now) do
+    %{
+      problem: :not_yet_a_transaction,
+      repair:
+        "#{inspect(world)} is at transaction #{now} and this name pins #{inspect(tx)}. " <>
+          "A name may only pin a moment that has happened — one from the future is not a " <>
+          "snapshot, it is 'everything so far', which changes. Take a name from a snapshot " <>
+          "you actually opened."
+    }
+  end
+
+  defp closed(world) do
+    %{
+      problem: :world_not_open,
+      repair:
+        "#{inspect(world)} is not open on this node, so nothing can check what this name " <>
+          "pins against where the world actually is. Open the world, then reopen the name."
+    }
   end
 
   @doc "Every fact visible in this snapshot, oldest first across all ledgers."

@@ -46,7 +46,7 @@ defmodule BlazieTest do
       {:ok, _} = World.append(a, [{42, "height", 181}])
 
       assert Snapshot.value(early, 42, "height") == 180
-      assert Snapshot.value(Snapshot.reopen(name), 42, "height") == 180
+      assert Snapshot.value(Snapshot.reopen!(name), 42, "height") == 180
       assert Snapshot.value(Snapshot.open([a]), 42, "height") == 181
     end
 
@@ -54,7 +54,7 @@ defmodule BlazieTest do
       {:ok, _} = World.append(a, [{42, "height", 180}])
       snapshot = Snapshot.open([a])
 
-      assert Snapshot.facts(Snapshot.reopen(Snapshot.name(snapshot))) ==
+      assert Snapshot.facts(Snapshot.reopen!(Snapshot.name(snapshot))) ==
                Snapshot.facts(snapshot)
     end
 

@@ -126,7 +126,7 @@ defmodule Blazie.Model.AgentEndToEndTest do
 
     # The question no prompt library can answer: what did it think on Tuesday?
     at_the_time =
-      Snapshot.reopen(Map.new(Snapshot.name(snapshot(world)), fn {w, _} -> {w, before} end))
+      Snapshot.reopen!(Map.new(Snapshot.name(snapshot(world)), fn {w, _} -> {w, before} end))
 
     assert Snapshot.value(at_the_time, "t1", "severity") == "low"
   end

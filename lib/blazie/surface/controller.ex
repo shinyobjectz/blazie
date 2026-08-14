@@ -127,7 +127,7 @@ defmodule Blazie.Surface.Controller do
     with {:ok, refs} <- open_all(ledgers) do
       case Map.get(params, "name") do
         nil -> {:ok, Snapshot.open(refs)}
-        pinned -> with {:ok, at} <- Wire.snapshot_name(pinned), do: {:ok, Snapshot.reopen(at)}
+        pinned -> with {:ok, at} <- Wire.snapshot_name(pinned), do: Snapshot.reopen(at)
       end
     end
   end

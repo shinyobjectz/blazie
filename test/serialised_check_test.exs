@@ -172,7 +172,7 @@ defmodule Blazie.SerialisedCheckTest do
       assert {:ok, tx} =
                World.append(world, [{"ada", "height", 180}], check: &Attribute.check/2)
 
-      assert Snapshot.value(Snapshot.reopen(%{World.name_of(world) => tx}), "ada", "height") ==
+      assert Snapshot.value(Snapshot.reopen!(%{World.name_of(world) => tx}), "ada", "height") ==
                180
     end
   end

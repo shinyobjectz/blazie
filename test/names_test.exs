@@ -63,15 +63,15 @@ defmodule Blazie.NamesTest do
       {:ok, tx} = World.append(world, [{"ada", "height", 180}])
       name = Snapshot.name(Snapshot.open([world]))
 
-      assert Snapshot.name(Snapshot.reopen(name)) == name
-      assert Snapshot.value(Snapshot.reopen(name), "ada", "height") == 180
+      assert Snapshot.name(Snapshot.reopen!(name)) == name
+      assert Snapshot.value(Snapshot.reopen!(name), "ada", "height") == 180
       assert name[World.name_of(world)] == tx
     end
 
     test "and an address handed to reopen is normalised, not stored", %{world: world} do
       # Nothing in lib/ does this any more, but a name arrives from outside and
       # the shape a snapshot promises must not depend on who built it.
-      snapshot = Snapshot.reopen(%{world => World.tx(world)})
+      snapshot = Snapshot.reopen!(%{world => World.tx(world)})
 
       assert [key] = Map.keys(Snapshot.name(snapshot))
       refute match?({:via, _, _}, key)
@@ -87,6 +87,33 @@ defmodule Blazie.NamesTest do
       assert Map.keys(name) |> Enum.sort() ==
                Enum.sort([World.name_of(one), World.name_of(two)])
     end
+
+    # C2 in .research/failure-modes.md: an older controller zipped a map's
+    # values against the caller's argument order and assigned every ledger
+    # somebody else's transaction. The zip is gone — but the bug was invisible
+    # to every test whose ledgers sat at the SAME transaction, because an
+    # assertion whose inputs are all equal cannot detect a permutation. This
+    # advances every ledger by a different amount, so a permutation anywhere
+    # on the path has somewhere to show.
+    test "each ledger gets its own transaction, at 2 worlds and at 40" do
+      for count <- [2, 40] do
+        worlds =
+          for i <- 1..count do
+            world = TestLedger.open()
+            {:ok, _} = World.append(world, Blazie.Attribute.define("n", answers: "integer"))
+
+            # i appends: every world ends at a different tx.
+            for j <- 1..i, do: {:ok, _} = World.append(world, [{"e", "n", j}])
+            world
+          end
+
+        name = Snapshot.name(Snapshot.open(worlds))
+
+        # Maps change representation at 32 keys, so both sides of that line
+        # are covered by the two counts.
+        assert name == Map.new(worlds, &{World.name_of(&1), World.tx(&1)})
+      end
+    end
   end
 
   describe "a name with ordinary world names is something a wire can carry" do
@@ -100,8 +127,66 @@ defmodule Blazie.NamesTest do
       assert {:ok, decoded} = Jason.decode(encoded)
       assert decoded == name
 
-      # And the decoded thing is a name again, with no translation in between.
-      assert Snapshot.name(Snapshot.reopen(decoded)) == name
+      # And the decoded thing reaches reopen intact — where it is refused,
+      # because nothing here can vouch for what it pins: "tenant-7" is not
+      # open, and "$vitals" is real but has not reached transaction 9. The
+      # shape survived the wire; the bound then did its job. Which refusal
+      # comes first depends on map order, and both are the bound working.
+      assert {:error, %{problem: problem}} = Snapshot.reopen(decoded)
+      assert problem in [:world_not_open, :not_yet_a_transaction]
+    end
+  end
+
+  describe "a name can only pin a moment that has happened" do
+    # C1 in .research/failure-modes.md, reproduced 2026-08-13: a name pinned to
+    # a future transaction silently meant "everything, so far" — which changes,
+    # in a direction whoever minted the name controls, poisoning any client
+    # that cached on it per the documented advice. The claim under test is the
+    # central one: an answer at a name is the same answer forever.
+    test "a future transaction is refused, never clamped", %{world: world} do
+      {:ok, tx} = World.append(world, [{"ada", "height", 10}])
+      name = World.name_of(world)
+
+      assert {:error, %{problem: :not_yet_a_transaction, repair: repair}} =
+               Snapshot.reopen(%{name => tx + 1})
+
+      assert repair =~ "has happened"
+
+      # The reproduction's exact shape: a hand-written name far in the future.
+      assert {:error, %{problem: :not_yet_a_transaction}} =
+               Snapshot.reopen(%{name => 1_152_921_504_606_846_976})
+
+      # And the bang form is a louder door, not a different one.
+      assert_raise ArgumentError, ~r/has happened/, fn ->
+        Snapshot.reopen!(%{name => tx + 1})
+      end
+    end
+
+    test "a valid name answers the same whatever is written after it", %{world: world} do
+      {:ok, tx} = World.append(world, [{"ada", "height", 10}])
+      name = %{World.name_of(world) => tx}
+
+      {:ok, snapshot} = Snapshot.reopen(name)
+      before = Snapshot.value(snapshot, "ada", "height")
+
+      # An arbitrary write sequence — corrections, new entities, new fields.
+      for i <- 1..20 do
+        {:ok, _} = World.append(world, [{"ada", "height", i}, {"grace", "height", i * 2}])
+      end
+
+      {:ok, again} = Snapshot.reopen(name)
+      assert Snapshot.value(again, "ada", "height") == before
+    end
+
+    test "a moment that has happened is always reopenable", %{world: world} do
+      # The bound must refuse exactly the future — every past transaction,
+      # including zero, is a moment that happened.
+      {:ok, _} = World.append(world, [{"ada", "height", 10}])
+      name = World.name_of(world)
+
+      for tx <- 0..World.tx(world) do
+        assert {:ok, _} = Snapshot.reopen(%{name => tx})
+      end
     end
   end
 
