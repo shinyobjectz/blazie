@@ -42,7 +42,7 @@ defmodule Blazie.ConverseRequiresTest do
     fn _reference, _messages, _tools, _opts ->
       at = :counters.get(held, 1)
       :counters.add(held, 1, 1)
-      {:ok, {:said, Enum.at(answers, at, List.last(answers))}}
+      {:ok, {:said, Enum.at(answers, at, List.last(answers))}, %{in: 7, out: 3}}
     end
   end
 
@@ -73,8 +73,8 @@ defmodule Blazie.ConverseRequiresTest do
       :ets.insert(seen, {:turn, messages})
 
       if length(messages) > 1,
-        do: {:ok, {:said, "short"}},
-        else: {:ok, {:said, "far too long for this"}}
+        do: {:ok, {:said, "short"}, %{in: 1, out: 1}},
+        else: {:ok, {:said, "far too long for this"}, %{in: 1, out: 1}}
     end
 
     assert {:ok, "short", []} =

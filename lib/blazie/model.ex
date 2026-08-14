@@ -40,6 +40,19 @@ defmodule Blazie.Model do
   @type refusal :: %{problem: atom(), repair: String.t()}
 
   @doc """
+  The attributes a model call is written down with.
+
+  Beside `Spend.seed/0` rather than inside it: what a call cost and what a call
+  WAS are different statements, and one of them was already spoken for.
+  """
+  @spec seed() :: [tuple()]
+  def seed do
+    Blazie.Attribute.define("asked", answers: "any", cardinality: "many") ++
+      Blazie.Attribute.define("answered", answers: "any", cardinality: "many") ++
+      Blazie.Attribute.define("took_ms", answers: "integer", cardinality: "many")
+  end
+
+  @doc """
   Ask a model for text.
 
       Blazie.Model.generate("openai:gpt-4o-mini", "Say hello")
@@ -144,14 +157,19 @@ defmodule Blazie.Model do
   end
 
   defp turn(reference, messages, tools, run, opts, left, tries, made) do
+    asked_at = System.monotonic_time(:millisecond)
+
     case speaking(reference, opts).(reference, messages, tools, opts) do
       {:error, refusal} ->
         {:error, refusal}
 
-      {:ok, {:said, said}} ->
+      {:ok, {:said, said}, spent} ->
+        record(reference, opts, messages, said, spent, asked_at)
         answered(reference, messages, tools, run, opts, left, tries, made, said)
 
-      {:ok, {:calls, calls}} ->
+      {:ok, {:calls, calls}, spent} ->
+        record(reference, opts, messages, calls, spent, asked_at)
+
         {results, made} =
           Enum.reduce(calls, {[], made}, fn call, {results, made} ->
             answered =
@@ -175,6 +193,61 @@ defmodule Blazie.Model do
         )
     end
   end
+
+  # Every model call, written down where it happened.
+  #
+  # Given `into:` and `by:`, a turn lands as facts: which model, what it was
+  # asked, what came back, what it cost and how long it took. So "what did this
+  # agent do, and what did it cost" is a query over a world rather than a
+  # metrics system somebody has to keep in step — the position `Spend` already
+  # took for tokens, extended to the call that spent them.
+  #
+  # `Spend` existed and nothing called it. A module tested in isolation and
+  # wired to nothing is the same failure as a check that runs beside the thing
+  # rather than on it, and this is the wire.
+  #
+  # Best effort: a trajectory that could not be written must not fail the work
+  # it was describing. A silent gap in a trace is bad; a run that dies because
+  # its diary was full is worse.
+  defp record(reference, opts, messages, answer, spent, asked_at) do
+    with world when not is_nil(world) <- Keyword.get(opts, :into),
+         by when not is_nil(by) <- Keyword.get(opts, :by) do
+      took = System.monotonic_time(:millisecond) - asked_at
+
+      Blazie.World.append(
+        world,
+        [
+          {by, "asked", asking(messages), by},
+          {by, "answered", answering(answer), by},
+          {by, "took_ms", took, by}
+        ] ++ Blazie.Spend.of(by, spent, by, named(reference))
+      )
+    end
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  defp named(%Reference{provider: provider, name: name}), do: "#{provider}:#{name}"
+
+  # The last thing said to the model, not the whole conversation. A turn is
+  # already a fact per call, so writing the accumulated messages every time
+  # would store the same prefix once per turn — quadratic in a long run, and the
+  # earlier turns are already there to be read in order.
+  defp asking(messages) do
+    case List.last(messages) do
+      %{"content" => content} when is_binary(content) -> content
+      other -> inspect(other)
+    end
+  end
+
+  defp answering(said) when is_binary(said), do: said
+
+  defp answering(calls) when is_list(calls),
+    do: Enum.map_join(calls, ", ", fn call -> "#{call.name}(#{inspect(call.arguments)})" end)
+
+  defp answering(other), do: inspect(other)
 
   # Who answers. `provider:` is a seam, and it earns its keep: the loop was
   # covered by a test that reimplemented it — a `FakeLoop` with its own copy of

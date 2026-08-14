@@ -43,6 +43,20 @@ defmodule Blazie.Spend do
   end
 
   @doc """
+  The same, naming the model that spent it.
+
+  `model` was in `seed/0` from the start and nothing ever wrote it, so "what did
+  gpt-4o-mini cost us" was a question the vocabulary could ask and the data
+  could not answer. A declared attribute nobody writes is the same defect as a
+  declared shape nobody checks.
+  """
+  @spec of(term(), %{in: non_neg_integer(), out: non_neg_integer()}, term(), String.t()) ::
+          [tuple()]
+  def of(id, spent, by, model) when is_binary(model) do
+    of(id, spent, by) ++ [{id, "model", model, by}]
+  end
+
+  @doc """
   Everything one id has spent, ever.
 
   Summed from the facts rather than kept as a counter. A counter is a second

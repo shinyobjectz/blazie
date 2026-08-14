@@ -32,7 +32,7 @@ defmodule Blazie.Model.Provider do
   it wrong.
   """
   @callback converse(Reference.t(), [map()], [map()], keyword()) ::
-              {:ok, {:said, String.t()} | {:calls, [map()]}} | {:error, refusal()}
+              {:ok, {:said, String.t()} | {:calls, [map()]}, usage()} | {:error, refusal()}
 
   @optional_callbacks converse: 4
 
@@ -101,7 +101,10 @@ defmodule Blazie.Model.Provider do
   rather than guessed at: a spend of zero means "not reported", and a budget
   built on guesses would refuse the wrong runs.
   """
-  @spec spent(map()) :: %{in: non_neg_integer(), out: non_neg_integer()}
+  @typedoc "What a turn cost, as the provider reported it. Zero means not reported."
+  @type usage :: %{in: non_neg_integer(), out: non_neg_integer()}
+
+  @spec spent(map()) :: usage()
   def spent(%{"usage" => usage}) when is_map(usage) do
     %{
       in: Map.get(usage, "prompt_tokens") || Map.get(usage, "input_tokens") || 0,

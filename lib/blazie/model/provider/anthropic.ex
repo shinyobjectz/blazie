@@ -82,7 +82,10 @@ defmodule Blazie.Model.Provider.Anthropic do
       |> put_system(system)
 
     with {:ok, answered} <- Provider.post(url(opts, "/messages"), headers(opts), body) do
-      turn(answered)
+      case turn(answered) do
+        {:ok, said} -> {:ok, said, Provider.spent(answered)}
+        {:error, refusal} -> {:error, refusal}
+      end
     end
   end
 

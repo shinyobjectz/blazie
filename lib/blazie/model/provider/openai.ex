@@ -71,7 +71,10 @@ defmodule Blazie.Model.Provider.OpenAI do
     }
 
     with {:ok, answered} <- Provider.post(url(opts, "/chat/completions"), headers(opts), body) do
-      turn(answered)
+      case turn(answered) do
+        {:ok, said} -> {:ok, said, Provider.spent(answered)}
+        {:error, refusal} -> {:error, refusal}
+      end
     end
   end
 
