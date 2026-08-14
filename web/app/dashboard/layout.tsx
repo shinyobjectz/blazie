@@ -110,12 +110,14 @@ export default function DashboardLayout({
             ) : (
               <DropdownMenu>
                 <DropdownMenuTrigger className="font-mono inline-flex items-center gap-2 rounded-md border border-border py-1 pl-1 pr-3 text-xs text-white transition-colors hover:border-white/40 hover:bg-white/5">
-                  {/* The one avatar worth a shader: it is the answer to "which
-                      world am I writing into", and it is on screen on every
-                      page whether or not the menu is ever opened. */}
-                  {held.world ? (
-                    <WorldAvatar live world={held.world} />
-                  ) : null}
+                  {/* The same props as the rows below, deliberately. The
+                      trigger was `live` at the default size while the menu drew
+                      still ones at `sm`, so the world you were looking at and
+                      the same world one click away were a shader and a gradient
+                      at two different sizes — the one place a reader compares
+                      them directly. An avatar that means "this world" has to be
+                      the same picture wherever it says it. */}
+                  {held.world ? <WorldAvatar size="sm" world={held.world} /> : null}
                   {held.world ?? "choose a world"}
                   <ChevronDown className="size-3.5 text-muted-foreground" />
                 </DropdownMenuTrigger>

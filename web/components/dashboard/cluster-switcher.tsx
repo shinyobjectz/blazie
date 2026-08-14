@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { WorldAvatar } from "@/components/ui/world-avatar"
+import { ClusterMark } from "@/components/ui/cluster-mark"
 import type { Cluster } from "@/lib/blazie"
 import { cn } from "@/lib/utils"
 
@@ -26,8 +26,12 @@ import { cn } from "@/lib/utils"
  * every page shares. A logo tells you what you already know. This tells you
  * whether the number below is production.
  *
- * The avatar is derived from the cluster's name by the same function that draws
- * a world's, so two clusters are told apart by colour before they are read.
+ * The mark is a `ClusterMark`, not a world's avatar. It used to be the latter,
+ * which drew a cluster as a planet — a circle, and at size a running shader —
+ * so the two kinds of thing this console holds looked like one kind. A cluster
+ * HOLDS worlds; if they wear the same face the sidebar says the opposite of
+ * what the model means. It also spent one of the six WebGL contexts a tab has,
+ * from a component that is on every page, for something that is not a world.
  */
 export function ClusterSwitcher() {
   const { clusters, cluster, chooseCluster } = useCluster()
@@ -52,7 +56,7 @@ export function ClusterSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex h-full w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-raised">
-        <WorldAvatar world={cluster.name} size="sm" />
+        <ClusterMark name={cluster.name} size="md" />
 
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium tracking-tight text-white">
@@ -75,7 +79,7 @@ export function ClusterSwitcher() {
             onSelect={() => chooseCluster(held.id)}
             className="gap-2"
           >
-            <WorldAvatar world={held.name} size="sm" />
+            <ClusterMark name={held.name} size="sm" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm">{held.name}</span>
               <State cluster={held} />

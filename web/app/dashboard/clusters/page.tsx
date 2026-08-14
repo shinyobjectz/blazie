@@ -5,7 +5,7 @@ import { useEffect, useState } from "react"
 
 import { OpenCluster } from "@/components/dashboard/open-cluster"
 import { Nothing, PageHead } from "@/components/dashboard/page-shell"
-import { WorldAvatar } from "@/components/ui/world-avatar"
+import { ClusterMark } from "@/components/ui/cluster-mark"
 import { type Cluster, forgetCluster, look } from "@/lib/blazie"
 import { cn } from "@/lib/utils"
 
@@ -93,7 +93,7 @@ function Card({
   return (
     <div className={cn("bg-background p-5", chosen && "bg-raised/40")}>
       <button type="button" onClick={onChoose} className="flex w-full items-center gap-3 text-left">
-        <WorldAvatar world={cluster.name} size="lg" live={chosen} />
+        <ClusterMark name={cluster.name} size="lg" />
 
         <span className="min-w-0 flex-1">
           <span className="block truncate text-base font-medium tracking-tight text-white">

@@ -5,8 +5,7 @@ import Link from "next/link"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useInView } from "motion/react"
 
-import { Nothing, PageHead } from "@/components/dashboard/page-shell"
-import { CopyButton } from "@/components/ui/copy-button"
+import { Nothing } from "@/components/dashboard/page-shell"
 import { RefusalNote } from "@/components/ui/refusal-note"
 import { WorldSystem } from "@/components/ui/world-system"
 import { showCount, showWhen } from "@/lib/format"
@@ -159,9 +158,7 @@ export default function Orbit() {
 
   if (ordered.length === 0) {
     return (
-      <>
-        <Head />
-        <Nothing icon={OrbitIcon} title="nothing in the sky yet">
+      <Nothing icon={OrbitIcon} title="nothing in the sky yet">
           a world is where data lives.{" "}
           <Link
             href="/dashboard/ordered"
@@ -169,21 +166,23 @@ export default function Orbit() {
           >
             make one
           </Link>{" "}
-          and it appears here, with whatever you put in orbit around it.
-        </Nothing>
-      </>
+        and it appears here, with whatever you put in orbit around it.
+      </Nothing>
     )
   }
 
   const open = looking ? answers[looking.world] : undefined
 
   return (
-    <>
-      <Head />
-
+    // Full bleed, and the negative margins are how: the console pads every page
+    // and the sky is the one page whose subject IS the space. A bordered box
+    // inside a padded column made it a picture of a sky on a page; this makes
+    // the page the sky, and everything that was a heading above it becomes a
+    // badge floating on it.
+    <div className="-mx-6 -my-8 h-[calc(100svh-3.5rem)]">
       <div
         ref={viewport}
-        className="relative aspect-video min-h-96 w-full touch-none select-none overflow-hidden rounded-lg border border-border bg-background"
+        className="relative h-full w-full touch-none select-none overflow-hidden bg-background"
         onPointerDown={(event) => {
           dragging.current = { x: event.clientX - pan.x, y: event.clientY - pan.y }
           moved.current = false
@@ -239,18 +238,23 @@ export default function Orbit() {
           })}
         </div>
 
+        {/* Chrome, floating. Everything here used to be a block of page above
+            and below the sky; as badges it stays legible and stops competing
+            with the thing it describes. */}
+        <Head />
+
         <div className="absolute right-3 top-3 flex flex-col gap-1">
           <Handle
             label="closer"
             onClick={() => setZoom((was) => Math.min(ZOOM.most, was + ZOOM.step))}
           >
-            <Plus className="size-4" />
+            <Plus className="size-3.5" />
           </Handle>
           <Handle
             label="further out"
             onClick={() => setZoom((was) => Math.max(ZOOM.least, was - ZOOM.step))}
           >
-            <Minus className="size-4" />
+            <Minus className="size-3.5" />
           </Handle>
           <Handle
             label="back to the middle"
@@ -259,12 +263,14 @@ export default function Orbit() {
               setPan({ x: 0, y: 0 })
             }}
           >
-            <Crosshair className="size-4" />
+            <Crosshair className="size-3.5" />
           </Handle>
         </div>
 
-        <p className="font-mono pointer-events-none absolute bottom-3 left-3 text-xs text-muted-foreground">
-          drag to move · ⌘ or ctrl and scroll to zoom · click a planet to show it
+        <Legend answers={answers} />
+
+        <p className="font-mono pointer-events-none absolute bottom-3 right-3 text-[10px] text-muted-foreground/70">
+          drag · ⌘/ctrl+scroll to zoom · click a planet
         </p>
 
         {looking ? (
@@ -277,34 +283,27 @@ export default function Orbit() {
           />
         ) : null}
       </div>
-
-      <Legend answers={answers} />
-
-      <details className="mt-10 rounded-lg border border-border">
-        <summary className="cursor-pointer px-4 py-3 text-sm text-muted-foreground transition-colors hover:text-white">
-          the lua this page ran, once per world
-        </summary>
-        <div className="relative border-t border-border">
-          <div className="absolute right-2 top-2">
-            <CopyButton value={ORBIT} />
-          </div>
-          <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-white/80">
-            {ORBIT}
-          </pre>
-        </div>
-      </details>
-    </>
+    </div>
   )
 }
 
+/**
+ * The title, as a badge on the sky rather than a heading above it.
+ *
+ * The explanation moved into a tooltip. On a page whose whole subject is space,
+ * four lines of prose permanently occupying the top of it is the one thing
+ * guaranteed to be read once and then be in the way forever.
+ */
 function Head() {
   return (
-    <PageHead title="orbit">
-      every world you hold, and what acts on it. a planet is sized by how much
-      data is in it; each ring is a kind of thing that circles it, further out
-      the further it reaches outside the world. everything here was counted by
-      asking the world itself.
-    </PageHead>
+    <div
+      className="pointer-events-auto absolute left-3 top-3 flex items-center gap-2 rounded-md border border-border bg-background/70 px-2.5 py-1.5 backdrop-blur"
+      title="every world you hold, and what acts on it. a planet is sized by how much data is in it; each ring is a kind of thing that circles it, further out the further it reaches outside the world. everything here was counted by asking the world itself."
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <OrbitIcon className="size-3.5 text-muted-foreground" />
+      <span className="font-mono text-xs text-white">orbit</span>
+    </div>
   )
 }
 
@@ -326,7 +325,7 @@ function Handle({
       // The sky under this is a drag target, and a pointerdown that starts on a
       // button would otherwise begin a pan and end as a click on nothing.
       onPointerDown={(event) => event.stopPropagation()}
-      className="flex size-8 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground transition-colors hover:border-white/30 hover:text-white"
+      className="flex size-7 items-center justify-center rounded-md border border-border bg-background/70 text-muted-foreground backdrop-blur transition-colors hover:border-white/30 hover:text-white"
     >
       {children}
     </button>
@@ -532,19 +531,27 @@ function Legend({ answers }: { answers: Record<string, Answer> }) {
   const held = Object.values(answers).map((answer) => answer.census)
 
   return (
-    <div className="mt-6 grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 lg:grid-cols-5">
+    // Five cards of prose became five chips. The totals are the part worth
+    // having on screen at all times; what each band MEANS is a thing you read
+    // once, so it is a tooltip now rather than a paragraph competing with the
+    // sky it is describing.
+    <div
+      className="absolute bottom-3 left-3 flex flex-wrap gap-1.5"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
       {BANDS.map((band) => {
         const across = held.reduce((sum, census) => sum + countOf(census, band.kind), 0)
 
         return (
-          <div className="bg-background p-4" key={band.kind}>
-            <div className="flex items-baseline gap-2">
-              <span aria-hidden className={cn("size-2 shrink-0 self-center", band.mark)} />
-              <span className="font-mono text-sm text-white">{showCount(across)}</span>
-              <span className={cn("text-sm", band.ink)}>{band.label}</span>
-            </div>
-            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{band.reach}</p>
-          </div>
+          <span
+            key={band.kind}
+            title={band.reach}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-background/70 px-2 py-1 backdrop-blur"
+          >
+            <span aria-hidden className={cn("size-1.5 shrink-0", band.mark)} />
+            <span className="font-mono text-xs text-white">{showCount(across)}</span>
+            <span className={cn("text-xs", band.ink)}>{band.label}</span>
+          </span>
         )
       })}
     </div>
