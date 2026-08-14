@@ -59,12 +59,19 @@ defmodule Blazie.Tool do
   """
   @spec declare(String.t(), keyword()) :: [tuple()]
   def declare(id, opts) do
+    # Optional, because the other way to have a body is to BE a module —
+    # `Sandbox.declare/3` supplies an `image` instead. Required here, a tool
+    # could only ever be Lua written in this tree, which is the trusted case;
+    # the untrusted one is the whole reason a sandbox exists.
     [
       {id, "is", "job"},
       {id, "describe", Keyword.fetch!(opts, :describe)},
-      {id, "takes", encode_takes(Keyword.get(opts, :takes, []))},
-      {id, "source", Keyword.fetch!(opts, :source)}
-    ]
+      {id, "takes", encode_takes(Keyword.get(opts, :takes, []))}
+    ] ++
+      case Keyword.get(opts, :source) do
+        nil -> []
+        source -> [{id, "source", source}]
+      end
   end
 
   @doc "The tools one field may use, as a model needs to see them."
@@ -104,9 +111,67 @@ defmodule Blazie.Tool do
   """
   @spec run(Snapshot.t(), map(), keyword()) :: {:ok, map()} | {:error, map()}
   def run(%Snapshot{} = snapshot, call, opts \\ []) do
+    # A tool is a declared job, and a job whose work arrived as a module runs in
+    # the sandbox. That sentence was true of `Job` and not of this function,
+    # which read `source` and nothing else — so `Job` reached the sandbox and
+    # `Tool` could not, and a tool could only ever be Lua somebody here wrote.
+    #
+    # Which is the wrong way round. Lua authored in this tree is the trusted
+    # case; a module is the untrusted one, and the untrusted one is exactly what
+    # an agent must not be able to run outside the sandbox.
+    case Snapshot.value(snapshot, call.name, "image") do
+      %Blazie.Blob{} = image -> sandboxed(snapshot, call, image, opts)
+      _ -> from_source(snapshot, call, opts)
+    end
+  end
+
+  # Fuel and memory come off the declaration, the same attributes a sandboxed
+  # job already uses. A tool that declares neither gets `Sandbox`'s defaults,
+  # and fuel is not optional there — it is the only thing that stops a guest,
+  # because a NIF runs to completion and no supervisor reaches inside one.
+  defp sandboxed(snapshot, call, image, opts) do
+    limits =
+      for field <- [:fuel, :memory_bytes],
+          value = Snapshot.value(snapshot, call.name, to_string(field)),
+          is_integer(value),
+          do: {field, value}
+
+    with {:ok, bytes} <- fetch(image, opts),
+         {:ok, answer, _spent} <- Blazie.Sandbox.run(bytes, call.arguments, limits) do
+      {:ok, if(is_map(answer), do: answer, else: %{"answer" => answer})}
+    end
+  end
+
+  defp fetch(image, opts) do
+    case Keyword.get(opts, :bytes) do
+      given when is_binary(given) ->
+        {:ok, given}
+
+      _ ->
+        target = Keyword.get(opts, :target) || Application.get_env(:blazie, :blob_target)
+
+        case target do
+          {module, target_opts} ->
+            Blazie.Blob.fetch(image, module, target_opts)
+
+          _ ->
+            {:error,
+             %{
+               problem: :nowhere_to_fetch,
+               repair: "No blob target is configured, so this tool's module cannot be read."
+             }}
+        end
+    end
+  end
+
+  defp from_source(%Snapshot{} = snapshot, call, opts) do
     case Snapshot.value(snapshot, call.name, "source") do
       nil ->
-        {:error, %{problem: :no_such_tool, repair: "#{call.name} is declared with no source."}}
+        {:error,
+         %{
+           problem: :no_such_tool,
+           repair: "#{call.name} is declared with neither a `source` nor an `image`."
+         }}
 
       source ->
         prelude = "args = " <> lua(call.arguments) <> "\nanswer = {}\n"
