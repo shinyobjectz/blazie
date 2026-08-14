@@ -203,6 +203,53 @@ export function worldsOn(cluster: string) {
   )
 }
 
+/**
+ * Keep answering a chunk, and be told when the answer changes.
+ *
+ * A cluster re-runs the chunk every time a fact lands inside what it read, and
+ * pushes the new answer. This reaches it through the control plane, which holds
+ * the socket so the browser never holds the cluster's token.
+ *
+ * Returns what stops it. A watch left running re-answers a chunk for nobody, so
+ * closing it is not tidiness — it is the cluster's work.
+ */
+export function watch(
+  cluster: string,
+  world: string,
+  source: string,
+  said: {
+    answer: (value: Value, name: SnapshotName) => void
+    refused?: (refusal: { problem?: string; repair?: string }) => void
+    ended?: (why: string) => void
+  },
+): () => void {
+  const where = new URL(`/api/clusters/${encodeURIComponent(cluster)}/watch`, window.location.origin)
+  where.searchParams.set("world", world)
+  where.searchParams.set("source", source)
+
+  const stream = new EventSource(where.toString())
+
+  stream.addEventListener("answer", (message) => {
+    const payload = JSON.parse((message as MessageEvent).data) as {
+      value: Value
+      name: SnapshotName
+    }
+    said.answer(payload.value, payload.name)
+  })
+
+  stream.addEventListener("refused", (message) => {
+    said.refused?.(JSON.parse((message as MessageEvent).data))
+    stream.close()
+  })
+
+  stream.addEventListener("ended", (message) => {
+    said.ended?.(JSON.parse((message as MessageEvent).data).why)
+    stream.close()
+  })
+
+  return () => stream.close()
+}
+
 /** Take a world name on a cluster. First come, and yours once taken. */
 export function claim(cluster: string, world: string) {
   return send<{ world: string; name: SnapshotName }>(

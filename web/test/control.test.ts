@@ -22,6 +22,7 @@ import { after, before, describe, it } from "node:test"
 
 import { asHostname, mintToken, same } from "../lib/control/clusters.ts"
 import { type Held, shown } from "../lib/control/model.ts"
+import * as phoenix from "../lib/control/phoenix.ts"
 import * as tunnel from "../lib/control/tunnel.ts"
 import * as upcloud from "../lib/control/upcloud.ts"
 
@@ -638,5 +639,50 @@ describe("what the machine is told to do", () => {
     // A blank one configures a destination that does not exist and fails on the
     // first cadence rather than at boot, which is the worse of the two.
     assert.equal(/BACKUP_BUCKET=/.test(rendered), false)
+  })
+})
+
+/* ----------------------------------------------------------------- watching */
+
+describe("speaking phoenix's channel protocol", () => {
+  it("frames as a positional array, which is what the wire wants", () => {
+    // `[join_ref, ref, topic, event, payload]`. A wire format rather than an
+    // API, so it is written down once instead of inferred at three call sites.
+    assert.deepEqual(JSON.parse(phoenix.joining("watch:x", "main", "return 1")), [
+      "1",
+      "1",
+      "watch:x",
+      "phx_join",
+      { world: "main", source: "return 1" },
+    ])
+  })
+
+  it("beats, because phoenix drops a socket that stops talking", () => {
+    assert.deepEqual(JSON.parse(phoenix.heartbeat(7)), [null, "7", "phoenix", "heartbeat", {}])
+    // The server times out at 60s, so one missed beat survives and two do not.
+    assert.ok(phoenix.HEARTBEAT_MS < 60_000 / 2 + 1)
+  })
+
+  it("carries the token in the socket url, where the browser never sees it", () => {
+    const url = new URL(phoenix.socketUrl("https://atlas.blazie.dev", "THE-TOKEN"))
+
+    assert.equal(url.pathname, "/socket/websocket")
+    assert.equal(url.searchParams.get("token"), "THE-TOKEN")
+    // Phoenix refuses a socket that does not say which protocol it speaks.
+    assert.equal(url.searchParams.get("vsn"), "2.0.0")
+    // `https`, not `wss` — a Worker upgrades an https fetch; wss is what a
+    // browser would dial and is not what happens here.
+    assert.equal(url.protocol, "https:")
+  })
+
+  it("reads a frame back, and refuses anything that is not one", () => {
+    assert.deepEqual(phoenix.readFrame('["1","1","t","e",{"a":1}]'), ["1", "1", "t", "e", { a: 1 }])
+    assert.equal(phoenix.readFrame("not json"), null)
+    assert.equal(phoenix.readFrame('{"not":"an array"}'), null)
+    assert.equal(phoenix.readFrame('["too","short"]'), null)
+  })
+
+  it("names its events, so a browser can tell an answer from a refusal", () => {
+    assert.equal(phoenix.event("answer", { value: 1 }), 'event: answer\ndata: {"value":1}\n\n')
   })
 })
