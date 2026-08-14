@@ -1,0 +1,15 @@
+{
+  // The tests run under node and exercise worker code, so they need both sets of
+  // globals: `node:test` and `KVNamespace`. Its own project rather than folded
+  // into either, because the app is a browser, the functions are a worker, and
+  // this is neither.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "@cloudflare/workers-types"],
+    "lib": ["ES2023", "DOM"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["**/*.ts", "../lib/control/**/*.ts"],
+  "exclude": ["../node_modules"]
+}

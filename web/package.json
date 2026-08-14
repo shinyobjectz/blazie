@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --import ./test/run.ts --test test/*.test.ts"
+    "test": "pnpm typecheck && node --experimental-strip-types --import ./test/run.ts --test test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p functions/tsconfig.json && tsc --noEmit -p test/tsconfig.json"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.80",

@@ -198,7 +198,7 @@ export function run(
 
 /** Which worlds this caller may name on that cluster. */
 export function worldsOn(cluster: string) {
-  return send<{ caller: string; login: string | null; worlds: string[] }>(
+  return send<{ caller: string; worlds: string[] }>(
     `/api/clusters/${encodeURIComponent(cluster)}/me`,
   )
 }

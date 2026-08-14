@@ -32,13 +32,10 @@ defmodule Blazie.Surface.Router do
     plug(Blazie.Surface.Authorize, names: false)
   end
 
-  scope "/auth", Blazie.Surface do
-    pipe_through(:open_door)
-
-    post("/github", IdentityController, :github)
-    post("/device", IdentityController, :device)
-    post("/device/token", IdentityController, :device_token)
-  end
+  # There is no `/auth` here any more. Signing in belongs to the control plane,
+  # which is served beside the console and holds the github secret — a cluster
+  # that also traded oauth codes would be shipping a credential it cannot use
+  # and an endpoint nobody calls, which is the definition of attack surface.
 
   scope "/", Blazie.Surface do
     pipe_through(:claiming)
@@ -49,7 +46,7 @@ defmodule Blazie.Surface.Router do
   scope "/", Blazie.Surface do
     pipe_through(:api)
 
-    get("/me", IdentityController, :me)
+    get("/me", Controller, :me)
 
     post("/run", Controller, :run)
   end

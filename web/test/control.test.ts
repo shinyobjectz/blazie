@@ -55,7 +55,9 @@ function bodyOf<T>(one: Sent): T {
 }
 
 let sent: Sent[] = []
-let answers: (() => { ok: boolean; status?: number; body: unknown })[] = []
+type Answer = { ok: boolean; status?: number; body: unknown }
+
+let answers: (() => Answer)[] = []
 const realFetch = globalThis.fetch
 
 function stub() {
@@ -74,7 +76,8 @@ function stub() {
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
 
-    const next = answers.shift() ?? (() => ({ ok: true, body: { success: true, result: {} } }))
+    const next: () => Answer =
+      answers.shift() ?? (() => ({ ok: true, body: { success: true, result: {} } }))
     const said = next()
 
     return {
@@ -86,7 +89,7 @@ function stub() {
 }
 
 /** Queue what the vendor answers, in order. */
-function answering(...these: { ok: boolean; status?: number; body: unknown }[]) {
+function answering(...these: Answer[]) {
   answers.push(...these.map((one) => () => one))
 }
 

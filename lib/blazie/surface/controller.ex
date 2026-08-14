@@ -1,6 +1,6 @@
 defmodule Blazie.Surface.Controller do
   @moduledoc """
-  Run, and claim. That is the whole of it.
+  Run, claim, and say who you are. That is the whole of it.
 
   There used to be `open`, `ask` and `write` here, and between them they asked a
   caller to know what a fact is, what a pattern is, and that a snapshot's name is
@@ -62,6 +62,24 @@ defmodule Blazie.Surface.Controller do
         problem: :incomplete_request,
         repair: "Running needs `world` and `source`: where to run, and the Lua to run."
       })
+
+  @doc """
+  Who this caller is, and what it may name.
+
+  A caller is a token's fingerprint and a list of worlds, and that is the whole
+  of it. There used to be a github login here too, read from `$identities` — but
+  identity moved to the control plane, and a cluster that answered "who are you"
+  with a github handle would be answering from a copy of something it is not the
+  record of.
+  """
+  def me(conn, _params) do
+    token = conn.assigns[:caller]
+
+    json(conn, %{
+      "caller" => Authority.caller(token),
+      "worlds" => Authority.allowed(token)
+    })
+  end
 
   @doc """
   Claim a world name, and hold what you claimed.

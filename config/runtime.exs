@@ -14,37 +14,28 @@ if config_env() == :prod do
       is not in the repo on purpose.
       """
 
-  # TLS is optional and, when present, additional rather than instead. The node
-  # sits behind a proxy that terminates the public certificate; this encrypts
-  # the hop from that proxy to here, which otherwise crosses the internet in
-  # the clear carrying bearer tokens. A self-signed certificate is enough for
-  # that hop — the proxy is configured to trust this origin, not the world.
-  https =
-    case {System.get_env("TLS_CERT"), System.get_env("TLS_KEY")} do
-      {cert, key} when is_binary(cert) and is_binary(key) ->
-        [
-          https: [
-            ip: {0, 0, 0, 0, 0, 0, 0, 0},
-            port: String.to_integer(System.get_env("TLS_PORT") || "4443"),
-            certfile: cert,
-            keyfile: key
-          ]
-        ]
-
-      _ ->
-        []
-    end
+  # No TLS here, because nothing reaches this over the internet.
+  #
+  # A cluster serves plaintext on loopback and `cloudflared` dials out, making
+  # its own encrypted connection to Cloudflare — so the hop this used to protect
+  # does not exist. The listener is bound inside a container published only to
+  # 127.0.0.1, which is where the plaintext stops.
+  #
+  # What went with it is worth naming, because it was expensive: TLS_CERT,
+  # TLS_KEY and TLS_PORT existed for the hand-built node that WAS reachable
+  # directly, and getting them right cost an afternoon and a strict-SSL outage
+  # over a Cloudflare origin certificate. A tunnelled cluster needs no
+  # certificate at all — there is nothing to issue, install, renew, or get
+  # wrong.
 
   config :blazie,
          Blazie.Surface.Endpoint,
-         [
-           server: true,
-           secret_key_base: secret,
-           http: [
-             ip: {0, 0, 0, 0, 0, 0, 0, 0},
-             port: String.to_integer(System.get_env("PORT") || "4000")
-           ]
-         ] ++ https
+         server: true,
+         secret_key_base: secret,
+         http: [
+           ip: {0, 0, 0, 0, 0, 0, 0, 0},
+           port: String.to_integer(System.get_env("PORT") || "4000")
+         ]
 
   # Where ledgers keep their facts. The store is the seam, so moving this to
   # object storage later is a different module rather than a different path.
@@ -108,21 +99,10 @@ if config_env() == :prod do
     )
   end
 
-  # Who may sign in, and how. The secret is read from the environment and never
-  # written down here — a checked-in secret is a secret nobody has.
-  config :blazie,
-    github_client_id: System.get_env("GITHUB_CLIENT_ID"),
-    github_client_secret: System.get_env("GITHUB_CLIENT_SECRET"),
-    github_logins:
-      (System.get_env("GITHUB_LOGINS") || "")
-      |> String.split(",", trim: true)
-      |> Enum.map(&String.trim/1)
-
-  if System.get_env("GITHUB_CLIENT_ID") == nil do
-    IO.warn(
-      "GITHUB_CLIENT_ID is not set, so nobody can sign in. The four operations still work for a token issued another way."
-    )
-  end
+  # No github here. Signing in is the control plane's, which is what makes
+  # "no clusters yet" a state you can be in: asking a cluster to trade an oauth
+  # code meant holding no cluster left you unable to reach the page that would
+  # have let you open one.
 
   if System.get_env("KEY_DIR") == nil do
     IO.warn(
