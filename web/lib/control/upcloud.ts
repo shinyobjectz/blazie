@@ -644,15 +644,27 @@ ${backupEnv(opening)}
       # A container that stayed up is not a tunnel that connected — the
       # difference cost a provision that reported it while Cloudflare
       # served 1033. cloudflared says so in its own log when it registers.
+      #
+      # Read into a variable and matched with \`case\`, NOT piped into \`grep -q\`.
+      # \`grep -q\` exits the moment it matches, which SIGPIPEs the producer for
+      # 141 — and under \`pipefail\` that makes the whole pipeline non-zero. So
+      # finding the line is what made the test fail. The loop ran all 45 rounds,
+      # the check after it took its failing branch, and four provisions reported
+      # "cloudflared never registered" while attaching a log that showed it
+      # registering four connections ninety seconds earlier. One of those was
+      # believed and a working cluster was destroyed.
+      registered=""
       for i in $(seq 1 45); do
-        docker logs tunnel 2>&1 | grep -q 'Registered tunnel connection' && break
-        docker ps --filter name=tunnel --filter status=running -q | grep -q . \\
-          || { say failed "cloudflared exited: $(docker logs --tail 60 tunnel 2>&1)"; exit 1; }
+        logs=$(docker logs tunnel 2>&1 || true)
+        case "$logs" in *"Registered tunnel connection"*) registered=yes; break;; esac
+
+        up=$(docker ps --filter name=tunnel --filter status=running -q || true)
+        [ -n "$up" ] || { say failed "cloudflared exited: $(docker logs --tail 60 tunnel 2>&1 || true)"; exit 1; }
         sleep 2
       done
 
-      docker logs tunnel 2>&1 | grep -q 'Registered tunnel connection' \\
-        || { say failed "cloudflared never registered: $(docker logs --tail 60 tunnel 2>&1)"; exit 1; }
+      [ -n "$registered" ] \\
+        || { say failed "cloudflared never registered: $(docker logs --tail 60 tunnel 2>&1 || true)"; exit 1; }
       say tunnelled
 
       # Asking what to run, on a timer. A cluster listens on nothing, so an

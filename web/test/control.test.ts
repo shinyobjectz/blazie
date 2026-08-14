@@ -841,6 +841,36 @@ describe("what the machine is told to do", () => {
     assert.match(out, /and some log/)
   })
 
+  it("never pipes into `grep -q` under pipefail, which inverts the test", () => {
+    // Demonstrated rather than asserted, because the reason is not obvious and
+    // a bare rule invites somebody to "simplify" it back. `grep -q` exits the
+    // instant it matches, SIGPIPEs the producer for 141, and under `pipefail`
+    // that makes the whole pipeline non-zero — so FINDING the line is what
+    // makes the test fail.
+    const dir = mkdtempSync(join(tmpdir(), "blazie-"))
+    const path = join(dir, "pipefail")
+
+    writeFileSync(
+      path,
+      [
+        "set -o pipefail",
+        "yes 'Registered tunnel connection' | head -100000 | grep -q Registered",
+        "echo piped=$?",
+        "logs=$(yes 'Registered tunnel connection' | head -10)",
+        "case \"$logs\" in *'Registered tunnel connection'*) echo cased=0;; *) echo cased=1;; esac",
+      ].join("\n"),
+    )
+
+    const out = String(execFileSync("bash", [path]))
+
+    assert.match(out, /cased=0/)
+
+    // Four provisions reported "cloudflared never registered" while attaching a
+    // log showing four connections registered ninety seconds earlier. One was
+    // believed, and a working cluster was destroyed.
+    assert.equal(script.includes("| grep -q"), false, "a pipeline into grep -q came back")
+  })
+
   it("writes an upgrade script that is also valid bash", () => {
     // A script inside a heredoc inside a script inside YAML. Checking only the
     // outer one would leave the inner one exactly as unchecked as the whole
