@@ -223,6 +223,22 @@ defmodule Blazie.Model do
         ] ++ Blazie.Spend.of(by, spent, by, named(reference))
       )
     end
+
+    # The same turn, said again in somebody else's language. Not conditional on
+    # `into:` — a caller with nowhere to keep facts may still be watched by a
+    # collector, and the two accounts answer different questions.
+    Blazie.Otel.span("model.converse", Keyword.get(opts, :by, "anonymous"),
+      took_ms: System.monotonic_time(:millisecond) - asked_at,
+      attributes: [
+        {"gen_ai.system", reference.provider},
+        {"gen_ai.request.model", reference.name},
+        {"gen_ai.usage.input_tokens", spent.in},
+        {"gen_ai.usage.output_tokens", spent.out},
+        {"blazie.answered", answering(answer) |> String.slice(0, 200)}
+      ]
+    )
+
+    :ok
   rescue
     _ -> :ok
   catch
