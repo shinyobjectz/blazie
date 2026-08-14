@@ -164,6 +164,13 @@ defmodule Blazie.Sandbox do
              {:ok, module} <- Wasmex.Module.compile(probe, bytes) do
           :persistent_term.put(key, {engine, module})
           {:ok, engine, module}
+        else
+          {:error, why} ->
+            {:error,
+             %{
+               problem: :will_not_load,
+               repair: "This module did not compile: #{String.slice(to_string(why), 0, 300)}"
+             }}
         end
     end
   end
