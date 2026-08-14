@@ -28,7 +28,6 @@ defmodule Blazie.PromiseLedgerTest do
 
   # The ledger: file => {phrase it admits, the ticket or decision that owns it}.
   @owned %{
-    "lib/blazie/job.ex" => {"Not yet true", "bla-pwjm"},
     "lib/blazie/store.ex" => {"neither of those is here yet", "bla-pp24"},
     "lib/blazie/cluster.ex" =>
       {"deliberately not implemented",

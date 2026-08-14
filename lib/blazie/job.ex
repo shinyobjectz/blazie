@@ -32,11 +32,16 @@ defmodule Blazie.Job do
   something these functions fetch. That keeps `due?/3` a pure function of a
   snapshot and a moment, and confines the impurity to the caller at the edge.
 
-  ## Not yet true
+  ## Doctrine 14, now enforced in one place
 
-  Doctrine 14 says a formula and a job run in the same sandbox and only the job
-  is handed network. Nothing here enforces that — there is no sandbox yet. This
-  module is the shape that boundary will sit on, not the boundary.
+  A formula and a job run in the same sandbox and differ in exactly one thing:
+  a job is handed the network, a formula is not. For a Lua guest that sandbox
+  is `Blazie.Lua.world/2` — it strips everything that reaches, then hands back
+  only what `Blazie.Lua.capabilities/1` names for the kind. For a wasm guest
+  it is `Blazie.Sandbox`, fenced by the absence of imports and, under WASI, by
+  a preview-1 platform that has no sockets to grant. So the network decision
+  is one function both paths read, not two fences that must agree — and this
+  module hands its work to `as: :job`, which is the flag that opens it.
   """
 
   alias Blazie.{Attribute, Snapshot, World}

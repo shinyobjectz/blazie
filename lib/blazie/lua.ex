@@ -191,21 +191,38 @@ defmodule Blazie.Lua do
   # The substituted clock is also more useful than no clock: "as of this data"
   # is a question a formula should be able to ask, and `at` is exactly that
   # moment rather than the moment somebody happened to run it.
-  defp grant(state, :formula, at) do
-    {_, state} = :luerl.set_table_keys(["os", "time"], {:erl_func, frozen(at)}, state)
-    {_, state} = :luerl.set_table_keys(["os", "clock"], {:erl_func, frozen(0)}, state)
+  @doc """
+  What a guest of this kind may reach — the ONE place doctrine 14 lives.
 
-    # Deterministic, not fixed: a different snapshot is a different sequence.
-    {:ok, _, state} = :luerl.do("math.randomseed(#{seed(at)})", state)
-    state
-  end
+  A formula and a job run in the same sandbox and differ in exactly this: a
+  job is handed the network (and the real clock its network answers travel
+  with), a formula is not. `grant/3` reads this and hands back only what it
+  names; `Blazie.Sandbox` honors the same map for a wasm guest, where WASI
+  preview 1 makes `network` a promise the platform keeps for free (there are
+  no sockets to grant). So "may this reach out" is answered by one function
+  rather than inferred from two fences that have to agree.
+  """
+  @spec capabilities(:formula | :job) :: %{network: boolean(), clock: :frozen | :real}
+  def capabilities(:formula), do: %{network: false, clock: :frozen}
+  def capabilities(:job), do: %{network: true, clock: :real}
 
-  # A job keeps the real ones. Its answer happened once and was never
-  # reproducible, so there is nothing for a frozen clock to protect.
-  defp grant(state, :job, _at) do
-    state
-    |> grant_http()
-    |> grant_blob()
+  defp grant(state, kind, at) do
+    caps = capabilities(kind)
+
+    state =
+      case caps.clock do
+        :frozen ->
+          {_, s} = :luerl.set_table_keys(["os", "time"], {:erl_func, frozen(at)}, state)
+          {_, s} = :luerl.set_table_keys(["os", "clock"], {:erl_func, frozen(0)}, s)
+          # Deterministic, not fixed: a different snapshot is a different sequence.
+          {:ok, _, s} = :luerl.do("math.randomseed(#{seed(at)})", s)
+          s
+
+        :real ->
+          state
+      end
+
+    if caps.network, do: state |> grant_http() |> grant_blob(), else: state
   end
 
   defp frozen(value), do: fn _args, state -> {[value], state} end
