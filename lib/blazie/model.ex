@@ -93,6 +93,22 @@ defmodule Blazie.Model do
 
   Returns the answer and every call made, so a trace is something the caller can
   write down rather than reconstruct.
+
+  ## An answer can be required to hold
+
+  Given `answers:` and `snapshot:`, the answer is checked against the
+  requirements on that attribute before it comes back — the same `unmet/2` a
+  sampled job uses, so a requirement means one thing whether a loop or a job
+  produced the value. Failing, the reasons go back to the model as a turn and it
+  tries again, bounded by `tries:`.
+
+      converse(model, prompt, tools, run,
+        answers: "summary", snapshot: snapshot, tries: 3)
+
+  Without them nothing is checked, which is the honest default for a loop whose
+  answer is prose nobody declared a shape for. But an unchecked answer is the
+  thing this tree says a generated value must never be, so a caller that means
+  the output to land somewhere should say what it answers.
   """
   @spec converse(
           String.t(),
@@ -104,11 +120,20 @@ defmodule Blazie.Model do
           {:ok, String.t(), [map()]} | {:error, refusal()}
   def converse(model, prompt, tools, run_tool, opts \\ []) do
     with {:ok, %Reference{} = reference} <- Reference.from(model) do
-      turn(reference, messages(prompt), tools, run_tool, opts, Keyword.get(opts, :calls, 4), [])
+      turn(
+        reference,
+        messages(prompt),
+        tools,
+        run_tool,
+        opts,
+        Keyword.get(opts, :calls, 4),
+        Keyword.get(opts, :tries, 3),
+        []
+      )
     end
   end
 
-  defp turn(_reference, _messages, _tools, _run, _opts, 0, made) do
+  defp turn(_reference, _messages, _tools, _run, _opts, 0, _tries, made) do
     {:error,
      %{
        problem: :too_many_calls,
@@ -118,13 +143,13 @@ defmodule Blazie.Model do
      }}
   end
 
-  defp turn(reference, messages, tools, run, opts, left, made) do
-    case Provider.for(reference).converse(reference, messages, tools, opts) do
+  defp turn(reference, messages, tools, run, opts, left, tries, made) do
+    case speaking(reference, opts).(reference, messages, tools, opts) do
       {:error, refusal} ->
         {:error, refusal}
 
       {:ok, {:said, said}} ->
-        {:ok, said, Enum.reverse(made)}
+        answered(reference, messages, tools, run, opts, left, tries, made, said)
 
       {:ok, {:calls, calls}} ->
         {results, made} =
@@ -145,9 +170,85 @@ defmodule Blazie.Model do
           run,
           opts,
           left - 1,
+          tries,
           made
         )
     end
+  end
+
+  # Who answers. `provider:` is a seam, and it earns its keep: the loop was
+  # covered by a test that reimplemented it — a `FakeLoop` with its own copy of
+  # the recursion — which proves a copy caps its calls and says nothing about
+  # this function. A loop that decides when to stop spending money should be
+  # tested, not paraphrased.
+  defp speaking(reference, opts) do
+    case Keyword.get(opts, :provider) do
+      nil ->
+        module = Provider.for(reference)
+        fn r, m, t, o -> module.converse(r, m, t, o) end
+
+      speak when is_function(speak, 4) ->
+        speak
+
+      module when is_atom(module) ->
+        fn r, m, t, o -> module.converse(r, m, t, o) end
+    end
+  end
+
+  # The answer, checked if the caller said what it answers.
+  #
+  # The repairs go back as a turn rather than being returned, because a model
+  # told WHY it was refused can fix it and a model told only "no" cannot — the
+  # same reason `Attribute.judge/3` takes the trouble to return a reason at all.
+  defp answered(reference, messages, tools, run, opts, left, tries, made, said) do
+    attribute = Keyword.get(opts, :answers)
+    snapshot = Keyword.get(opts, :snapshot)
+
+    cond do
+      is_nil(attribute) or is_nil(snapshot) ->
+        {:ok, said, Enum.reverse(made)}
+
+      true ->
+        case Blazie.Attribute.unmet([{:answer, attribute, said}], snapshot) do
+          [] ->
+            {:ok, said, Enum.reverse(made)}
+
+          unmet when tries <= 1 ->
+            {:error,
+             %{
+               problem: :unmet,
+               repair:
+                 "This answered #{length(unmet)} time(s) without satisfying " <>
+                   "#{inspect(attribute)}: " <> Enum.map_join(unmet, " ", & &1.repair)
+             }}
+
+          unmet ->
+            turn(
+              reference,
+              messages ++ repair(said, unmet),
+              tools,
+              run,
+              opts,
+              left,
+              tries - 1,
+              made
+            )
+        end
+    end
+  end
+
+  # What was said, and what was wrong with it. Both, because a model shown only
+  # the complaint has to guess which of its sentences drew it.
+  defp repair(said, unmet) do
+    [
+      %{"role" => "assistant", "content" => said},
+      %{
+        "role" => "user",
+        "content" =>
+          "That does not hold. " <>
+            Enum.map_join(unmet, " ", & &1.repair) <> " Answer again, satisfying it."
+      }
+    ]
   end
 
   # The model's own turn has to go back too, or it asks for the same tool again
