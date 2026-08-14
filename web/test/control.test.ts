@@ -262,6 +262,41 @@ describe("what the account is already spending", () => {
   })
 })
 
+describe("removing something that is already half removed", () => {
+  it("counts a machine that is not there as gone", async () => {
+    stub()
+    answering(
+      { ok: true, body: {} },                                    // stop
+      { ok: true, body: { server: { state: "stopped" } } },      // poll
+      { ok: false, status: 404, body: {} },                      // delete
+    )
+
+    // Removal has to be idempotent or it cannot be finished once interrupted.
+    // It was not: a destroy deleted the machine, failed on a tunnel that was
+    // still draining, kept the record — and every attempt after refused the
+    // same way, so the console held a cluster that no longer existed and would
+    // not let go of it.
+    assert.equal(await upcloud.close({ token: "t" }, "server-1"), true)
+  })
+
+  it("counts a tunnel that is not there as gone", async () => {
+    stub()
+    answering(
+      { ok: true, body: { success: true, result: { result: [] } } }, // dns lookup
+      { ok: false, status: 404, body: { success: false } },          // tunnel delete
+    )
+
+    assert.equal(
+      await tunnel.unmake(
+        { accountId: "a", zoneId: "z", token: "t" },
+        "tunnel-1",
+        "atlas.blazie.dev",
+      ),
+      true,
+    )
+  })
+})
+
 describe("what a machine is allowed to say back", () => {
   const opening = {
     name: "atlas",

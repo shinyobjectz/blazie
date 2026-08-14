@@ -162,14 +162,24 @@ export async function unmake(
 
   // The name goes first and the tunnel second: a record pointing at a tunnel
   // that is gone is a 1033, and a tunnel with no record is invisible.
-  for (let attempt = 0; attempt < 8; attempt++) {
+  //
+  // Three attempts rather than eight. Cloudflare refuses a tunnel with live
+  // connections and they take minutes to drain, so retrying until it works
+  // means retrying for longer than the request lives — the caller gets nothing,
+  // decides the removal failed, and asks again. Better to answer honestly and
+  // let the caller decide, which is what the delete endpoint now does.
+  for (let attempt = 0; attempt < 3; attempt++) {
     const gone = await call(reaching, `/accounts/${reaching.accountId}/cfd_tunnel/${id}`, {
       method: "DELETE",
     })
 
-    if (gone.ok) return true
+    // Already gone is gone. Removing something twice has to succeed the second
+    // time, or a removal interrupted halfway can never be finished — which is
+    // exactly what happened: a machine deleted, a tunnel still draining, and a
+    // record that refused to be dropped on every attempt after.
+    if (gone.ok || gone.status === 404) return true
 
-    await new Promise((wake) => setTimeout(wake, 15_000))
+    await new Promise((wake) => setTimeout(wake, 5_000))
   }
 
   return false
@@ -177,7 +187,8 @@ export async function unmake(
 
 type Answered =
   | { ok: true; result: unknown }
-  | { ok: false; problem: string; repair: string }
+  /** `status` is absent when Cloudflare never answered at all. */
+  | { ok: false; problem: string; repair: string; status?: number }
 
 async function call(
   reaching: Reaching,
@@ -222,6 +233,7 @@ async function call(
   return {
     ok: false,
     problem: "cloudflare_refused",
+    status: response.status,
     repair: why
       ? `Cloudflare refused: ${why}`
       : `Cloudflare answered ${response.status} without saying why. ${

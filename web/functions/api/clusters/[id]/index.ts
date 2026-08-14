@@ -50,27 +50,38 @@ export const onRequestDelete: PagesFunction<Control> = async ({ env, request, pa
     }
   }
 
-  // The machine is refused rather than forgotten when it would not go, because
-  // dropping the record is what makes it invisible — and an invisible machine
-  // still bills. The tunnel and the name are already gone by here, so the
-  // cluster is unreachable either way; what must not happen is losing the only
-  // record of which UpCloud server it was.
-  if (destroy && !tunnelGone) {
-    return refuse(
-      "tunnel_remains",
-      `${cluster.name}'s machine is gone but its tunnel would not delete — Cloudflare refuses one that still has connections, and they can take a few minutes to drain. The record has been kept so the tunnel can still be found. Ask again shortly.`,
-      502,
-    )
-  }
-
+  // A machine that would not go is the only thing worth keeping the record for.
+  //
+  // Both used to block it, and that made removal a state you could not leave.
+  // Cloudflare refuses a tunnel with live connections, they take minutes to
+  // drain, and `unmake` retried for longer than the request survives — so a
+  // removal whose machine had already gone refused on the tunnel, kept the
+  // record, and refused identically on every attempt after. The console showed
+  // a cluster that no longer existed and would not let go of it.
+  //
+  // The two are not the same risk. Losing the record of a running machine loses
+  // a bill nobody can see. A tunnel left behind costs nothing, answers nothing
+  // once its machine is gone, and is named `blazie-<cluster>`, so it can be
+  // found without the record. Only the first is worth being stuck over.
   if (destroy && !machineGone) {
     return refuse(
       "machine_remains",
-      `The tunnel and the name were removed, but ${cluster.name}'s machine would not stop and delete. The record has been kept so the machine can still be found — its id is ${cluster.host?.uuid ?? "unknown"}. Ask again, or remove it from the UpCloud console.`,
+      `${cluster.name}'s machine would not stop and delete, so the record has been kept — otherwise it would keep billing with nothing pointing at it. Its id is ${cluster.host?.uuid ?? "unknown"}. Ask again, or remove it from the UpCloud console.`,
       502,
     )
   }
 
   await keep(env, session.login, all.filter((c) => c.id !== id))
-  return answer({ forgotten: id, destroyed: destroy })
+
+  // Said rather than refused. The caller wanted the cluster gone and it is; this
+  // is one thing left draining that nobody has to wait on.
+  return answer({
+    forgotten: id,
+    destroyed: destroy,
+    ...(destroy && !tunnelGone
+      ? {
+          note: `The machine is gone. Its tunnel was still draining connections and Cloudflare would not delete it yet — it answers nothing now, and Cloudflare will accept a delete of blazie-${cluster.name} shortly.`,
+        }
+      : {}),
+  })
 }

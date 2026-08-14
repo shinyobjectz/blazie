@@ -442,7 +442,11 @@ export async function close(credentials: Credentials, uuid: string): Promise<boo
     signal: AbortSignal.timeout(60_000),
   }).catch(() => null)
 
-  return Boolean(gone?.ok)
+  // A machine that is not there is a machine that is gone. Removing something
+  // twice has to succeed the second time, or a removal interrupted halfway can
+  // never be finished — and one was: the machine deleted, the tunnel still
+  // draining, and every attempt after that refused.
+  return Boolean(gone?.ok) || gone?.status === 404
 }
 
 /**
