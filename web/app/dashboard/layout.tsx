@@ -1,6 +1,7 @@
 "use client"
 
 import { Check, ChevronDown } from "lucide-react"
+import { usePathname } from "next/navigation"
 
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import {
@@ -24,9 +25,25 @@ import {
 import { Wordmark } from "@/components/ui/wordmark"
 import { SIGN_IN } from "@/lib/blazie"
 
+import { under } from "@/lib/path"
+
 import { ClusterHeld, useClusterState } from "./cluster"
 import { Onboarding } from "./onboarding"
 import { WayOut } from "./way-out"
+
+/**
+ * The pages that are about ONE world, and therefore the only ones that get to
+ * ask which.
+ *
+ * The rest read every world you hold and sum across them — storage, activity,
+ * settings, the worlds list, the orbit. On those the picker was a control that
+ * changed nothing on screen, which is worse than an absent control: it invites
+ * somebody to change it, watch nothing happen, and conclude the page is broken.
+ *
+ * Read off what each page actually destructures from the cluster. `data`,
+ * `editor` and `agents` take `world` or `ask`; the others take `worlds`.
+ */
+const PER_WORLD = ["/dashboard/data", "/dashboard/editor", "/dashboard/agents"]
 
 /**
  * The console shell: sidebar, and a bar saying which world you are looking at.
@@ -38,6 +55,8 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
+  const pathname = usePathname()
+  const perWorld = PER_WORLD.some((route) => under(pathname, route))
   const { held, error, retry } = useClusterState()
   const { width, setWidth, remember } = useSidebarWidth()
 
@@ -101,9 +120,13 @@ export default function DashboardLayout({
         <SidebarInset className="min-w-0">
           <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur">
             <SidebarTrigger />
-            <Separator orientation="vertical" className="h-4" />
 
-            {held.worlds.length === 0 ? (
+            {/* The divider belongs to the picker, not to the header. Left in
+                place on a page with no picker it is a rule separating a button
+                from nothing. */}
+            {perWorld ? <Separator orientation="vertical" className="h-4" /> : null}
+
+            {!perWorld ? null : held.worlds.length === 0 ? (
               <span className="font-mono text-xs text-muted-foreground">
                 no worlds yet
               </span>
