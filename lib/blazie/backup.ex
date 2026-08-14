@@ -307,7 +307,7 @@ defmodule Blazie.Backup do
                                                                             {:ok, acc} ->
         case fetch_segments(target, topts, segments) do
           {:ok, bytes} ->
-            File.write!(Path.join(dir, file), bytes)
+            placed(Path.join(dir, file), bytes)
 
             # A hole in the segments means what came back stops short of what
             # the target nominally holds. Said out loud, because a restore that
@@ -343,7 +343,7 @@ defmodule Blazie.Backup do
   # whole and is not.
   defp fetch_segments(target, topts, segments) do
     segments
-    |> Enum.sort_by(&segment_from/1)
+    |> Enum.sort_by(&range/1)
     |> Enum.reduce_while({:ok, <<>>, 0}, fn key, {:ok, acc, at} ->
       {from, to} = range(key)
 
@@ -357,8 +357,32 @@ defmodule Blazie.Backup do
 
         true ->
           case target.get(topts, key) do
-            {:ok, bytes} -> {:cont, {:ok, acc <> bytes, to}}
-            {:error, why} -> {:halt, {:error, %{problem: :segment_missing, key: key, why: why}}}
+            {:ok, bytes} when byte_size(bytes) == to - from ->
+              # Only the bytes past what is already assembled. A segment that
+              # starts before `at` is the ordinary crash — a run that copied,
+              # died before recording, and re-copied a longer range from the
+              # same offset. Concatenating it WHOLE duplicated the overlap,
+              # shifted every later record out of frame, and the ledger then
+              # opened clean having silently lost everything after the
+              # overlap (C8, reproduced). The slice restores exactly the
+              # contiguous bytes; if anything hostile hid in the overlap, the
+              # ledger's own offset-bound CRC refuses it at open.
+              {:cont, {:ok, acc <> binary_part(bytes, at - from, to - at), to}}
+
+            {:ok, bytes} ->
+              # A segment whose bytes are not its name is not a segment.
+              {:halt,
+               {:error,
+                %{
+                  problem: :segment_lying,
+                  key: key,
+                  why:
+                    "#{key} names #{to - from} bytes and holds #{byte_size(bytes)}. " <>
+                      "Nothing restored from it can be placed, so nothing was."
+                }}}
+
+            {:error, why} ->
+              {:halt, {:error, %{problem: :segment_missing, key: key, why: why}}}
           end
       end
     end)
@@ -366,6 +390,16 @@ defmodule Blazie.Backup do
       {:ok, bytes, _at} -> {:ok, bytes}
       {:error, why} -> {:error, why}
     end
+  end
+
+  # Written beside and renamed in, the same move the checkpoint makes. A crash
+  # mid-restore then leaves either no file or a whole one — never a short file
+  # that opens cleanly as a shorter history, which is a partial restore
+  # indistinguishable from a successful one.
+  defp placed(path, bytes) do
+    tmp = path <> ".restoring"
+    File.write!(tmp, bytes)
+    File.rename!(tmp, path)
   end
 
   defp restore_keys(_target, _topts, _dir, :ledgers), do: {:ok, 0}
@@ -377,7 +411,7 @@ defmodule Blazie.Backup do
       Enum.reduce_while(keys, {:ok, 0}, fn key, {:ok, n} ->
         case target.get(topts, key) do
           {:ok, bytes} ->
-            File.write!(Path.join(dir, Path.basename(key)), bytes)
+            placed(Path.join(dir, Path.basename(key)), bytes)
             {:cont, {:ok, n + 1}}
 
           {:error, why} ->
@@ -439,8 +473,6 @@ defmodule Blazie.Backup do
   defp segment_file(key) do
     key |> String.trim_leading(@ledgers_prefix) |> Path.dirname()
   end
-
-  defp segment_from(key), do: key |> range() |> elem(0)
 
   # The highest boundary any segment claims, which is what `reach/1` would have
   # answered if there were no holes.

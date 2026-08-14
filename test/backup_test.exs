@@ -474,6 +474,82 @@ defmodule Blazie.BackupTest do
     end
   end
 
+  describe "a restore is a contiguous prefix or a refusal" do
+    # C8, reproduced: a partial overlap — the ordinary consequence of a run
+    # that copied, died before recording, and re-copied a longer range from
+    # the same offset — was concatenated WHOLE. The duplicated bytes shifted
+    # every later record out of frame, the scan stopped at the first bad CRC,
+    # and the ledger opened clean having silently lost everything after the
+    # overlap. Over-restoring was invisible to a check that only looked for
+    # under-restoring.
+    defp restored_bytes(ctx, file, segments) do
+      # Its own bucket and its own empty disk — a restore refuses a directory
+      # with anything in it, and that refusal is somebody else's test.
+      root = Path.join(ctx.remote, "c8-#{System.unique_integer([:positive])}")
+      into = Path.join(root, "ledgers/#{file}")
+      out = Path.join(root, "out")
+      File.mkdir_p!(into)
+      File.mkdir_p!(out)
+
+      for {from, to, bytes} <- segments do
+        File.write!(Path.join(into, "#{from}-#{to}.segment"), bytes)
+      end
+
+      restore = [
+        ledger_dir: out,
+        key_dir: Path.join(root, "keys"),
+        target: {Backup.Target.Directory, root: root},
+        only: :ledgers
+      ]
+
+      case Backup.restore(restore) do
+        {:ok, _report} -> {:ok, File.read!(Path.join(out, file))}
+        refusal -> refusal
+      end
+    end
+
+    test "every perturbation restores an exact prefix of the truth, or refuses", ctx do
+      truth = :crypto.strong_rand_bytes(500)
+      cut = fn from, to -> {from, to, binary_part(truth, from, to - from)} end
+      file = "c8.ledger"
+
+      perturbed = [
+        # The clean cuts.
+        {[cut.(0, 100), cut.(100, 250), cut.(250, 500)], 500},
+        # One dropped: the restore stops at the hole, an exact shorter prefix.
+        {[cut.(0, 100), cut.(250, 500)], 100},
+        # One uploaded twice: a duplicate is not a hole and adds nothing.
+        {[cut.(0, 100), cut.(0, 100), cut.(100, 500)], 500},
+        # The reproduction: a crashed run re-copied a LONGER range from the
+        # same offset, so 0-100 and 0-250 both exist. 350 bytes came back
+        # where 500 should have; now the overlap is sliced, never repeated.
+        {[cut.(0, 100), cut.(0, 250), cut.(250, 500)], 500},
+        # Extended forward: the next segment reaches back over covered bytes.
+        {[cut.(0, 100), cut.(100, 300), cut.(250, 500)], 500}
+      ]
+
+      for {segments, upto} <- perturbed do
+        assert {:ok, bytes} = restored_bytes(ctx, file, segments)
+
+        assert bytes == binary_part(truth, 0, upto),
+               "#{inspect(Enum.map(segments, fn {f, t, _} -> {f, t} end))} did not restore " <>
+                 "the exact #{upto}-byte prefix"
+      end
+    end
+
+    test "a segment whose bytes are not its name is a refusal, not a guess", ctx do
+      truth = :crypto.strong_rand_bytes(200)
+
+      assert {:error, %{problem: :segment_lying}} =
+               restored_bytes(ctx, "liar.ledger", [
+                 {0, 100, binary_part(truth, 0, 100)},
+                 # Named 100-200, holding 50 bytes: nothing after it can be
+                 # placed, so nothing is.
+                 {100, 200, binary_part(truth, 100, 50)}
+               ])
+    end
+  end
+
   defp ledger_path(ctx), do: Path.join(ctx.ledgers, Store.File.filename(ctx.name))
 
   defp segment_from(key) do

@@ -170,6 +170,8 @@ defmodule Blazie.Erasure do
     end
   end
 
+  def reveal(answer, _bound), do: answer
+
   # The plaintext authenticated, so these bytes were sealed by somebody who
   # held the key — but a restored key store can be the attacker's, and then
   # the plaintext is theirs too. `:safe` so it cannot mint atoms (C7); a
@@ -179,8 +181,6 @@ defmodule Blazie.Erasure do
   rescue
     _error -> :unreadable
   end
-
-  def reveal(answer, _bound), do: answer
 
   # Erased only on the tombstone's say-so. `erased?/1` reads the `$erasures`
   # world, which is safe from every world except `$erasures` itself — where a
