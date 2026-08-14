@@ -39,6 +39,8 @@ export type Cluster = {
   refusal?: { problem: string; repair: string }
   /** The last thing the machine said while becoming a cluster. */
   saying?: { step: string; at: string; detail?: string }
+  /** Everything it said, oldest first — the sequence, not just the latest. */
+  said?: { step: string; at: string; detail?: string }[]
   host?: { vendor: string; uuid: string; plan: string; zone: string }
   opened: string
 }

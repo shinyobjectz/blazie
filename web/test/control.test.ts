@@ -551,6 +551,17 @@ describe("studios, the tenant boundary", () => {
   })
 })
 
+describe("what a machine said, kept in order", () => {
+  it("bounds the account so a retrying machine cannot grow it forever", async () => {
+    const { SAID_KEPT } = await import("../lib/control/model.ts")
+
+    // Generous enough that a real install never reaches it — six steps — and
+    // finite so a machine looping on a failure cannot fill a KV value.
+    assert.ok(SAID_KEPT > 6)
+    assert.ok(SAID_KEPT <= 100)
+  })
+})
+
 describe("names and secrets", () => {
   it("refuses a name that leaves nothing to be a hostname", () => {
     assert.equal(asHostname("平和"), null)

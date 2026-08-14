@@ -39,6 +39,20 @@ export type Held = {
   saying?: Said
 
   /**
+   * Everything it has said, oldest first.
+   *
+   * `saying` alone answers "where is it now" and cannot answer "how long did
+   * the image pull take" or "did it ever reach docker" — and when a provision
+   * fails, the sequence up to the failure is most of the diagnosis. Keeping only
+   * the latest threw away the evidence at the moment it became interesting.
+   *
+   * Bounded, because a machine that retries could otherwise grow a KV value
+   * without limit. The steps are few and one line each, so the cap is generous
+   * enough that a real install never reaches it.
+   */
+  said?: Said[]
+
+  /**
    * The tenant boundaries on this cluster.
    *
    * A Studio is a set of worlds and a caller that may name exactly those, so
@@ -81,6 +95,9 @@ export type Host = {
  * happen in, which is what makes "stuck at `pulled`" a sentence.
  */
 export const STEPS = ["booted", "packages", "docker", "pulled", "serving", "tunnelled"] as const
+
+/** How much of a machine's account of itself to keep. */
+export const SAID_KEPT = 40
 
 export type Step = (typeof STEPS)[number]
 

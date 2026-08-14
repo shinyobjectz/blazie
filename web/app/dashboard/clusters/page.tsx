@@ -237,6 +237,25 @@ function Card({
           leaves the machine running; destroying takes the machine and every
           world on it. A console where those are one button is a console that
           deletes a database by mis-click. */}
+      {/* What it said on the way, oldest first. The sequence up to a failure is
+          most of the diagnosis, and it is the thing a machine with no password
+          and no key cannot be asked for afterwards. */}
+      {cluster.said && cluster.said.length > 1 ? (
+        <ol className="font-mono mt-4 space-y-1 text-[11px] text-muted-foreground">
+          {cluster.said.map((one, at) => (
+            <li key={`${one.step}-${one.at}`} className="flex gap-2">
+              <span className="w-4 shrink-0 text-right text-white/25">{at + 1}</span>
+              <span className={one.step === "failed" ? "text-flame" : "text-white/70"}>
+                {one.step}
+              </span>
+              <span className="ml-auto shrink-0 tabular-nums">
+                {new Date(one.at).toLocaleTimeString()}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+
       {cluster.saying?.step === "failed" && cluster.saying.detail ? (
         <pre className="font-mono mt-4 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-flame/30 bg-flame/5 p-3 text-[11px] leading-relaxed text-flame">
           {cluster.saying.detail}

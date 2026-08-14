@@ -22,7 +22,7 @@
 
 import { answer, refuse } from "@/lib/control/answer"
 import { amend, one, ownerOf, same } from "@/lib/control/clusters"
-import { type Control, isStep } from "@/lib/control/model"
+import { type Control, SAID_KEPT, type Said, isStep } from "@/lib/control/model"
 
 export const onRequestPost: PagesFunction<Control> = async ({ env, request, params }) => {
   const id = String(params.id)
@@ -50,14 +50,19 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request, para
     return refuse("not_yours", "That is not a cluster you can speak for.", 403)
   }
 
+  const heard: Said = {
+    step: said.step,
+    at: new Date().toISOString(),
+    // Bounded, because this is a machine reporting a command's output and a
+    // stack trace would otherwise become a KV value that grows every retry.
+    detail: said.detail ? String(said.detail).slice(0, 2_000) : undefined,
+  }
+
   await amend(env, login!, id, {
-    saying: {
-      step: said.step,
-      at: new Date().toISOString(),
-      // Bounded, because this is a machine reporting a command's output and a
-      // stack trace would otherwise become a KV value that grows every retry.
-      detail: said.detail ? String(said.detail).slice(0, 2_000) : undefined,
-    },
+    saying: heard,
+    // Kept in order, so a failed provision carries the sequence up to it rather
+    // than only the last line — which is most of the diagnosis.
+    said: [...(cluster.said ?? []), heard].slice(-SAID_KEPT),
     // Reaching the last step is not the same as answering, which is checked
     // separately and is what actually decides `open`. What this does is stop a
     // machine that has finished installing from being described as opening.
