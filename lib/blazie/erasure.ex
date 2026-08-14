@@ -104,9 +104,17 @@ defmodule Blazie.Erasure do
   @doc false
   # Called on the write path with whatever the world already knows about this
   # entity's owner. Nothing is encrypted unless a subject was declared first.
-  def protect(answer, nil), do: answer
+  #
+  # `bound` is {world, id, attribute, tx} — WHERE this sealed answer belongs,
+  # authenticated into the ciphertext as AAD. Without it any sealed answer of
+  # a subject was a valid sealed answer for any other fact of that subject: a
+  # writer who could reach the bytes could splice one fact's answer onto
+  # another and it decrypted cleanly (C6, reproduced). A tuple, never a map,
+  # because the AAD must be the same bytes at reveal and EEP-18 lets a map's
+  # pair order change between OTP releases.
+  def protect(answer, nil, _bound), do: answer
 
-  def protect(answer, subject) do
+  def protect(answer, subject, {_world, _id, _attribute, _tx} = bound) do
     # A fresh data key per fact, wrapped by the subject's key. The wrapped key
     # travels in the fact: it is noise without the KEK, so it needs no store of
     # its own and nothing durable is held in memory.
@@ -115,30 +123,77 @@ defmodule Blazie.Erasure do
 
     iv = :crypto.strong_rand_bytes(12)
     plain = :erlang.term_to_binary(answer)
-    {cipher, tag} = :crypto.crypto_one_time_aead(:aes_256_gcm, dek, iv, plain, <<>>, true)
+    aad = :erlang.term_to_binary(bound)
+    {cipher, tag} = :crypto.crypto_one_time_aead(:aes_256_gcm, dek, iv, plain, aad, true)
 
-    {:sealed, subject, wrapped, iv, tag, cipher}
+    {:sealed, subject, wrapped, iv, tag, cipher, :bound}
   end
 
   @doc false
-  def reveal({:sealed, subject, wrapped, iv, tag, cipher}) do
+  # A failed reveal answers `:erased` IF AND ONLY IF a tombstone says the
+  # subject was erased. Every other failure — a flipped bit, a truncated blob,
+  # a key store restored under the wrong master, a wrapped key that opened but
+  # did not authenticate — is `:unreadable`, because reporting corruption as a
+  # completed lawful deletion is the one confusion this module exists to never
+  # make (C5, reproduced with a single flipped bit).
+  def reveal({:sealed, subject, wrapped, iv, tag, cipher, :bound}, bound) do
     case Keyring.unwrap(wrapped, subject) do
       {:ok, dek} ->
-        case :crypto.crypto_one_time_aead(:aes_256_gcm, dek, iv, cipher, <<>>, tag, false) do
-          :error -> :erased
+        aad = :erlang.term_to_binary(bound)
+
+        case :crypto.crypto_one_time_aead(:aes_256_gcm, dek, iv, cipher, aad, tag, false) do
+          :error -> failed(subject)
           plain -> :erlang.binary_to_term(plain)
         end
 
       :forgotten ->
-        :erased
+        failed(subject)
     end
   end
 
-  def reveal(answer), do: answer
+  # The shape written before answers were bound to their fact. Revealed with
+  # the empty AAD it was sealed under — a fact is immutable, so what was
+  # written unbound stays unbound; only what is written from now on carries
+  # the binding. The C6 property therefore holds for every fact this code
+  # writes, and the legacy shape is readable rather than silently reachable
+  # by new writes.
+  def reveal({:sealed, subject, wrapped, iv, tag, cipher}, _bound) do
+    case Keyring.unwrap(wrapped, subject) do
+      {:ok, dek} ->
+        case :crypto.crypto_one_time_aead(:aes_256_gcm, dek, iv, cipher, <<>>, tag, false) do
+          :error -> failed(subject)
+          plain -> :erlang.binary_to_term(plain)
+        end
+
+      :forgotten ->
+        failed(subject)
+    end
+  end
+
+  def reveal(answer, _bound), do: answer
+
+  # Erased only on the tombstone's say-so. `erased?/1` reads the `$erasures`
+  # world, which is safe from every world except `$erasures` itself — where a
+  # read would be a call back into the process doing the revealing. Nothing
+  # sealed can exist there once it is unnameable, so that world answers
+  # `:unreadable` without asking.
+  defp failed(subject) do
+    if erased?(subject), do: :erased, else: :unreadable
+  end
 
   @doc false
-  def reveal_fact(%Fact{value: {:sealed, _, _, _, _, _}} = fact),
-    do: %{fact | value: reveal(fact.value)}
+  def reveal_fact(fact, world \\ nil)
 
-  def reveal_fact(%Fact{} = fact), do: fact
+  def reveal_fact(%Fact{value: {:sealed, _, _, _, _, _}} = fact, _world),
+    do: %{fact | value: reveal(fact.value, nil)}
+
+  def reveal_fact(%Fact{value: {:sealed, _, _, _, _, _, :bound}} = fact, world) do
+    if world == @world do
+      %{fact | value: :unreadable}
+    else
+      %{fact | value: reveal(fact.value, {world, fact.id, fact.attribute, fact.tx})}
+    end
+  end
+
+  def reveal_fact(%Fact{} = fact, _world), do: fact
 end

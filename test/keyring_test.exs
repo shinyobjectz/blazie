@@ -128,7 +128,7 @@ defmodule Blazie.KeyringTest do
       # Read the raw row rather than the revealed one.
       raw = World.raw_at(world, tx) |> Enum.find(&(&1.attribute == "height"))
 
-      assert {:sealed, subject, wrapped, _iv, _tag, _cipher} = raw.value
+      assert {:sealed, subject, wrapped, _iv, _tag, _cipher, :bound} = raw.value
       assert subject == ctx.subject
       assert byte_size(wrapped) > 0
 

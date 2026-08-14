@@ -164,7 +164,7 @@ defmodule Blazie.ErasureTest do
       {:ok, tx} = World.append(ctx.world, [{42, "height", 180}])
 
       raw = World.raw_at(ctx.world, tx) |> Enum.find(&(&1.attribute == "height"))
-      {:sealed, _subject, wrapped, _iv, _tag, cipher} = raw.value
+      {:sealed, _subject, wrapped, _iv, _tag, cipher, :bound} = raw.value
 
       # The wrapped data key cannot open the ciphertext it travels with — that
       # takes the subject's key, which is not here and never was.
@@ -189,7 +189,7 @@ defmodule Blazie.ErasureTest do
       world
       |> World.raw_at(World.tx(world))
       |> Enum.filter(&(&1.id == id and &1.attribute == attribute))
-      |> Enum.all?(&match?({:sealed, _, _, _, _, _}, &1.value))
+      |> Enum.all?(&match?({:sealed, _, _, _, _, _, :bound}, &1.value))
     end
 
     test "a fact written long after its subject was evicted is still sealed", ctx do
@@ -251,6 +251,74 @@ defmodule Blazie.ErasureTest do
 
       assert sealed?(world, 42, "height"),
              "after a reopen, a fact about an owned entity went down in plaintext"
+    end
+  end
+
+  describe "corruption and lawful deletion are different answers" do
+    # C5, reproduced with one flipped bit: AEAD tag failure was reported as a
+    # completed GDPR erasure, whatever caused it. The claim: :erased if and
+    # only if a tombstone exists. Both directions matter — a test that only
+    # checks the erased side passes on the old code and proves nothing.
+    test "a flipped bit with no tombstone is unreadable, never erased", ctx do
+      bound = {"w", 42, "height", 7}
+
+      {:sealed, s, w, iv, tag, cipher, :bound} =
+        Erasure.protect("secret-value", ctx.subject, bound)
+
+      <<first, rest::binary>> = cipher
+      tampered = {:sealed, s, w, iv, tag, <<Bitwise.bxor(first, 1), rest::binary>>, :bound}
+
+      assert Erasure.reveal(tampered, bound) == :unreadable
+      refute Erasure.reveal(tampered, bound) == :erased
+    end
+
+    test "a destroyed key with a tombstone is erased", ctx do
+      bound = {"w", 42, "height", 7}
+      sealed = Erasure.protect("secret-value", ctx.subject, bound)
+
+      :ok = Erasure.erase(ctx.subject)
+
+      assert Erasure.reveal(sealed, bound) == :erased
+    end
+
+    test "a key that is gone with no tombstone is loss, not deletion", ctx do
+      bound = {"w", 42, "height", 7}
+      sealed = Erasure.protect("secret-value", ctx.subject, bound)
+
+      # The key vanishes without anybody recording an erasure — a restore
+      # under the wrong master, an eviction bug, a lost key store.
+      :ok = Keyring.destroy(ctx.subject)
+
+      assert Erasure.reveal(sealed, bound) == :unreadable
+    end
+  end
+
+  describe "a sealed answer is worthless anywhere but on its own fact" do
+    # C6, reproduced: empty AAD meant any sealed answer of a subject was a
+    # valid sealed answer for any other fact of that subject — a writer who
+    # could reach the bytes could put alice's salary on any fact about alice.
+    test "every splice between two facts fails, in both directions", ctx do
+      bounds = for tx <- 1..3, do: {"w", 42, "field-#{tx}", tx}
+      sealed = Enum.map(bounds, &Erasure.protect("answer-at-#{elem(&1, 3)}", ctx.subject, &1))
+
+      for {blob, i} <- Enum.with_index(sealed),
+          {bound, j} <- Enum.with_index(bounds),
+          i != j do
+        assert Erasure.reveal(blob, bound) == :unreadable,
+               "fact #{i}'s sealed answer opened on fact #{j}"
+      end
+
+      # And each still opens where it belongs.
+      for {blob, bound} <- Enum.zip(sealed, bounds) do
+        assert Erasure.reveal(blob, bound) =~ "answer-at-"
+      end
+    end
+
+    test "a different world is a different place", ctx do
+      bound = {"w", 42, "height", 7}
+      sealed = Erasure.protect("secret", ctx.subject, bound)
+
+      assert Erasure.reveal(sealed, {"other-world", 42, "height", 7}) == :unreadable
     end
   end
 end

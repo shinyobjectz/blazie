@@ -435,7 +435,7 @@ defmodule Blazie.World do
   end
 
   def handle_call({:find_at, tx, pattern}, _from, state) do
-    {:reply, Enum.map(matching(state, tx, pattern), &Erasure.reveal_fact/1), state}
+    {:reply, Enum.map(matching(state, tx, pattern), &Erasure.reveal_fact(&1, state.name)), state}
   end
 
   # Not revealed: an id is never sealed, and revealing a value here would be
@@ -455,7 +455,7 @@ defmodule Blazie.World do
       state.facts
       |> Enum.drop_while(&(&1.tx > tx))
       |> Enum.reverse()
-      |> Enum.map(&Erasure.reveal_fact/1)
+      |> Enum.map(&Erasure.reveal_fact(&1, state.name))
 
     {:reply, facts, state}
   end
@@ -575,8 +575,15 @@ defmodule Blazie.World do
 
   defp seal(fact, state) do
     case owner_of(state, fact.id) do
-      nil -> fact
-      subject -> %{fact | value: Erasure.protect(fact.value, subject)}
+      nil ->
+        fact
+
+      subject ->
+        # Bound to WHERE it is: this world, this entity, this attribute, this
+        # transaction. The binding is what makes a sealed answer worthless
+        # anywhere but on the fact it was written for.
+        bound = {state.name, fact.id, fact.attribute, fact.tx}
+        %{fact | value: Erasure.protect(fact.value, subject, bound)}
     end
   end
 
