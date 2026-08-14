@@ -81,8 +81,12 @@ const tools: Item[] = [
   { href: "/dashboard/editor", label: "editor", icon: SquareTerminal },
   { href: "/dashboard/storage", label: "storage", icon: HardDrive },
   { href: "/dashboard/activity", label: "activity", icon: Activity },
-  { href: "/dashboard/settings", label: "settings", icon: Settings },
 ]
+
+// Settings is deliberately not above. It is not a place you work, it is where
+// you go to change who you are and what this console may do — which is what the
+// account block at the bottom is for, and it is already there. Listing it twice
+// made the nav answer two different questions in one column.
 
 export function AppSidebar({ login }: { login: string | null }) {
   const pathname = usePathname()
