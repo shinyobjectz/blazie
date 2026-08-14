@@ -234,7 +234,14 @@ defmodule Blazie.Coding do
         Model.converse(
           model,
           [%{"role" => "user", "content" => prompt(snapshot, agent, task)}] ++
-            Run.messages(snapshot, run, keep: Keyword.get(opts, :keep, 6)),
+            Run.messages(snapshot, run,
+              keep: Keyword.get(opts, :keep, 6),
+              # The task is what this run is about, so turns that fell out of
+              # the window come back when they bear on it — recency decides
+              # what is verbatim, relevance decides what is recalled.
+              about: task,
+              recall: Keyword.get(opts, :recall, 3)
+            ),
           Tool.available(snapshot, agent),
           &running(world, run, opts, &1),
           Keyword.merge(

@@ -91,6 +91,73 @@ defmodule Blazie.LongHorizonTest do
     end
   end
 
+  describe "what is recalled is about the work, not merely recent" do
+    test "reaches behind the summary for the turn that matters", %{world: world} do
+      turned(world, "r", 2)
+
+      {:ok, _} =
+        World.append(world, [
+          {"r", "asked", "where do credentials live", "r"},
+          {"r", "answered", "the database password lives in the vault, under ops/db", "r"}
+        ])
+
+      turned(world, "r", 9)
+      {:ok, _} = Run.compact(world, "r", 8, "early setup happened")
+
+      messages = Run.messages(snapshot(world), "r", keep: 3, about: "read the vault password")
+
+      # The summary leads, the recalled turn follows it, the window ends it —
+      # and the recalled turn is the ORIGINAL, which the summary had eaten.
+      assert hd(messages)["content"] =~ "early setup"
+      recalled = Enum.at(messages, 1)["content"]
+      assert recalled =~ "Recalled from earlier"
+      assert recalled =~ "vault, under ops/db"
+    end
+
+    test "does not recall what the window already carries", %{world: world} do
+      turned(world, "r", 5)
+
+      {:ok, _} =
+        World.append(world, [
+          {"r", "asked", "final step about the vault", "r"},
+          {"r", "answered", "vault opened", "r"}
+        ])
+
+      messages = Run.messages(snapshot(world), "r", keep: 3, about: "vault")
+
+      # The matching turn is inside the window, so recalling it would send it
+      # twice. Nothing outside the window mentions the vault, so nothing is.
+      refute Enum.any?(messages, &(&1["content"] =~ "Recalled"))
+    end
+
+    test "recalls nothing when nothing is about it", %{world: world} do
+      turned(world, "r", 10)
+
+      messages = Run.messages(snapshot(world), "r", keep: 2, about: "quaternion")
+      refute Enum.any?(messages, &(&1["content"] =~ "Recalled"))
+    end
+
+    test "is bounded, and answers in the order things happened", %{world: world} do
+      for i <- 1..8 do
+        {:ok, _} =
+          World.append(world, [
+            {"r", "asked", "about the widget, part #{i}", "r"},
+            {"r", "answered", "widget detail #{i}", "r"}
+          ])
+      end
+
+      turned(world, "r", 4)
+
+      found = Run.recalled(snapshot(world), "r", "the widget", recall: 3, outside: 4)
+
+      assert length(found) == 3
+      # Chosen best-first with newer breaking ties, then said oldest-first,
+      # because a model reads them as history.
+      assert Enum.map(found, & &1.turn) == Enum.sort(Enum.map(found, & &1.turn))
+      assert Enum.all?(found, &(&1.answered =~ "widget"))
+    end
+  end
+
   describe "compaction asks a model, and writes what it said" do
     test "folds everything but the window", %{world: world} do
       turned(world, "r", 12)

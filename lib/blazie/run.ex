@@ -51,6 +51,23 @@ defmodule Blazie.Run do
   So a run has no length limit. What it has is an assembly that stays the size
   the policy says, however long the run gets.
 
+  ## Recency is not relevance, so the assembly also retrieves
+
+  A window on the end is the wrong shape for the one thing long runs are for:
+  a fact established in turn three is exactly what the model needs again in
+  turn forty, and by then it lives only in a summary's lossy account. Every
+  real harness has an answer to this — retrieval, not a bigger window — and
+  `recalled/4` is this one's: the turns outside the window, scored against
+  what the run is doing now, the best of them brought back whole.
+
+  The scoring is lexical, and deliberately so. This node has no embedding
+  index — vectors are a thing bought, not built, the same judgement as every
+  other vendor — and the seam a better scorer would plug into is exactly that
+  one function: same question in, same shape out. What matters is not the
+  scorer but the property the fact log already paid for: retrieval is a QUERY
+  over originals that were never thrown away, not a memory store somebody had
+  to maintain beside the run.
+
   ## Compaction adds, it does not replace
 
   A long run's early turns get summarised so the context stays affordable. The
@@ -124,6 +141,12 @@ defmodule Blazie.Run do
   `converse/5` takes either a prompt or a list of messages, so resuming is
   passing this where the prompt would go. Compacted turns come back as their
   summary instead, which is the whole point of having compacted them.
+
+  `about:` is what the run is doing now. Given, the turns outside the window
+  are searched and the most relevant come back whole, between the summaries
+  and the verbatim end — `recall:` says how many (three unless told). Absent,
+  the assembly is summaries and the window, which is right for a run short
+  enough that nothing has fallen out of view yet.
   """
   @spec messages(Snapshot.t(), term(), keyword()) :: [map()]
   def messages(%Snapshot{} = snapshot, id, opts \\ []) do
@@ -146,13 +169,93 @@ defmodule Blazie.Run do
         said -> [%{"role" => "user", "content" => "Earlier: " <> Enum.join(said, " ")}]
       end
 
+    remembered =
+      case Keyword.get(opts, :about) do
+        nil ->
+          []
+
+        about ->
+          snapshot
+          |> recalled(id, about,
+            recall: Keyword.get(opts, :recall, 3),
+            outside: length(within)
+          )
+          |> Enum.map(fn one ->
+            %{
+              "role" => "user",
+              "content" =>
+                "Recalled from earlier in this run, because it is about what you are doing:\n" <>
+                  "asked: #{clipped(one.asked)}\nanswered: #{clipped(one.answered)}"
+            }
+          end)
+      end
+
     summaries ++
+      remembered ++
       Enum.flat_map(within, fn turn ->
         [
           %{"role" => "user", "content" => to_string(turn.asked)},
           %{"role" => "assistant", "content" => to_string(turn.answered)}
         ]
       end)
+  end
+
+  @doc """
+  The turns most about something, from anywhere in the run.
+
+  Scored by the words they share with `about`, best first — then answered in
+  the order they happened, because a model reads them as history. Turns the
+  caller is already sending verbatim are excluded with `outside:` (how many at
+  the end are spoken for), so recall reaches exactly the part of the run that
+  is otherwise a summary or nothing.
+
+  Lexical, and honestly so: a turn that says the thing in different words will
+  be missed. That is the known cost of not owning an embedding index, and the
+  repair when it matters is a better scorer behind the same function — not a
+  memory store beside the run.
+  """
+  @spec recalled(Snapshot.t(), term(), String.t(), keyword()) ::
+          [%{turn: pos_integer(), asked: term(), answered: term()}]
+  def recalled(%Snapshot{} = snapshot, id, about, opts \\ []) do
+    count = Keyword.get(opts, :recall, 3)
+    outside = Keyword.get(opts, :outside, 0)
+
+    all = turns(snapshot, id)
+    pool = if outside > 0, do: Enum.drop(all, -outside), else: all
+    wanted = terms(about)
+
+    if count <= 0 or MapSet.size(wanted) == 0 do
+      []
+    else
+      pool
+      |> Enum.with_index(1)
+      |> Enum.map(fn {turn, at} ->
+        {turn, at, MapSet.size(MapSet.intersection(wanted, terms("#{turn.asked} #{turn.answered}")))}
+      end)
+      |> Enum.filter(fn {_turn, _at, score} -> score > 0 end)
+      # Best first to choose, later-first to break ties — of two equally
+      # relevant turns the newer is likelier still true.
+      |> Enum.sort_by(fn {_turn, at, score} -> {-score, -at} end)
+      |> Enum.take(count)
+      |> Enum.sort_by(fn {_turn, at, _score} -> at end)
+      |> Enum.map(fn {turn, at, _score} -> %{turn: at, asked: turn.asked, answered: turn.answered} end)
+    end
+  end
+
+  defp terms(text) do
+    text
+    |> to_string()
+    |> String.downcase()
+    |> String.split(~r/[^a-z0-9_]+/u, trim: true)
+    |> Enum.reject(&(byte_size(&1) < 3))
+    |> MapSet.new()
+  end
+
+  # A recalled turn comes back whole unless whole is enormous — an answer that
+  # carries a file would otherwise spend the window the recall exists to save.
+  defp clipped(text) do
+    text = to_string(text)
+    if String.length(text) > 2_000, do: String.slice(text, 0, 2_000) <> " …", else: text
   end
 
   @doc """
