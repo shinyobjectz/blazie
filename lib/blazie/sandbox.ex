@@ -208,6 +208,10 @@ defmodule Blazie.Sandbox do
     end
   end
 
+  # A refusal that is already one passes through — `compiled/1` speaks the
+  # shape itself.
+  defp refusal(%{problem: _, repair: _} = why), do: why
+
   defp refusal(why) do
     %{
       problem: :would_not_start,

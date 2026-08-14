@@ -54,8 +54,11 @@ defmodule Blazie.SandboxWasiTest do
   end
 
   test "a module that is not wasm is refused before it runs" do
+    # `:will_not_load`, the same answer `run/3` gives — a compile failure is
+    # one problem however the module would have been spoken to.
     assert {:error, refusal} = Sandbox.run_wasi("not wasm at all")
-    assert refusal.problem == :would_not_start
+    assert refusal.problem == :will_not_load
+    assert refusal.repair =~ "did not compile"
   end
 
   test "a guest is given no filesystem unless somebody hands it one" do
