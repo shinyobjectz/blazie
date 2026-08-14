@@ -91,9 +91,41 @@ defmodule Blazie.Model do
   @spec embed(String.t(), String.t() | [String.t()], keyword()) ::
           {:ok, [[float()]]} | {:error, refusal()}
   def embed(model, text, opts \\ []) do
-    with {:ok, %Reference{} = model} <- Reference.from(model) do
-      Provider.for(model).embed(model, List.wrap(text), opts)
+    with {:ok, %Reference{} = reference} <- Reference.from(model),
+         :ok <- allowed(reference, opts) do
+      case Provider.for(reference).embed(reference, List.wrap(text), opts) do
+        {:ok, vectors} ->
+          {:ok, vectors}
+
+        # A provider that says what answering cost — GPU seconds, from a
+        # suite — gets its call booked exactly as converse books tokens:
+        # same table, same Studio attribution, same visible `unpriced`.
+        {:ok, vectors, usage} ->
+          book_embed(reference, opts, usage)
+          {:ok, vectors}
+
+        {:error, refusal} ->
+          {:error, refusal}
+      end
     end
+  end
+
+  defp book_embed(reference, opts, usage) do
+    with world when not is_nil(world) <- Keyword.get(opts, :into),
+         by when not is_nil(by) <- Keyword.get(opts, :by) do
+      billed = Keyword.get(opts, :for, by)
+
+      case Blazie.Price.booking(billed, named(reference), usage, prices(opts)) do
+        [] -> :ok
+        assertions -> Blazie.World.append(world, assertions)
+      end
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   @doc """

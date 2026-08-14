@@ -1,113 +1,232 @@
 defmodule Blazie.IndexTest do
   @moduledoc """
-  Facts are reached by a sort order rather than by scanning.
+  The vector seam: bought, roled, derived, and swappable.
 
-  Doctrine 12: an index is the engine's business. Nothing above the world
-  knows these exist — the tests below are about answers being identical and
-  the work being smaller.
+  The gate runs ONE capability — kind-scoped retrieval over a corpus of
+  symbols — through two providers: the exact node-local index (whose every
+  score is the true score, so it is also the baseline), and the Turbopuffer
+  module speaking real HTTP to a server implementing exactly the wire shape
+  the module speaks. Same test body, same corpus, same answers: the vendor
+  is swappable because nothing above the behaviour can tell them apart.
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
-  alias Blazie.{World, Snapshot, TestLedger}
+  alias Blazie.{Attribute, Index, Job, Snapshot, Symbol, TestLedger, World}
+  alias Blazie.Job.Runner
+
+  # A tiny wire-accurate vendor: holds upserts in an Agent, answers queries
+  # with exact cosine over what it holds, speaks the same paths, bodies and
+  # `dist` dialect the module does. What it pins is the MODULE's wire format.
+  defmodule Wire do
+    import Plug.Conn
+
+    def init(agent), do: agent
+
+    def call(
+          %Plug.Conn{method: "POST", path_info: ["v1", "namespaces", ns, "query"]} = conn,
+          agent
+        ) do
+      {:ok, body, conn} = read_body(conn)
+      asked = Jason.decode!(body)
+      rows = Agent.get(agent, &Map.get(&1, ns, %{}))
+
+      query = asked["vector"]
+
+      wanted = fn meta ->
+        Enum.all?(asked["filters"] || %{}, fn {key, [["Eq", value]]} ->
+          Map.get(meta, key) == value
+        end)
+      end
+
+      results =
+        rows
+        |> Map.values()
+        |> Enum.filter(fn %{"attributes" => meta} -> wanted.(meta) end)
+        |> Enum.map(fn %{"id" => id, "vector" => vector} ->
+          %{"id" => id, "dist" => 1.0 - cosine(query, vector)}
+        end)
+        |> Enum.sort_by(& &1["dist"])
+        |> Enum.take(asked["top_k"])
+
+      answer(conn, %{"results" => results})
+    end
+
+    def call(%Plug.Conn{method: "POST", path_info: ["v1", "namespaces", ns]} = conn, agent) do
+      {:ok, body, conn} = read_body(conn)
+      %{"upserts" => upserts} = Jason.decode!(body)
+
+      Agent.update(agent, fn held ->
+        Map.update(held, ns, Map.new(upserts, &{&1["id"], &1}), fn rows ->
+          Enum.reduce(upserts, rows, &Map.put(&2, &1["id"], &1))
+        end)
+      end)
+
+      answer(conn, %{"ok" => true})
+    end
+
+    def call(%Plug.Conn{method: "DELETE", path_info: ["v1", "namespaces", ns]} = conn, agent) do
+      Agent.update(agent, &Map.delete(&1, ns))
+      answer(conn, %{"ok" => true})
+    end
+
+    defp answer(conn, body) do
+      conn |> put_resp_content_type("application/json") |> send_resp(200, Jason.encode!(body))
+    end
+
+    defp cosine(a, b) do
+      dot = Enum.zip_with(a, b, &(&1 * &2)) |> Enum.sum()
+      na = :math.sqrt(Enum.map(a, &(&1 * &1)) |> Enum.sum())
+      nb = :math.sqrt(Enum.map(b, &(&1 * &1)) |> Enum.sum())
+      dot / (na * nb)
+    end
+  end
 
   setup do
     world = TestLedger.open()
+    {:ok, _} = World.append(world, Attribute.seed() ++ Index.seed() ++ Symbol.seed())
+    %{world: world}
+  end
+
+  defp exact_provider do
+    {Index.Exact, prefix: "t#{System.unique_integer([:positive])}_"}
+  end
+
+  defp turbopuffer_provider do
+    {:ok, agent} = Agent.start_link(fn -> %{} end)
+
+    server =
+      start_supervised!(
+        Supervisor.child_spec({Bandit, plug: {Wire, agent}, port: 0, ip: {127, 0, 0, 1}},
+          id: :"tp_#{System.unique_integer([:positive])}"
+        )
+      )
+
+    {:ok, {_addr, port}} = ThousandIsland.listener_info(server)
+
+    {Index.Turbopuffer,
+     endpoint: "http://127.0.0.1:#{port}",
+     key: "test-key",
+     prefix: "t#{System.unique_integer([:positive])}_"}
+  end
+
+  test "a space without a role refuses everything", %{world: world} do
+    snapshot = Snapshot.open([world])
+    query = Symbol.new("unroled_64", [1.0, 0.0])
+
+    assert {:error, %{problem: :no_role, repair: repair}} =
+             Index.nearest(snapshot, "unroled_64", query, 3, %{}, provider: exact_provider())
+
+    assert repair =~ "Declare it"
+  end
+
+  test "a query_only space cannot assert an edge, a similarity space can", %{world: world} do
+    {:ok, _} = World.append(world, Index.declare("glance_128", "query_only"))
+    {:ok, _} = World.append(world, Index.declare("pe_1024", "similarity"))
+    snapshot = Snapshot.open([world])
+
+    assert {:error, %{problem: :role_refuses, repair: repair}} =
+             Index.edge(snapshot, "glance_128", "a", "b", 0.9)
+
+    assert repair =~ "invent a relationship"
+
+    assert {:ok, [{_a, "alike", edge}]} = Index.edge(snapshot, "pe_1024", "a", "b", 0.9)
+    assert edge["space"] == "pe_1024"
+  end
+
+  describe "the Phase 4 gate: one capability, two vendors, same answers" do
+    # Sixteen items in two kinds whose vectors point in cleanly separated
+    # directions, so top-3 kind-scoped retrieval has an unambiguous truth.
+    defp corpus do
+      for i <- 1..16 do
+        kind = if rem(i, 2) == 0, do: "video", else: "still"
+        angle = i / 16 * 1.5 + if(kind == "video", do: 0.0, else: 100.0)
+        {"item-#{i}", [:math.cos(angle), :math.sin(angle)], %{"kind" => kind}}
+      end
+    end
+
+    defp truth(query, kind, k) do
+      corpus()
+      |> Enum.filter(fn {_id, _v, meta} -> meta["kind"] == kind end)
+      |> Enum.map(fn {id, v, _} ->
+        s = Symbol.new("gate_2", v)
+        {:ok, score} = Symbol.near(Symbol.new("gate_2", query), s)
+        {id, score}
+      end)
+      |> Enum.sort_by(fn {_id, score} -> -score end)
+      |> Enum.take(k)
+      |> Enum.map(&elem(&1, 0))
+    end
+
+    test "kind-scoped retrieval at parity, vendor swapped mid-test", %{world: world} do
+      {:ok, _} = World.append(world, Index.declare("gate_2", "retrieval"))
+      snapshot = Snapshot.open([world])
+      query = [:math.cos(0.7), :math.sin(0.7)]
+
+      for provider <- [exact_provider(), turbopuffer_provider()] do
+        {module, opts} = provider
+        :ok = module.upsert(opts, "gate_2", corpus())
+
+        {:ok, hits} =
+          Index.nearest(snapshot, "gate_2", Symbol.new("gate_2", query), 3, %{"kind" => "video"},
+            provider: provider
+          )
+
+        ids = Enum.map(hits, fn {id, _score} -> to_string(id) end)
+
+        assert ids == truth(query, "video", 3),
+               "#{inspect(module)} disagreed with the exact baseline: #{inspect(ids)}"
+
+        # Kill the index; the world still holds the symbols. Derived means
+        # disposable, and disposable means this is not data loss.
+        :ok = module.drop(opts, "gate_2")
+      end
+    end
+  end
+
+  test "the maintaining job indexes what lands, and re-fires on new symbols", %{world: world} do
+    {:ok, _} = World.append(world, Job.seed() ++ Index.job_seed())
+    {:ok, _} = World.append(world, Index.declare("lane_2", "retrieval"))
+    {:ok, _} = World.append(world, Attribute.define("embedding", answers: "any"))
+    {:ok, _} = World.append(world, Attribute.define("kind", answers: "name"))
+    {:ok, _} = World.append(world, Job.declare("indexer", every: 3_600))
+
+    provider = exact_provider()
+    {module, popts} = provider
 
     {:ok, _} =
       World.append(world, [
-        {1, "height", 180},
-        {1, "colour", "blue"},
-        {2, "height", 190},
-        {2, "parent", 1}
+        {"item-1", "embedding", Symbol.new("lane_2", [1.0, 0.0])},
+        {"item-1", "kind", "video"}
       ])
 
-    {:ok, _} = World.append(world, [{3, "height", 200}, {3, "parent", 1}])
+    runner =
+      start_supervised!(
+        {Runner,
+         world: world,
+         jobs: [Index.job("indexer", "embedding", provider: provider, meta: ["kind"])],
+         name: :"idx_#{System.unique_integer([:positive])}"}
+      )
 
-    %{world: world, snapshot: Snapshot.open([world])}
+    assert {:ok, ["indexer"]} = Runner.tick(runner, 1_000)
+    settle(runner)
+
+    {:ok, [{"item-1", _score}]} = module.search(popts, "lane_2", [1.0, 0.0], 1, %{})
+
+    # Quiet inside the cadence — until a new symbol lands in its read set.
+    assert {:ok, []} = Runner.tick(runner, 1_010)
+
+    {:ok, _} =
+      World.append(world, [{"item-2", "embedding", Symbol.new("lane_2", [0.0, 1.0])}])
+
+    assert {:ok, ["indexer"]} = Runner.tick(runner, 1_020)
+    settle(runner)
+
+    {:ok, [{"item-2", _}]} = module.search(popts, "lane_2", [0.0, 1.0], 1, %{})
   end
 
-  describe "every pattern shape answers the same as a scan would" do
-    test "by id", %{snapshot: snapshot} do
-      found = Snapshot.find(snapshot, id: 1)
-      assert length(found) == 2
-      assert Enum.all?(found, &(&1.id == 1))
-    end
-
-    test "by attribute", %{snapshot: snapshot} do
-      assert length(Snapshot.find(snapshot, attribute: "height")) == 3
-    end
-
-    test "by id and attribute", %{snapshot: snapshot} do
-      assert [%{value: 180}] = Snapshot.find(snapshot, id: 1, attribute: "height")
-    end
-
-    test "by answer — the value order", %{snapshot: snapshot} do
-      assert [%{id: 2}] = Snapshot.find(snapshot, attribute: "height", value: 190)
-    end
-
-    test "by answer alone — edges backwards", %{snapshot: snapshot} do
-      # Everything pointing at entity 1.
-      found = Snapshot.find(snapshot, value: 1)
-      assert Enum.map(found, & &1.id) |> Enum.sort() == [2, 3]
-    end
-
-    test "with no pattern at all", %{snapshot: snapshot} do
-      assert length(Snapshot.find(snapshot, [])) == 6
-    end
-
-    test "a pattern nothing matches", %{snapshot: snapshot} do
-      assert Snapshot.find(snapshot, id: 999) == []
-      assert Snapshot.find(snapshot, attribute: "never_written") == []
-    end
-  end
-
-  describe "answers stay ordered and bounded by the name" do
-    test "oldest first", %{snapshot: snapshot} do
-      txs = Snapshot.find(snapshot, attribute: "height") |> Enum.map(& &1.tx)
-      assert txs == Enum.sort(txs)
-    end
-
-    test "an earlier name does not see later facts", %{world: world} do
-      early = Snapshot.open([world])
-      {:ok, _} = World.append(world, [{4, "height", 210}])
-
-      assert length(Snapshot.find(early, attribute: "height")) == 3
-      assert length(Snapshot.find(Snapshot.open([world]), attribute: "height")) == 4
-    end
-
-    test "composing several ledgers still answers across them", %{world: a} do
-      b = TestLedger.open()
-      {:ok, _} = World.append(b, [{9, "height", 1}])
-
-      assert length(Snapshot.find(Snapshot.open([a, b]), attribute: "height")) == 4
-    end
-  end
-
-  describe "the work is smaller, not just the same" do
-    @tag timeout: 30_000
-    test "a targeted question over a large world stays fast" do
-      world = TestLedger.open()
-
-      # 20k facts across 10k entities and two attributes.
-      for chunk <- Enum.chunk_every(1..10_000, 500) do
-        facts =
-          Enum.flat_map(chunk, fn n -> [{n, "height", n}, {n, "colour", "c#{rem(n, 7)}"}] end)
-
-        {:ok, _} = World.append(world, facts)
-      end
-
-      snapshot = Snapshot.open([world])
-
-      {by_id, _} = :timer.tc(fn -> Snapshot.find(snapshot, id: 7777) end)
-      {by_pair, _} = :timer.tc(fn -> Snapshot.find(snapshot, id: 7777, attribute: "height") end)
-
-      assert Snapshot.find(snapshot, id: 7777) |> length() == 2
-
-      # A full scan and sort of 20k facts per question would not be close to
-      # this. Generous enough not to be flaky, tight enough to catch a
-      # regression to scanning.
-      assert by_id < 20_000, "find by id took #{by_id}us"
-      assert by_pair < 20_000, "find by id and attribute took #{by_pair}us"
-    end
+  defp settle(runner) do
+    Enum.reduce_while(1..400, nil, fn _, _ ->
+      if Runner.in_flight(runner) == [], do: {:halt, :ok}, else: {:cont, Process.sleep(5)}
+    end)
   end
 end

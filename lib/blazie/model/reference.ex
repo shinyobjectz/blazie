@@ -20,9 +20,12 @@ defmodule Blazie.Model.Reference do
     "openai" => Blazie.Model.Provider.OpenAI,
     "anthropic" => Blazie.Model.Provider.Anthropic,
     "openrouter" => Blazie.Model.Provider.OpenRouter,
-    "cloudflare" => Blazie.Model.Provider.Cloudflare
+    "cloudflare" => Blazie.Model.Provider.Cloudflare,
+    # A customer's own embedding suite — the MadEmb door. A vendor as a
+    # module name is a file, not a word.
+    "modal" => Blazie.Model.Provider.Modal
   }
-  @provider_atoms [:openai, :anthropic, :openrouter, :cloudflare]
+  @provider_atoms [:openai, :anthropic, :openrouter, :cloudflare, :modal]
   @doc false
   def known_atoms, do: @provider_atoms
 

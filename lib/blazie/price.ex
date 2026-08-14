@@ -38,6 +38,7 @@ defmodule Blazie.Price do
   def seed do
     Attribute.define("per_million_in", answers: "number") ++
       Attribute.define("per_million_out", answers: "number") ++
+      Attribute.define("per_gpu_second", answers: "number") ++
       Attribute.define("price_source", answers: "name") ++
       Attribute.define("price_checked", answers: "name") ++
       Attribute.define("booked", answers: "any", cardinality: "many") ++
@@ -57,8 +58,9 @@ defmodule Blazie.Price do
 
       {:ok,
        [
-         {id, "per_million_in", Keyword.fetch!(opts, :per_million_in) * 1.0},
-         {id, "per_million_out", Keyword.fetch!(opts, :per_million_out) * 1.0},
+         {id, "per_million_in", Keyword.get(opts, :per_million_in, 0.0) * 1.0},
+         {id, "per_million_out", Keyword.get(opts, :per_million_out, 0.0) * 1.0},
+         {id, "per_gpu_second", Keyword.get(opts, :per_gpu_second, 0.0) * 1.0},
          {id, "price_source", source},
          {id, "price_checked", checked}
        ]}
@@ -75,23 +77,24 @@ defmodule Blazie.Price do
   end
 
   @doc "The current price for a model, or nil — and nil means book nothing."
-  @spec of(Snapshot.t(), String.t()) :: %{in: float(), out: float()} | nil
+  @spec of(Snapshot.t(), String.t()) :: %{in: float(), out: float(), gpu: float()} | nil
   def of(%Snapshot{} = snapshot, model) do
     id = "price:" <> model
 
     with per_in when is_number(per_in) <- Snapshot.value(snapshot, id, "per_million_in"),
          per_out when is_number(per_out) <- Snapshot.value(snapshot, id, "per_million_out") do
-      %{in: per_in, out: per_out}
+      %{in: per_in, out: per_out, gpu: Snapshot.value(snapshot, id, "per_gpu_second") || 0.0}
     else
       _ -> nil
     end
   end
 
-  @doc "What one call cost at a price, in USD."
-  @spec cost(%{in: float(), out: float()}, %{in: non_neg_integer(), out: non_neg_integer()}) ::
-          float()
+  @doc "What one call cost at a price, in USD — tokens, GPU seconds, or both."
+  @spec cost(map(), map()) :: float()
   def cost(price, usage) do
-    usage.in / 1_000_000 * price.in + usage.out / 1_000_000 * price.out
+    Map.get(usage, :in, 0) / 1_000_000 * price.in +
+      Map.get(usage, :out, 0) / 1_000_000 * price.out +
+      Map.get(usage, :gpu_seconds, 0.0) * Map.get(price, :gpu, 0.0)
   end
 
   @doc """
@@ -121,8 +124,9 @@ defmodule Blazie.Price do
            %{
              "model" => model,
              "usd" => cost(price, usage),
-             "in" => usage.in,
-             "out" => usage.out
+             "in" => Map.get(usage, :in, 0),
+             "out" => Map.get(usage, :out, 0),
+             "gpu_seconds" => Map.get(usage, :gpu_seconds, 0.0)
            }, "price"}
         ]
     end
