@@ -1,0 +1,105 @@
+# The blazie <-> socialite alignment: a MAPPING, never a merge.
+#
+# Each row pairs a blazie word with the socialite code it meets at a seam,
+# says whose word RULES at that seam (at a framework's boundary, speak the
+# framework's word), and names what must never cross it. No blazie word
+# enters socialite's ontology database and no socialite word enters
+# blazie's — this file is the pairing, held as data so both repos can lint
+# it, and a row here is a recorded decision the way a collision ruling is.
+#
+# Checked by test/alignment_test.exs: every blazie word below must be one
+# blazie's ontology adopted (the list is pinned there, so a rename breaks
+# the test instead of silently orphaning a row), every socialite code must
+# be dotted-or-three-letter shaped, and no vendor may appear anywhere.
+
+[[pair]]
+blazie = "world"
+socialite = "har.workspace"
+seam = "an agent's files are facts in a world; the Harness mounts them as a workspace"
+rules = "blazie"
+never_cross = "socialite never writes a world directly — everything lands through the checked wire"
+
+[[pair]]
+blazie = "studio"
+socialite = "app.studio"
+seam = "tenancy: a Studio is worlds plus the one caller that may name exactly those"
+rules = "blazie"
+never_cross = "the shared Graph world is no tenant's Studio — presenting infrastructure as holdings"
+
+[[pair]]
+blazie = "run"
+socialite = "nex.session"
+seam = "one execution and its trajectory; resume is a query on either side"
+rules = "blazie"
+never_cross = "checkpoint state held anywhere but the facts (checkpoint.py retires into this seam)"
+
+[[pair]]
+blazie = "job"
+socialite = "nex.sweep"
+seam = "declared work with a cadence; a hint makes it due sooner because it read the hints"
+rules = "socialite"
+never_cross = "cursor advancing before the writes land"
+
+[[pair]]
+blazie = "directive"
+socialite = "nex.event"
+seam = "what a tool asked the runtime to do, and the record of it doing so"
+rules = "blazie"
+never_cross = "an effect performed that no fact records — the Event stream is the projection, not the record"
+
+[[pair]]
+blazie = "formula"
+socialite = "dos.report"
+seam = "a Dossier is EXECUTED, never typed: its numbers come from code under the fence"
+rules = "socialite"
+never_cross = "a number typed into prose — a claim with no origin"
+
+[[pair]]
+blazie = "symbol"
+socialite = "mad.space"
+seam = "a vector and the space it lives in; the space's role decides what it may assert"
+rules = "socialite"
+never_cross = "a query_only space asserting two things are alike"
+
+[[pair]]
+blazie = "ask"
+socialite = "nex.research"
+seam = "one objective, every granted source, one citable document shape, round-robin"
+rules = "socialite"
+never_cross = "a vendor's name reaching a tool, a document, or a word"
+
+[[pair]]
+blazie = "attribute"
+socialite = "mel.requirement"
+seam = "laws: named, versioned requirements on what a field's values must satisfy"
+rules = "blazie"
+never_cross = "a verdict that is absent — unjudgeable parks an answer exactly as failed does"
+
+[[pair]]
+blazie = "control plane"
+socialite = "nex.gateway"
+seam = "the account-wide door: limits, fairness, booking — the bucket sees every tenant"
+rules = "blazie"
+never_cross = "a per-tenant limiter claiming to hold an account-wide ceiling"
+
+[[pair]]
+blazie = "blob"
+socialite = "gph.format"
+seam = "bytes by content address; fetch-and-embed is one pass because addresses expire"
+rules = "blazie"
+never_cross = "a stored URL waiting to be embedded later"
+
+# ── decisions recorded as rows ─────────────────────────────────────────────
+
+# remit: DECIDED control-plane-only, 2026-08-14 (bla-8a8s). The engine's word
+# for authority is the grant (may_name facts, checked at the cluster's door);
+# a remit is the control plane's clamp on what an agent-held grant may do,
+# lives in the control plane's own store, and pulling it into the engine's
+# ontology would blur exactly the boundary this file exists to keep. Checked
+# free in blazie's ontology on the same date; if the engine ever grows a
+# concept this word fits, this row is where the argument resumes.
+[[decision]]
+name = "remit"
+ruled = "control-plane vocabulary only"
+checked = "2026-08-14"
+ticket = "bla-8a8s"
