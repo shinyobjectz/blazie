@@ -35,6 +35,8 @@ export type Opening = {
   home: string
   id: string
   hello: string
+  /** Where this cluster copies itself to. Absent means it does not. */
+  backup?: Backup
   /**
    * What signs this cluster's own cookies. Generated per cluster, written once.
    *
@@ -70,6 +72,27 @@ export type Opening = {
  * which is the right shape for a credential a web service holds.
  */
 export type Credentials = { token: string }
+
+/**
+ * Where a cluster's copies go.
+ *
+ * One bucket, a prefix per cluster. The prefix is the cluster's id rather than
+ * its name, because a name can be given up and taken by somebody else and a
+ * backup must not follow the name to a different cluster.
+ *
+ * The credential is shared across clusters, which is the weak part and is worth
+ * saying out loud: a cluster that was taken over could read every other
+ * cluster's copies. R2's S3 tokens cannot be scoped to a prefix, so genuinely
+ * isolating them means a bucket and a token per cluster. Recorded rather than
+ * quietly accepted.
+ */
+export type Backup = {
+  bucket: string
+  endpoint: string
+  accessKeyId: string
+  secretAccessKey: string
+  prefix: string
+}
 
 /**
  * The plans offered, and nothing else.
@@ -232,6 +255,28 @@ async function stateOf(credentials: Credentials, uuid: string): Promise<string |
  * checkout, and no step that depends on a machine somebody is holding. A cluster
  * that could only be opened from a particular laptop would not be a product.
  */
+/**
+ * The backup settings, or nothing at all.
+ *
+ * Nothing rather than empty values: `runtime.exs` decides whether to back up by
+ * whether `BACKUP_BUCKET` is set, and a blank one would configure a destination
+ * that does not exist and fail on the first cadence rather than at boot.
+ */
+function backupEnv(opening: Opening): string {
+  if (!opening.backup) return ""
+
+  const b = opening.backup
+
+  return [
+    `      BACKUP_BUCKET=${b.bucket}`,
+    `      BACKUP_ENDPOINT=${b.endpoint}`,
+    `      BACKUP_REGION=auto`,
+    `      BACKUP_ACCESS_KEY_ID=${b.accessKeyId}`,
+    `      BACKUP_SECRET_ACCESS_KEY=${b.secretAccessKey}`,
+    `      BACKUP_PREFIX=${b.prefix}`,
+  ].join("\n")
+}
+
 function cloudInit(opening: Opening): string {
   const said = `${opening.home}/api/clusters/${opening.id}/said`
 
@@ -254,6 +299,7 @@ write_files:
     content: |
       BLAZIE_CLUSTER=${opening.hostname}
       SECRET_KEY_BASE=${opening.secret}
+${backupEnv(opening)}
 
   - path: /usr/local/bin/blazie-open
     permissions: "0755"
@@ -318,9 +364,18 @@ write_files:
         cloudflare/cloudflared:latest tunnel --no-autoupdate run \\
         --token ${opening.tunnelToken}
 
-      sleep 8
-      docker ps --filter name=tunnel --filter status=running -q | grep -q . \\
-        || { say failed "cloudflared did not stay up: $(docker logs --tail 40 tunnel 2>&1)"; exit 1; }
+      # A container that stayed up is not a tunnel that connected — the
+      # difference cost a provision that reported it while Cloudflare
+      # served 1033. cloudflared says so in its own log when it registers.
+      for i in $(seq 1 45); do
+        docker logs tunnel 2>&1 | grep -q 'Registered tunnel connection' && break
+        docker ps --filter name=tunnel --filter status=running -q | grep -q . \\
+          || { say failed "cloudflared exited: $(docker logs --tail 60 tunnel 2>&1)"; exit 1; }
+        sleep 2
+      done
+
+      docker logs tunnel 2>&1 | grep -q 'Registered tunnel connection' \\
+        || { say failed "cloudflared never registered: $(docker logs --tail 60 tunnel 2>&1)"; exit 1; }
       say tunnelled
 
 runcmd:

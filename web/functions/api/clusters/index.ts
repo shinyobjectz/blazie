@@ -100,6 +100,19 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
       home: new URL(request.url).origin,
       id: made.made.id,
       hello,
+      // A prefix per cluster, keyed by id rather than name — a name can be
+      // given up and taken by somebody else, and a backup must not follow the
+      // name to a different cluster.
+      backup:
+        env.BACKUP_BUCKET && env.BACKUP_ENDPOINT && env.BACKUP_ACCESS_KEY_ID && env.BACKUP_SECRET_ACCESS_KEY
+          ? {
+              bucket: env.BACKUP_BUCKET,
+              endpoint: env.BACKUP_ENDPOINT,
+              accessKeyId: env.BACKUP_ACCESS_KEY_ID,
+              secretAccessKey: env.BACKUP_SECRET_ACCESS_KEY,
+              prefix: `clusters/${made.made.id}/`,
+            }
+          : undefined,
     },
   )
 

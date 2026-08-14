@@ -125,6 +125,19 @@ export type Control = {
   /** An UpCloud API token (`ucat_…`), presented as a bearer. */
   UPCLOUD_TOKEN?: string
 
+  /**
+   * Where a cluster copies itself to, and what it presents to get there.
+   *
+   * A cluster with no backup is one disk with no copy anywhere, which is the
+   * single largest gap between what the hand-built node had and what the console
+   * can make. Absent means clusters are opened without one — allowed, because a
+   * default destination is a bucket nobody chose, but the console says so.
+   */
+  BACKUP_BUCKET?: string
+  BACKUP_ENDPOINT?: string
+  BACKUP_ACCESS_KEY_ID?: string
+  BACKUP_SECRET_ACCESS_KEY?: string
+
   /** Needs Account:Cloudflare Tunnel:Edit — and Zone:DNS:Edit unless the next one is set. */
   CLOUDFLARE_API_TOKEN?: string
   /** Only when one token cannot hold both. Used for the zone's DNS record. */

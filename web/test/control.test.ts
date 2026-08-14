@@ -478,6 +478,12 @@ describe("what the machine is told to do", () => {
     assert.match(rendered, /^ {2}- apparmor$/m)
   })
 
+  it("proves the tunnel connected, not merely that a container is up", () => {
+    // A provision once reported `tunnelled` while Cloudflare served 1033: the
+    // container had stayed up and never registered. Those are different facts.
+    assert.match(script, /Registered tunnel connection/)
+  })
+
   it("closes everything inbound", () => {
     assert.match(script, /ufw --force default deny incoming/)
     assert.match(script, /ufw --force enable/)
@@ -492,5 +498,38 @@ describe("what the machine is told to do", () => {
 
   it("carries the secret the release refuses to boot without", () => {
     assert.match(rendered, /SECRET_KEY_BASE=SECRET/)
+  })
+
+  it("carries where to back up, when there is somewhere", async () => {
+    stub()
+    answering({ ok: true, body: { server: { uuid: "s" } } })
+
+    await upcloud.open(
+      { token: "t" },
+      {
+        name: "atlas", hostname: "atlas", zone: "us-nyc1", plan: "1xCPU-2GB",
+        tunnelToken: "T", secret: "S", home: "https://blazie.dev", id: "CID", hello: "H",
+        backup: {
+          bucket: "blazie-clusters",
+          endpoint: "https://acct.r2.cloudflarestorage.com",
+          accessKeyId: "AKI",
+          secretAccessKey: "SAK",
+          prefix: "clusters/CID/",
+        },
+      },
+    )
+
+    const yaml = (sent[0].body as any).server.user_data
+
+    assert.match(yaml, /BACKUP_BUCKET=blazie-clusters/)
+    assert.match(yaml, /BACKUP_PREFIX=clusters\/CID\//)
+    assert.match(yaml, /BACKUP_ACCESS_KEY_ID=AKI/)
+  })
+
+  it("omits backup entirely rather than configuring an empty one", () => {
+    // `runtime.exs` decides whether to back up by whether BACKUP_BUCKET is set.
+    // A blank one configures a destination that does not exist and fails on the
+    // first cadence rather than at boot, which is the worse of the two.
+    assert.equal(/BACKUP_BUCKET=/.test(rendered), false)
   })
 })

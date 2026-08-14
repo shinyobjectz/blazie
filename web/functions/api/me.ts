@@ -17,6 +17,14 @@ export const onRequestGet: PagesFunction<Control> = async ({ env, request }) => 
     login: session?.login ?? null,
     can: {
       sign_in: Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
+      // Said rather than assumed: a cluster opened without this holds facts on
+      // one disk with no copy anywhere, and that is invisible until it matters.
+      back_up: Boolean(
+        env.BACKUP_BUCKET &&
+          env.BACKUP_ENDPOINT &&
+          env.BACKUP_ACCESS_KEY_ID &&
+          env.BACKUP_SECRET_ACCESS_KEY,
+      ),
       open_clusters: Boolean(
         env.UPCLOUD_TOKEN &&
           env.CLOUDFLARE_API_TOKEN &&
