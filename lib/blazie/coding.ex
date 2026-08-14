@@ -76,7 +76,7 @@ defmodule Blazie.Coding do
   """
   @spec declare(String.t()) :: [tuple()]
   def declare(agent) do
-    for(tool <- ~w(list read write), do: {agent, "may_use", tool}) ++ tools()
+    for(tool <- ~w(list read write run), do: {agent, "may_use", tool}) ++ tools()
   end
 
   @doc "The tool declarations themselves, without granting them to anybody."
@@ -103,6 +103,16 @@ defmodule Blazie.Coding do
         if answer.content == nil then
           answer.missing = args.path
         end
+        """
+      ) ++
+      Tool.declare("run",
+        describe:
+          "Run a python file from the workspace and see what it printed. Takes `path`. " <>
+            "The whole workspace is there beside it, and anything it writes comes back.",
+        takes: %{"path" => %{"answers" => "name"}},
+        source: """
+        answer.path = args.path
+        answer.running = true
         """
       ) ++
       Tool.declare("write",
@@ -212,9 +222,113 @@ defmodule Blazie.Coding do
       {:ok, %{"writing" => true} = answered} ->
         apply_write(world, run, answered)
 
+      {:ok, %{"running" => true, "path" => path}} ->
+        execute(world, run, path, snapshot)
+
       other ->
         other
     end
+  end
+
+  @doc """
+  Run one of the workspace's files as python, in the sandbox.
+
+  The world's files are written into a directory, the directory is handed to the
+  guest as its only filesystem, and whatever it leaves behind comes back as
+  facts. So the agent works in python the way anybody works in python — a file,
+  an import, a thing it wrote next to it — and none of that reaches anything the
+  caller did not hand over.
+
+  `preopen` is what makes this ordinary rather than clever. A guest with no
+  preopened directory has no filesystem at all; with one it has exactly that
+  one. The fence is not a policy about paths, it is the absence of everything
+  else.
+
+  The directory is temporary and goes afterwards. The durable copy is the facts
+  it was built from and the facts it produced, which is the only account that
+  survives a restart.
+  """
+  @spec execute(World.ref(), term(), String.t(), Snapshot.t()) :: {:ok, map()} | {:error, map()}
+  def execute(world, run, path, %Snapshot{} = snapshot) do
+    case python() do
+      nil ->
+        {:error,
+         %{
+           problem: :no_python,
+           repair:
+             "This node has no python module, so nothing can be run. Set `:python_wasm` (or " <>
+               "PYTHON_WASM) to a wasi build of cpython."
+         }}
+
+      bytes ->
+        in_a_directory(snapshot, fn dir ->
+          answered = away(bytes, dir, path)
+          {:ok, Map.merge(answered, changed(world, run, snapshot, dir))}
+        end)
+    end
+  end
+
+  defp python do
+    case Application.get_env(:blazie, :python_wasm) || System.get_env("PYTHON_WASM") do
+      nil -> nil
+      where -> if File.exists?(where), do: File.read!(where), else: nil
+    end
+  end
+
+  # The workspace, on a disk, for exactly as long as the call takes.
+  defp in_a_directory(snapshot, doing) do
+    dir = Path.join(System.tmp_dir!(), "blazie-work-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+
+    for path <- files(snapshot) do
+      full = Path.join(dir, path)
+      File.mkdir_p!(Path.dirname(full))
+      File.write!(full, to_string(read(snapshot, path) || ""))
+    end
+
+    try do
+      doing.(dir)
+    after
+      File.rm_rf(dir)
+    end
+  end
+
+  defp away(bytes, dir, path) do
+    opts = [
+      fuel: Application.get_env(:blazie, :python_fuel, 20_000_000_000),
+      memory_bytes: Application.get_env(:blazie, :python_memory, 512 * 1024 * 1024),
+      args: ["python", Path.join("/work", path)],
+      preopen: [%Wasmex.Wasi.PreopenOptions{path: dir, alias: "/work"}]
+    ]
+
+    case Blazie.Sandbox.run_wasi(bytes, "", opts) do
+      {:ok, said, spent} -> %{"printed" => said, "fuel" => spent.fuel}
+      {:error, refusal} -> %{"failed" => refusal.repair, "problem" => to_string(refusal.problem)}
+    end
+  end
+
+  # Whatever the guest left behind, back as facts. A run that wrote a file and
+  # told nobody would be a run whose work vanished with the directory.
+  defp changed(world, run, snapshot, dir) do
+    before = MapSet.new(files(snapshot))
+
+    written =
+      dir
+      |> Path.join("**/*")
+      |> Path.wildcard()
+      |> Enum.filter(&File.regular?/1)
+      |> Enum.map(&Path.relative_to(&1, dir))
+      |> Enum.reject(fn path ->
+        MapSet.member?(before, path) and read(snapshot, path) == File.read!(Path.join(dir, path))
+      end)
+
+    for path <- written do
+      id = "file:" <> path
+      content = File.read!(Path.join(dir, path))
+      World.append(world, [{id, "path", path, run}, {id, "content", content, run}])
+    end
+
+    if written == [], do: %{}, else: %{"changed" => written}
   end
 
   defp apply_write(world, run, %{"path" => path, "content" => content}) do

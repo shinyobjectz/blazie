@@ -93,6 +93,31 @@ defmodule Blazie.CodingLiveTest do
     assert Coding.read(snapshot(world), "count.lua") =~ "42"
   end
 
+  @tag :python
+  test "it writes python, runs it, and reads what happened", %{world: world} do
+    # The loop that makes a coding agent converge rather than just edit: write,
+    # execute, look at the output. Everything before this was an editor.
+    {:ok, said, made} =
+      Coding.work(
+        world,
+        "live-run",
+        "Write a python file called sum.py that prints the sum of 1..10, then run it " <>
+          "and tell me what it printed.",
+        asks: live_chat(),
+        timeout: 120_000,
+        calls: 10
+      )
+
+    called = Enum.map(made, & &1.call.name)
+    assert "write" in called
+    assert "run" in called, "it never ran anything; it called #{inspect(called)}"
+
+    # 55, computed by cpython inside the sandbox rather than by the model.
+    ran = Enum.find(made, &(&1.call.name == "run"))
+    assert ran.answered["printed"] =~ "55"
+    assert said =~ "55"
+  end
+
   test "and the whole thing is answerable afterwards", %{world: world} do
     {:ok, _, _} =
       Coding.work(world, "live-3", "Create hello.lua containing: return 1",
