@@ -371,7 +371,12 @@ discovering them.
 - **Luerl performance.** No automatic collector: fifty thousand tables built
   and *discarded* still exhausted the heap until the binding grew a sweep at
   the iterator (`lua/binding.ex`). Walking a large world is exactly the
-  table-per-iteration shape. Also `pairs` order is unspecified, so anything
+  table-per-iteration shape — now measured: a Lua `each{}` aggregation over
+  50,000 readings costs **1,127ms per query** (~22µs per entity), which is
+  the ceiling a query author designs against. The repair for aggregation is
+  `Blazie.Rollup` (a projection a job maintains — 231ms once, re-firing on
+  change, sub-millisecond reads; the spike and the losing design's verdict
+  are in its moduledoc). Also `pairs` order is unspecified, so anything
   order-sensitive must sort — `facts/1` already does.
 - **Cold start and teardown of tunneled clusters.** A cluster is reachable
   only through cloudflared dialing out; opening is minutes of machine boot
