@@ -37,18 +37,24 @@ if config_env() == :prod do
            port: String.to_integer(System.get_env("PORT") || "4000")
          ]
 
+  # A production node without these is accidentally ephemeral, and the failure
+  # is silent until a redeploy erases everything — so absent is a refusal at
+  # boot, not a default and not a warning. `Blazie.Durability` holds the check
+  # so a test can run it; this is only the call.
+  :ok = Blazie.Durability.demanded!(System.get_env())
+
   # Where ledgers keep their facts. The store is the seam, so moving this to
   # object storage later is a different module rather than a different path.
   config :blazie,
     # LEDGER_DIR, not WORLD_DIR. The running node is configured with it and
     # every fact it holds is under /data/ledgers; renaming the variable or the
     # path would point a fresh node at an empty directory and call it healthy.
-    ledger_dir: System.get_env("LEDGER_DIR") || "/data/ledgers",
+    ledger_dir: System.fetch_env!("LEDGER_DIR"),
     ledger_sync: System.get_env("LEDGER_SYNC") == "true",
-    # Keys must outlive a deployment. Defaulting this inside the release would
-    # put them on an ephemeral disk, which is the in-memory keyring's bug
-    # wearing a filesystem — every subject erased by accident on redeploy.
-    key_dir: System.get_env("KEY_DIR") || "/data/keys",
+    # Keys must outlive a deployment. Demanded above for the same reason as
+    # the ledgers: keys on an ephemeral disk are every subject erased by
+    # accident on redeploy.
+    key_dir: System.fetch_env!("KEY_DIR"),
     kms_key: System.get_env("KMS_KEY"),
     gcp_credentials: System.get_env("GOOGLE_APPLICATION_CREDENTIALS")
 
@@ -137,10 +143,4 @@ if config_env() == :prod do
   # "no clusters yet" a state you can be in: asking a cluster to trade an oauth
   # code meant holding no cluster left you unable to reach the page that would
   # have let you open one.
-
-  if System.get_env("KEY_DIR") == nil do
-    IO.warn(
-      "KEY_DIR is not set; keys will be written to /data/keys. That path must be persistent storage — if it is not, a redeploy erases every subject."
-    )
-  end
 end

@@ -72,20 +72,39 @@ defmodule Blazie.AuthorityTest do
     end
   end
 
-  describe "the authority world is never nameable" do
+  describe "the reserved ledgers are never nameable" do
+    # The rule, not a list: everything whose contents change authorization or
+    # key state. A caller who could write `$erasures` would write forged
+    # tombstones, and the keyring reconciles against tombstones every time it
+    # opens — remote key destruction across ledgers, from one grant.
+    test "the set covers each module's own world, pinned both ways" do
+      assert Authority.world() in Authority.reserved()
+      assert Blazie.Erasure.world() in Authority.reserved()
+      assert "$backup" in Authority.reserved()
+    end
+
     test "not by default", %{token: token} do
-      refute Authority.may_name?(token, Authority.world())
+      for world <- Authority.reserved() do
+        refute Authority.may_name?(token, world)
+      end
     end
 
-    test "not even when granted", %{token: token} do
-      Authority.grant(token, Authority.world())
-
-      refute Authority.may_name?(token, Authority.world())
+    test "not even when a grant was forged straight into the world", %{token: token} do
+      # `grant/2` writes without checking — the fact lands. The refusal has to
+      # hold anyway, because a fact in the world is exactly what an attacker
+      # who reached the bytes can make.
+      for world <- Authority.reserved() do
+        Authority.grant(token, world)
+        refute Authority.may_name?(token, world)
+      end
     end
 
-    test "granting it is refused at the door rather than silently ignored", %{token: token} do
-      assert {:error, refusal} = Authority.grant_checked(token, Authority.world())
-      assert refusal.problem == :authority_is_not_nameable
+    test "granting one is refused at the door rather than silently ignored", %{token: token} do
+      for world <- Authority.reserved() do
+        assert {:error, refusal} = Authority.grant_checked(token, world)
+        assert refusal.problem == :not_nameable
+        assert refusal.repair =~ "no caller may ever name it"
+      end
     end
   end
 

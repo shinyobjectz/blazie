@@ -1,3 +1,11 @@
+# `LEDGER_SYNC=true mix test` runs the whole suite with every file store
+# fsyncing each transaction — the durable path, which no test would otherwise
+# take, and a flag no test sets is an untested path. CI runs the suite both
+# ways.
+if System.get_env("LEDGER_SYNC") == "true" do
+  Application.put_env(:blazie, :ledger_sync, true)
+end
+
 ExUnit.start(exclude: [:gcp, :crash, :load, :live, :object_storage, :python, :throughput])
 
 defmodule Blazie.TestLedger do

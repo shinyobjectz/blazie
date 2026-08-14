@@ -191,7 +191,11 @@ defmodule Blazie.Store.File do
        mode: mode,
        # Newest first. See `append/2`.
        facts: Enum.reverse(facts),
-       sync: Keyword.get(opts, :sync, false),
+       # The app env as the default, so `LEDGER_SYNC=true` reaches every file
+       # store nobody passed `sync:` to — including the whole test suite,
+       # because a flag no test sets is an untested path, and CI runs the
+       # suite once with it on.
+       sync: Keyword.get(opts, :sync, Application.get_env(:blazie, :ledger_sync, false)),
        every: Keyword.get(opts, :checkpoint_every),
        growth: Keyword.get(opts, :checkpoint_growth, @growth),
        # Tracked rather than asked for: a file opened in :append mode does not

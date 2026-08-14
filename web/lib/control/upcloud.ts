@@ -534,6 +534,9 @@ write_files:
       BLAZIE_CLUSTER=${opening.hostname}
       SECRET_KEY_BASE=${opening.secret}
       BLAZIE_MASTER_KEY=${opening.masterKey}
+      LEDGER_DIR=/data/ledgers
+      KEY_DIR=/data/keys
+      LEDGER_SYNC=true
 ${backupEnv(opening)}
 
   - path: /usr/local/bin/blazie-open

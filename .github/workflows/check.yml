@@ -41,6 +41,13 @@ jobs:
 
       - run: mix test
 
+      # The same suite with every file store fsyncing each transaction. The
+      # durable path is the one production runs and the one no test would
+      # otherwise take — a flag no test sets is an untested path.
+      - run: mix test
+        env:
+          LEDGER_SYNC: "true"
+
       # The crash tests spawn a real node in dev. Compile it first so the kill
       # lands on a process that is writing rather than one still starting.
       - run: MIX_ENV=dev mix compile
