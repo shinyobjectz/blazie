@@ -70,7 +70,10 @@ defmodule Blazie.MixProject do
       {:bandit, "~> 1.0"},
       {:jason, "~> 1.4"},
       {:wasmex, "~> 0.15"},
-      {:luerl, "~> 1.5"}
+      {:luerl, "~> 1.5"},
+      # The Elixir client, tested here against a real HTTP round trip so the
+      # SDK and the surface cannot drift apart unnoticed.
+      {:blazie_client, path: "clients/elixir", only: :test}
       # CORS is security-relevant and stable; doctrine 18 says a maintained
       # library beats one of ours for exactly this shape of requirement.
     ]
