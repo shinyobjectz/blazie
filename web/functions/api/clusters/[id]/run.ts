@@ -13,7 +13,7 @@
  */
 
 import { refuse, unauthenticated } from "@/lib/control/answer"
-import { one } from "@/lib/control/clusters"
+import { one, presenting } from "@/lib/control/clusters"
 import type { Control } from "@/lib/control/model"
 import { whoIs } from "@/lib/control/session"
 
@@ -29,13 +29,35 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request, para
 
   const body = await request.text()
 
+  // Which caller to speak as. Named studio, or the founding one that owns
+  // everything — and a studio that does not exist is refused rather than
+  // quietly becoming the founding token, because a typo that grants everything
+  // is the worst way this could fail.
+  const asked = (() => {
+    try {
+      return JSON.parse(body || "{}") as { studio?: string }
+    } catch {
+      return {}
+    }
+  })()
+
+  const token = presenting(cluster, asked.studio)
+
+  if (!token) {
+    return refuse(
+      "no_such_studio",
+      `${cluster.name} holds no studio with that id. A studio is made before it can be spoken for.`,
+      404,
+    )
+  }
+
   let answered: Response
 
   try {
     answered = await fetch(`${cluster.address}/run`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${cluster.token}`,
+        authorization: `Bearer ${token}`,
         "content-type": "application/json",
       },
       body,

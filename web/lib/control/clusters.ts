@@ -65,6 +65,24 @@ export async function amend(
 }
 
 /**
+ * Which token to present, for a Studio or for the cluster itself.
+ *
+ * No Studio named means the founding caller — the one minted when the cluster
+ * was opened, which owns everything on it. That is the right default for the
+ * console's own housekeeping and the wrong one for a tenant, which is why
+ * naming a Studio is how a tenant is spoken for.
+ *
+ * A Studio that does not exist is not silently the founding token. Falling back
+ * would mean a typo in a Studio name quietly granting everything, which is the
+ * single worst way for this to fail.
+ */
+export function presenting(cluster: Held, studio?: string | null): string | null {
+  if (!studio) return cluster.token
+
+  return (cluster.studios ?? []).find((s) => s.id === studio)?.token ?? null
+}
+
+/**
  * Ask a cluster who it thinks the caller is.
  *
  * The readiness check, and it is `/me` rather than a ping on purpose: a machine

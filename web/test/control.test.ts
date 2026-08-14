@@ -20,8 +20,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { after, before, describe, it } from "node:test"
 
-import { asHostname, mintToken, same } from "../lib/control/clusters.ts"
-import { type Held, shown } from "../lib/control/model.ts"
+import { asHostname, mintToken, presenting, same } from "../lib/control/clusters.ts"
+import { type Held, type Studio, shown, studioShown } from "../lib/control/model.ts"
 import * as phoenix from "../lib/control/phoenix.ts"
 import * as tunnel from "../lib/control/tunnel.ts"
 import * as upcloud from "../lib/control/upcloud.ts"
@@ -473,6 +473,66 @@ describe("what a browser is allowed to see", () => {
     assert.equal(out.name, "atlas")
     assert.equal(out.address, "https://atlas.blazie.dev")
     assert.equal(out.state, "open")
+  })
+})
+
+describe("studios, the tenant boundary", () => {
+  const alpha: Studio = { id: "s-alpha", name: "alpha", token: "ALPHA-TOKEN", opened: "" }
+  const beta: Studio = { id: "s-beta", name: "beta", token: "BETA-TOKEN", opened: "" }
+
+  const cluster: Held = {
+    id: "c1",
+    name: "atlas",
+    address: "https://atlas.blazie.dev",
+    token: "FOUNDING-TOKEN",
+    hello: "HELLO",
+    state: "open",
+    opened: "",
+    studios: [alpha, beta],
+  }
+
+  it("speaks as the studio that was named", () => {
+    assert.equal(presenting(cluster, "s-alpha"), "ALPHA-TOKEN")
+    assert.equal(presenting(cluster, "s-beta"), "BETA-TOKEN")
+  })
+
+  it("speaks as the founding caller when none is named", () => {
+    assert.equal(presenting(cluster, null), "FOUNDING-TOKEN")
+    assert.equal(presenting(cluster, undefined), "FOUNDING-TOKEN")
+  })
+
+  it("refuses a studio that does not exist, rather than falling back", () => {
+    // The single worst way this could fail: a typo in a studio id quietly
+    // becoming the founding token, which owns every world on the cluster.
+    assert.equal(presenting(cluster, "s-typo"), null)
+  })
+
+  it("works on a cluster opened before studios existed", () => {
+    const older: Held = { ...cluster, studios: undefined }
+
+    assert.equal(presenting(older, null), "FOUNDING-TOKEN")
+    assert.equal(presenting(older, "s-alpha"), null)
+  })
+
+  it("never carries a studio's token to a browser", () => {
+    const out = shown(cluster)
+    const json = JSON.stringify(out)
+
+    // A nested credential is the one a `shown` written for the outer shape
+    // forgets. Both are checked because both would be a leak.
+    assert.equal(json.includes("ALPHA-TOKEN"), false)
+    assert.equal(json.includes("BETA-TOKEN"), false)
+    assert.equal(json.includes("FOUNDING-TOKEN"), false)
+
+    assert.deepEqual(out.studios.map((s) => s.name), ["alpha", "beta"])
+    assert.equal(studioShown(alpha).name, "alpha")
+    assert.equal((studioShown(alpha) as Record<string, unknown>).token, undefined)
+  })
+
+  it("shows an empty list rather than nothing, on an older cluster", () => {
+    // The console maps over this. `undefined` would be a crash on exactly the
+    // clusters that existed before the feature.
+    assert.deepEqual(shown({ ...cluster, studios: undefined }).studios, [])
   })
 })
 

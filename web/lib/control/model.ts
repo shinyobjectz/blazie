@@ -37,6 +37,19 @@ export type Held = {
 
   /** The last thing the machine said about becoming a cluster. */
   saying?: Said
+
+  /**
+   * The tenant boundaries on this cluster.
+   *
+   * A Studio is a set of worlds and a caller that may name exactly those, so
+   * what is kept here is the caller — one token per Studio rather than one per
+   * cluster that owns everything on it.
+   *
+   * Absent on a cluster opened before Studios existed, which is why every read
+   * of it tolerates undefined: the founding token still works and still owns
+   * everything, and a cluster is not migrated by being looked at.
+   */
+  studios?: Studio[]
   host?: Host
   opened: string
 }
@@ -89,14 +102,44 @@ export function isStep(value: unknown): value is Step | "failed" {
  * The token is not in it and cannot be added by forgetting to remove it —
  * `shown/1` is the only way a cluster crosses the wire.
  */
-export type Shown = Omit<Held, "token" | "hello">
+export type Shown = Omit<Held, "token" | "hello" | "studios"> & {
+  studios: StudioShown[]
+}
 
 export function shown(cluster: Held): Shown {
   // Destructured out rather than deleted, so the type says they are gone
   // instead of a cast promising it. `void` marks them as dropped on purpose.
-  const { token, hello, ...rest } = cluster
+  const { token, hello, studios, ...rest } = cluster
   void token
   void hello
+
+  // Mapped rather than passed through: a Studio carries a token too, and the
+  // one way a credential reaches a browser is somebody forgetting a nested one.
+  return { ...rest, studios: (studios ?? []).map(studioShown) }
+}
+
+/**
+ * A tenant boundary: a caller that may name a set of worlds and no others.
+ *
+ * WHICH worlds is deliberately not stored here. That lives in the cluster's own
+ * `$authority`, which is the record — and a control plane keeping its own list
+ * beside it would be answering from a copy of the thing whose whole point is
+ * that it is the record. Ask the cluster with this token and it says.
+ */
+export type Studio = {
+  id: string
+  name: string
+  /** Server-side only, like every other credential here. */
+  token: string
+  opened: string
+}
+
+/** A Studio as the browser may see it: who it is, never what it presents. */
+export type StudioShown = Omit<Studio, "token">
+
+export function studioShown(studio: Studio): StudioShown {
+  const { token, ...rest } = studio
+  void token
   return rest
 }
 

@@ -9,7 +9,7 @@
  */
 
 import { refuse, unauthenticated } from "@/lib/control/answer"
-import { one } from "@/lib/control/clusters"
+import { one, presenting } from "@/lib/control/clusters"
 import type { Control } from "@/lib/control/model"
 import {
   HEARTBEAT_MS,
@@ -36,10 +36,16 @@ export const onRequestGet: PagesFunction<Control> = async ({ env, request, param
     return refuse("incomplete", "Watching needs `world` and `source`: where, and the Lua to keep answering.", 400)
   }
 
+  const token = presenting(cluster, asked.get("studio"))
+
+  if (!token) {
+    return refuse("no_such_studio", `${cluster.name} holds no studio with that id.`, 404)
+  }
+
   let upstream: Response
 
   try {
-    upstream = await fetch(socketUrl(cluster.address, cluster.token), {
+    upstream = await fetch(socketUrl(cluster.address, token), {
       headers: { Upgrade: "websocket" },
     })
   } catch {

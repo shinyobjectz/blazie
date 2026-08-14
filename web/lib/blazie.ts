@@ -189,7 +189,13 @@ export function run(
   cluster: string,
   world: string,
   source: string,
-  options: { name?: SnapshotName; also?: string[]; as?: "formula" | "job" } = {},
+  options: {
+    name?: SnapshotName
+    also?: string[]
+    as?: "formula" | "job"
+    /** Which tenant is speaking. Absent means the cluster's founding caller. */
+    studio?: string
+  } = {},
 ) {
   return send<RunResult>(`/api/clusters/${encodeURIComponent(cluster)}/run`, {
     body: { world, source, ...options },
@@ -250,10 +256,31 @@ export function watch(
   return () => stream.close()
 }
 
-/** Take a world name on a cluster. First come, and yours once taken. */
-export function claim(cluster: string, world: string) {
+/**
+ * Take a world name on a cluster. First come, and yours once taken.
+ *
+ * Claimed BY a studio when one is named, which is what makes a Studio a
+ * boundary rather than a label: the grant lands on that studio's caller, and no
+ * other studio on the cluster can name it afterwards.
+ */
+export function claim(cluster: string, world: string, studio?: string) {
   return send<{ world: string; name: SnapshotName }>(
     `/api/clusters/${encodeURIComponent(cluster)}/worlds`,
-    { body: { world } },
+    { body: { world, studio } },
+  )
+}
+
+/** The tenant boundaries on a cluster. */
+export function studios(cluster: string) {
+  return send<{ studios: { id: string; name: string; opened: string }[] }>(
+    `/api/clusters/${encodeURIComponent(cluster)}/studios`,
+  )
+}
+
+/** Make one. It holds no worlds until it claims them. */
+export function openStudio(cluster: string, name: string) {
+  return send<{ studio: { id: string; name: string; opened: string } }>(
+    `/api/clusters/${encodeURIComponent(cluster)}/studios`,
+    { body: { name } },
   )
 }
