@@ -10,6 +10,6 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["**/*.ts", "../lib/control/**/*.ts", "../lib/path.ts"],
+  "include": ["**/*.ts", "../lib/control/**/*.ts", "../lib/path.ts", "../lib/world-avatar.ts"],
   "exclude": ["../node_modules"]
 }

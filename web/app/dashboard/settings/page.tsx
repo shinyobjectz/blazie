@@ -1,5 +1,7 @@
 "use client"
 
+import { Grants } from "@/components/dashboard/grants"
+
 import { KeyRound } from "lucide-react"
 import { useRouter } from "next/navigation"
 
@@ -99,6 +101,8 @@ export default function Settings() {
           able to stop a database.
         </p>
       </section>
+
+      <Grants />
     </>
   )
 }

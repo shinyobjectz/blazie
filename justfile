@@ -32,7 +32,7 @@ _default:
 # order. `format` was missing, so a green `just check` never implied a green CI:
 # the build had been failing on formatting for long enough that nobody was
 # reading it, which is how a gate stops being one.
-check: format-check test control-test onto-scan
+check: format-check test control-test onto-scan onto-words-check mcp-skill-check
 
 format-check:
     mix format --check-formatted
@@ -51,6 +51,24 @@ build:
     mix compile --warnings-as-errors
 
 # Is this name free, ours, or ruled on? Run BEFORE naming anything.
+# blazie's vocabulary, rendered where the worker can quote it. The MCP surface
+# describes clusters and worlds to an agent, and those definitions already exist
+# — retyping one makes a second copy that nothing compares.
+onto-words:
+    @python3 scripts/onto-words.py
+
+onto-words-check:
+    @python3 scripts/onto-words.py --check
+
+# The skill an agent reads, rendered from the tool array the server dispatches
+# on. Documentation of an interface that is written by hand is correct the day
+# it is written and silently wrong afterwards.
+mcp-skill:
+    @node --experimental-strip-types --import ./web/test/run.ts scripts/mcp-skill.mts
+
+mcp-skill-check:
+    @node --experimental-strip-types --import ./web/test/run.ts scripts/mcp-skill.mts --check
+
 onto-check NAME:
     @{{monty}} onto check {{NAME}}
 

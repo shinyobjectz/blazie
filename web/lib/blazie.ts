@@ -293,3 +293,50 @@ export function openStudio(cluster: string, name: string) {
     { body: { name } },
   )
 }
+
+/* --------------------------------------------------------------- grants */
+
+/**
+ * What an agent may do on your behalf.
+ *
+ * The token comes back exactly once, from `makeGrant`. Nothing here can fetch
+ * it again, deliberately — a control plane that could hand back the tokens it
+ * issued would hand over every agent at once if it were ever read.
+ */
+export type Remit = {
+  clusters: "none" | "open" | "open+remove"
+  most: number
+  worlds: string[]
+  until: string
+}
+
+export type Grant = {
+  id: string
+  name: string
+  owner: string
+  remit: Remit
+  made: string
+  used?: string
+  revoked?: string
+}
+
+export function grants() {
+  return send<{ grants: Grant[] }>("/api/grants")
+}
+
+export function makeGrant(asked: { name: string; remit: Remit }) {
+  return send<{ grant: Grant; token: string }>("/api/grants", { body: asked })
+}
+
+export function revokeGrant(id: string) {
+  return send<{ revoked: string }>(`/api/grants?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  })
+}
+
+/** Approve an agent that is sitting on a pairing code, waiting. */
+export function approvePairing(code: string, remit: Remit) {
+  return send<{ approved: string; called: string }>("/api/grants/pair?ok=1", {
+    body: { code, remit },
+  })
+}
