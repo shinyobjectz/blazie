@@ -61,7 +61,15 @@ allow = ["job", "open", "write", "watch", "ask", "name", "value", "world"]
 # what it displaced, and it is the first thing that would go to save characters.
 #
 # So the budget is raised and the gap is said on every lint rather than being
-# quietly absent. The number is not free: it is ~6k tokens of every agent's
+# quietly absent. The number is not free: it is ~7k tokens of every agent's
 # context, spent on knowing what the words mean before writing any of them.
-body_cap = 28000
+#
+# Raised again 2026-08-14 (28000 -> 34000) for `run`, `refinement` and
+# `directive`. Worth writing down that this is the expected shape rather than a
+# slow leak: a vocabulary grows when the system does, each word costs its own
+# reasoning, and the alternative — a cap that forces the reasoning out — buys
+# characters by removing the only thing that stops a word drifting. The headroom
+# is deliberate so the next word is a decision about the word rather than about
+# this number.
+body_cap = 34000
 body_cap_why = "every word carries the reasoning that settled it, and that reasoning is what stops a word drifting back to whatever it displaced — so it is exactly the wrong thing to cut for characters. Deliberately says no number: a reason that has to be edited every time a word is added is a reason that goes stale, which is the drift this lint exists to catch"

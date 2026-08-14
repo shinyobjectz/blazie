@@ -76,7 +76,7 @@ defmodule Blazie.Coding do
   """
   @spec declare(String.t()) :: [tuple()]
   def declare(agent) do
-    for(tool <- ~w(list read write run), do: {agent, "may_use", tool}) ++ tools()
+    for(tool <- ~w(list read write run ask), do: {agent, "may_use", tool}) ++ tools()
   end
 
   @doc "The tool declarations themselves, without granting them to anybody."
@@ -111,8 +111,18 @@ defmodule Blazie.Coding do
             "The whole workspace is there beside it, and anything it writes comes back.",
         takes: %{"path" => %{"answers" => "name"}},
         source: """
+        answer["do"] = "run"
         answer.path = args.path
-        answer.running = true
+        """
+      ) ++
+      Tool.declare("ask",
+        describe:
+          "Hand a sub-task to another agent and get back what it said. Takes `task`. " <>
+            "Use it for work that is separable — not for something you could do in a step.",
+        takes: %{"task" => %{"answers" => "name"}},
+        source: """
+        answer["do"] = "ask"
+        answer.task = args.task
         """
       ) ++
       Tool.declare("write",
@@ -124,9 +134,9 @@ defmodule Blazie.Coding do
           "content" => %{"answers" => "name"}
         },
         source: """
+        answer["do"] = "write"
         answer.path = args.path
         answer.content = args.content
-        answer.writing = true
         """
       )
   end
@@ -226,7 +236,7 @@ defmodule Blazie.Coding do
           [%{"role" => "user", "content" => prompt(snapshot, agent, task)}] ++
             Run.messages(snapshot, run, keep: Keyword.get(opts, :keep, 6)),
           Tool.available(snapshot, agent),
-          &running(world, run, &1),
+          &running(world, run, opts, &1),
           Keyword.merge(
             [into: world, by: run, calls: Keyword.get(opts, :calls, 12)],
             Keyword.take(opts, [:provider, :timeout, :answers, :snapshot, :tries])
@@ -291,15 +301,18 @@ defmodule Blazie.Coding do
   # tool that wrote would be writing before anybody checked it — and what comes
   # back on a refusal is the reason, which the loop hands to the model as its
   # next turn.
-  defp running(world, run, call) do
+  defp running(world, run, opts, call) do
     snapshot = Snapshot.open([world])
 
+    # The loop no longer knows what any particular tool means. It runs the tool
+    # and hands whatever came back to the runtime, which performs it if it is a
+    # directive and passes it through if it is an answer.
     case Tool.run(snapshot, call) do
-      {:ok, %{"writing" => true} = answered} ->
-        apply_write(world, run, answered)
-
-      {:ok, %{"running" => true, "path" => path}} ->
-        execute(world, run, path, snapshot)
+      {:ok, answered} ->
+        Blazie.Directive.perform(
+          %{world: world, run: run, snapshot: snapshot, opts: opts},
+          answered
+        )
 
       other ->
         other
@@ -405,39 +418,5 @@ defmodule Blazie.Coding do
     end
 
     if written == [], do: %{}, else: %{"changed" => written}
-  end
-
-  defp apply_write(world, run, %{"path" => path, "content" => content}) do
-    id = "file:" <> path
-    writing = [{id, "path", path, run}, {id, "content", content, run}]
-
-    # Requirements first and explicitly. `World.append`'s `check:` is the
-    # vocabulary check and does not run them; a caller that wants them asks, and
-    # an agent's output is the case that most needs asking.
-    case Attribute.unmet(writing, Snapshot.open([world])) do
-      [] -> appending(world, writing, path)
-      unmet -> refused(path, unmet)
-    end
-  end
-
-  defp apply_write(_world, _run, answered), do: {:ok, answered}
-
-  defp appending(world, writing, path) do
-    case World.append(world, writing, check: &Attribute.check/2) do
-      {:ok, tx} -> {:ok, %{"wrote" => path, "at" => tx}}
-      {:error, refusals} -> refused(path, refusals)
-    end
-  end
-
-  defp refused(path, why) do
-    # Handed back as an answer rather than raised, so the model reads it and
-    # fixes it. A refusal the model never sees is a loop that repeats.
-    {:error,
-     %{
-       problem: :refused,
-       repair:
-         "Writing #{path} was refused: " <>
-           Enum.map_join(List.wrap(why), " ", &Map.get(&1, :repair, "no reason given"))
-     }}
   end
 end

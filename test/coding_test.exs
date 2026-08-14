@@ -74,7 +74,7 @@ defmodule Blazie.CodingTest do
   test "a write ANSWERS rather than writing", %{world: world} do
     # The tool itself must not touch the world: an agent's answer is exactly the
     # thing nobody has decided about yet.
-    assert {:ok, %{"writing" => true, "path" => "b.lua"}} =
+    assert {:ok, %{"do" => "write", "path" => "b.lua"}} =
              Tool.run(snapshot(world), %{
                name: "write",
                arguments: %{"path" => "b.lua", "content" => "return 2"}
@@ -243,6 +243,6 @@ defmodule Blazie.CodingTest do
 
     # Declared in the same world and not granted, so not offered. Two agents in
     # one world are not two agents with each other's hands.
-    assert names == ["list", "read", "run", "write"]
+    assert names == ["ask", "list", "read", "run", "write"]
   end
 end

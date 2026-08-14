@@ -50,6 +50,12 @@ export const WORDS: Record<string, Word> = {
     "definition": "What decides, as against what holds. It signs you in, remembers which clusters are yours, makes and unmakes the machines and the way in to them, and is the only thing that may present a credential to a cluster. It holds no worlds and answers no questions about data — asking it what is in a world is a category error, because it does not know and must not.",
     "test": "Would it still be needed if you already had every cluster you wanted, running? If no, it is control plane. If yes, it is a cluster."
   },
+  "dir": {
+    "name": "directive",
+    "code": "dir",
+    "definition": "An effect a tool asked the runtime to perform, and the record of it having been performed. A tool answers; it does not act. What it answers may be a directive — write this file, run this, ask another agent — and the runtime owns the doing, so what may happen at all is a list somebody can read rather than whatever a tool's code reached for. Both halves are facts: what was asked and what came of it, so an agent's effects on the world are a query and not an inference from its output.",
+    "test": "Did something outside the model happen because a tool said so? Then a directive carried it. If the tool did it itself, the runtime does not know it happened."
+  },
   "fac": {
     "name": "fact",
     "code": "fac",
