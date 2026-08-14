@@ -63,6 +63,10 @@ defmodule Blazie.Attribute do
   @answers "answers"
   @cardinality "cardinality"
 
+  # `one_of` sits beside `answers` because it is the same kind of statement: what
+  # a value may be. Many, because a closed set is written one member per fact —
+  # a stringified list would be a value nothing can read back.
+  @one_of "one_of"
   @root [@is, @answers, @cardinality]
 
   @type refusal :: %{attribute: String.t(), problem: atom(), repair: String.t()}
@@ -77,7 +81,12 @@ defmodule Blazie.Attribute do
   def seed do
     Enum.flat_map(@root, fn name ->
       [{name, @is, "attribute"}, {name, @answers, "name"}, {name, @cardinality, "one"}]
-    end)
+    end) ++
+      [
+        {@one_of, @is, "attribute"},
+        {@one_of, @answers, "name"},
+        {@one_of, @cardinality, "many"}
+      ]
   end
 
   @doc """
@@ -190,7 +199,8 @@ defmodule Blazie.Attribute do
     # it is the same check one transaction earlier — correct for a caller that
     # wants to know before it asks, and not a substitute for the one the world
     # runs, because only that one is serialised with the append.
-    with :ok <- check(assertions, known(facts)) do
+    with :ok <- check(assertions, known(facts)),
+         :ok <- shaped(assertions, facts) do
       assertions
       |> redeclarations(facts)
       |> Enum.flat_map(&contradicted(facts, &1))
@@ -217,6 +227,87 @@ defmodule Blazie.Attribute do
       [] -> :ok
       undefined -> {:error, Enum.map(undefined, &refusal/1)}
     end
+  end
+
+  # Does each value fit what its attribute says it answers?
+  #
+  # This was the sentence directly above `satisfies?/2` — "the predicate that
+  # check would be built from" — left subjunctive. It was never built, so a
+  # field declared `answers: "integer"` took a string and nothing anywhere said
+  # so: the shape was enforced at the model boundary by a json schema, and at
+  # the write boundary not at all. A declaration that only binds the polite
+  # caller is decoration.
+  #
+  # `answers: "any"` is the default and permissive, so this bites exactly the
+  # fields that went to the trouble of saying what they hold.
+  defp shaped(assertions, facts) do
+    declared = declarations_in(assertions)
+
+    assertions
+    |> Enum.map(&three/1)
+    |> Enum.flat_map(fn {_id, attribute, value} ->
+      shape = Map.get(declared, {attribute, @answers}) || value_in(facts, attribute, @answers)
+      set = Map.get(declared, {attribute, @one_of}) || one_of_in(facts, attribute)
+
+      cond do
+        not satisfies?(value, shape || "any") ->
+          [wrong_shape(attribute, shape, value)]
+
+        set != [] and set != nil and to_string(value) not in set ->
+          [outside(attribute, set, value)]
+
+        true ->
+          []
+      end
+    end)
+    |> case do
+      [] -> :ok
+      refusals -> {:error, refusals}
+    end
+  end
+
+  # A batch that declares a field and uses it is coherent, so the declarations
+  # in THIS write count — the same reasoning as `declared_in/1` above.
+  defp declarations_in(assertions) do
+    for assertion <- assertions,
+        {name, key, value} <- [three(assertion)],
+        key in [@answers, @one_of],
+        reduce: %{} do
+      held ->
+        case key do
+          "one_of" ->
+            Map.update(held, {name, "one_of"}, [to_string(value)], &(&1 ++ [to_string(value)]))
+
+          _ ->
+            Map.put(held, {name, key}, to_string(value))
+        end
+    end
+  end
+
+  defp one_of_in(facts, name) do
+    facts
+    |> Enum.filter(&(&1.id == name and &1.attribute == @one_of))
+    |> Enum.map(& &1.value)
+  end
+
+  defp wrong_shape(attribute, shape, value) do
+    %{
+      attribute: attribute,
+      problem: :wrong_shape,
+      repair:
+        "#{inspect(attribute)} answers #{inspect(shape)}, and #{inspect(value)} is not one. " <>
+          "Write a value of that shape, or widen what the field answers."
+    }
+  end
+
+  defp outside(attribute, set, value) do
+    %{
+      attribute: attribute,
+      problem: :outside_the_set,
+      repair:
+        "#{inspect(attribute)} answers one of #{Enum.map_join(set, ", ", &inspect/1)}, and " <>
+          "#{inspect(value)} is not among them."
+    }
   end
 
   @doc """
@@ -403,7 +494,7 @@ defmodule Blazie.Attribute do
   def one_of(source, name) do
     source
     |> facts_of()
-    |> Enum.filter(&(&1.id == name and &1.attribute == "one_of"))
+    |> Enum.filter(&(&1.id == name and &1.attribute == @one_of))
     |> Enum.map(& &1.value)
   end
 

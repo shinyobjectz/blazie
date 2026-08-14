@@ -108,6 +108,66 @@ defmodule Blazie.AttributeTest do
     end
   end
 
+  describe "a value has to fit what its field says it answers" do
+    test "a string into an integer field is refused", %{world: world} do
+      # The prose above `satisfies?/2` called it "the predicate that check would
+      # be built from" — subjunctive, and it was never built. So a field could
+      # declare `answers: "integer"` and take a string, with the shape enforced
+      # at the model boundary by a json schema and at the write boundary not at
+      # all. A declaration that only binds the polite caller is decoration.
+      {:ok, _} = World.append(world, Attribute.define("age", answers: "integer"))
+
+      assert {:error, [refusal]} =
+               World.append(world, [{"ada", "age", "not a number"}], checking_the_facts(world))
+
+      assert refusal.problem == :wrong_shape
+      assert refusal.repair =~ "answers \"integer\""
+    end
+
+    test "a value of the declared shape is accepted", %{world: world} do
+      {:ok, _} = World.append(world, Attribute.define("age", answers: "integer"))
+
+      assert {:ok, _tx} = World.append(world, [{"ada", "age", 41}], checking_the_facts(world))
+    end
+
+    test "`any` is the default, so this bites only fields that said something", %{world: world} do
+      {:ok, _} = World.append(world, Attribute.define("note"))
+
+      assert {:ok, _tx} = World.append(world, [{"ada", "note", 41}], checking_the_facts(world))
+
+      assert {:ok, _tx} =
+               World.append(world, [{"ada", "note", "words"}], checking_the_facts(world))
+    end
+
+    test "a value outside a closed set is refused", %{world: world} do
+      {:ok, _} =
+        World.append(
+          world,
+          Attribute.define("severity", answers: "name", one_of: ["low", "high"])
+        )
+
+      assert {:ok, _tx} =
+               World.append(world, [{"t", "severity", "high"}], checking_the_facts(world))
+
+      assert {:error, [refusal]} =
+               World.append(world, [{"t", "severity", "medium"}], checking_the_facts(world))
+
+      assert refusal.problem == :outside_the_set
+      assert refusal.repair =~ "\"low\", \"high\""
+    end
+
+    test "a batch that declares a field and uses it is coherent", %{world: world} do
+      # The same rule the undefined check follows: a transaction is atomic, so
+      # the declaration in this write counts for the values in it.
+      assert {:ok, _tx} =
+               World.append(
+                 world,
+                 Attribute.define("score", answers: "integer") ++ [{"n", "score", 7}],
+                 checking_the_facts(world)
+               )
+    end
+  end
+
   describe "everything extends, nothing redefines" do
     test "a vocabulary composed from another world is visible", %{world: tenant} do
       shared = TestLedger.open()
