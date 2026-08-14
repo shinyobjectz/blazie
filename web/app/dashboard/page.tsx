@@ -183,6 +183,23 @@ export default function Orbit() {
       <div
         ref={viewport}
         className="relative h-full w-full touch-none select-none overflow-hidden bg-background"
+        // A dot grid, and it moves with the sky.
+        //
+        // Faint enough to be ground rather than content — at six percent it
+        // reads as texture and never competes with a planet. The point is not
+        // decoration: an empty black field gives a drag nothing to be measured
+        // against, so panning felt like nothing happening until a planet came
+        // past. The grid is what makes the movement visible.
+        //
+        // Offset by the pan and scaled by the zoom, so it travels exactly as
+        // far as the sky does. A fixed grid would slide UNDER the worlds and
+        // read as two things moving at once, which is worse than no grid.
+        style={{
+          backgroundImage:
+            "radial-gradient(circle, rgb(255 255 255 / 0.06) 1px, transparent 1px)",
+          backgroundSize: `${32 * zoom}px ${32 * zoom}px`,
+          backgroundPosition: `${pan.x}px ${pan.y}px`,
+        }}
         onPointerDown={(event) => {
           dragging.current = { x: event.clientX - pan.x, y: event.clientY - pan.y }
           moved.current = false
