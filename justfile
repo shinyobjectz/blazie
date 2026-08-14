@@ -20,6 +20,8 @@ export PATH := "/opt/homebrew/opt/erlang/bin:" + env_var('PATH')
 # quoted sentence a sentence instead of a dozen positional arguments.
 set positional-arguments
 
+CF_ACCOUNT := "6d4b74aeb10f455fbf88141901e7595d"
+
 monty := "uv run --project " + justfile_directory() + "/../montology/.monty/cli monty"
 
 _default:
@@ -96,6 +98,51 @@ ship:
 banner:
     @echo "open http://localhost:3111/banner at 1200x420 and capture to priv/static/brand/banner.png"
     @echo "the page is web/app/banner/page.tsx — it renders the same shader and the same wordmark"
+
+# Set one control plane secret in BOTH environments, from stdin.
+#
+# Eight of them, set twice, by remembering to. They diverged once already and
+# the symptom was `/api/me` reporting sign-in unavailable with nothing saying
+# why — preview had the github secret and production did not, or the other way
+# round, and nothing compares them.
+#
+#     printf '%s' "$VALUE" | just secret GITHUB_CLIENT_SECRET
+#
+# Piped rather than passed as an argument, so the value never reaches a shell
+# history or a process list.
+secret NAME:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    value=$(cat)
+    [ -n "$value" ] || { echo "nothing on stdin — pipe the value in"; exit 1; }
+    cd web
+    for env in "" "--env preview"; do
+      printf '%s' "$value" \
+        | CLOUDFLARE_ACCOUNT_ID={{ CF_ACCOUNT }} npx wrangler pages secret put {{ NAME }} \
+            --project-name blazie $env >/dev/null
+    done
+    echo "{{ NAME }} set in production and preview"
+
+# What the control plane is missing, in both environments.
+#
+# A list rather than a diff, because wrangler will not show a value and the
+# useful question is not "are they the same" but "is anything absent".
+secrets:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd web
+    for env in "production" "preview"; do
+      echo "== $env =="
+      flag=""; [ "$env" = "preview" ] && flag="--env preview"
+      have=$(CLOUDFLARE_ACCOUNT_ID={{ CF_ACCOUNT }} npx wrangler pages secret list \
+               --project-name blazie $flag 2>/dev/null | grep -oE "^  - [A-Z_]+" | tr -d " -")
+      for want in GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET UPCLOUD_TOKEN \
+                  CLOUDFLARE_API_TOKEN CLOUDFLARE_DNS_TOKEN CLOUDFLARE_ACCOUNT_ID \
+                  CLOUDFLARE_ZONE_ID CLUSTER_ZONE BACKUP_BUCKET BACKUP_ENDPOINT \
+                  BACKUP_ACCESS_KEY_ID BACKUP_SECRET_ACCESS_KEY; do
+        echo "$have" | grep -qx "$want" && echo "  ok      $want" || echo "  MISSING $want"
+      done
+    done
 
 # The console, in development.
 web:
