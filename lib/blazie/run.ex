@@ -230,7 +230,8 @@ defmodule Blazie.Run do
       pool
       |> Enum.with_index(1)
       |> Enum.map(fn {turn, at} ->
-        {turn, at, MapSet.size(MapSet.intersection(wanted, terms("#{turn.asked} #{turn.answered}")))}
+        {turn, at,
+         MapSet.size(MapSet.intersection(wanted, terms("#{turn.asked} #{turn.answered}")))}
       end)
       |> Enum.filter(fn {_turn, _at, score} -> score > 0 end)
       # Best first to choose, later-first to break ties — of two equally
@@ -238,7 +239,9 @@ defmodule Blazie.Run do
       |> Enum.sort_by(fn {_turn, at, score} -> {-score, -at} end)
       |> Enum.take(count)
       |> Enum.sort_by(fn {_turn, at, _score} -> at end)
-      |> Enum.map(fn {turn, at, _score} -> %{turn: at, asked: turn.asked, answered: turn.answered} end)
+      |> Enum.map(fn {turn, at, _score} ->
+        %{turn: at, asked: turn.asked, answered: turn.answered}
+      end)
     end
   end
 

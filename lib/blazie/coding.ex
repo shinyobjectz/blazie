@@ -53,13 +53,15 @@ defmodule Blazie.Coding do
   the ordinary mechanism rather than by somebody editing a string.
   """
 
-  alias Blazie.{Attribute, Model, Run, Snapshot, Tool, World}
+  alias Blazie.{Attribute, Job, Model, Run, Snapshot, Tool, World}
 
   @doc "The attributes a workspace is written with."
   @spec seed() :: [tuple()]
   def seed do
     Attribute.define("path", answers: "name") ++
-      Attribute.define("content", answers: "any")
+      Attribute.define("content", answers: "any") ++
+      Attribute.define("task", answers: "name") ++
+      Attribute.define("resumed", answers: "integer", cardinality: "many")
   end
 
   @doc """
@@ -204,7 +206,130 @@ defmodule Blazie.Coding do
           {:ok, String.t(), [map()]} | {:error, map()}
   def work(world, run, task, opts) do
     {:ok, _} = Run.begin(world, run)
-    stretch(world, run, task, opts, Keyword.get(opts, :stretches, 1), [])
+
+    # The task is a fact, not an argument that dies with this call. It is what
+    # makes the run continuable by something that was not on the stack when it
+    # began — which is the whole of autonomous continuation.
+    {:ok, _} = World.append(world, [{run, "task", task, run}])
+
+    carry(world, run, task, opts)
+  end
+
+  @doc """
+  Continue a run from its own record, one more round of stretches.
+
+  Everything needed is already facts: the task, the turns, the workspace. So
+  continuing is not resuming a process — there is no process — it is calling
+  the same loop with the same policy against a record that never went away.
+
+  A run that never recorded a task cannot be continued, and says so.
+  """
+  @spec continue(World.ref(), term(), keyword()) ::
+          {:ok, String.t(), [map()]} | {:error, map()}
+  def continue(world, run, opts) do
+    snapshot = Snapshot.open([world])
+
+    case Snapshot.value(snapshot, run, "task") do
+      nil ->
+        {:error,
+         %{
+           problem: :no_task,
+           repair:
+             "Run #{inspect(run)} never recorded a task, so there is nothing to continue it " <>
+               "toward. Runs begun by `work/4` record one; this one was not."
+         }}
+
+      task ->
+        {:ok, _} = World.append(world, [{run, "resumed", System.system_time(:second), run}])
+        carry(world, run, task, opts)
+    end
+  end
+
+  @doc """
+  The job that picks up what stopped.
+
+  A run that spent its stretches is stopped rather than ended — `work/4` only
+  records `ended` when the model actually answered — and everything needed to
+  carry it on is facts. So continuation needs no new machinery: the runner
+  already ticks, the world is already the queue, and this is a job like any
+  other. Declare a cadence, register the work:
+
+      Job.Runner.register(runner, Coding.heartbeat(world, asks: "...", provider: ...))
+      World.append(world, Job.declare("heartbeat", every: 60))
+
+  Which is the prime-agent shape without the daemon: the harness continues its
+  own work, and what did the continuing is readable afterwards because every
+  resume is a fact on the run it resumed.
+
+  Bounded twice, because an unbounded resumer is a bill. A run must have
+  RESTED — `rest:` seconds since it began or was last resumed, 300 unless told
+  — so nothing running right now is grabbed by its own heartbeat. And a run is
+  given up on after `most:` resumes (three), because a run that three
+  continuations could not finish needs a person looking at it, not a fourth
+  continuation. A continuation that fails writes the refusal as a `failed`
+  fact on the run, which is exactly what `Refinement.triggers/2` reads — so a
+  heartbeat that keeps hitting the same wall becomes a refinement trigger
+  rather than a quiet loop.
+  """
+  @spec heartbeat(World.ref(), keyword()) :: Job.t()
+  def heartbeat(world, opts) do
+    Job.new("heartbeat", fn snapshot ->
+      now = System.system_time(:second)
+
+      Enum.flat_map(stalled(snapshot, now, opts), fn run ->
+        case continue(world, run, opts) do
+          {:ok, _said, _made} -> []
+          {:error, refusal} -> [{run, "failed", Map.get(refusal, :repair, inspect(refusal))}]
+        end
+      end)
+    end)
+  end
+
+  @doc """
+  The runs a heartbeat would pick up, at `now`.
+
+  Begun and not ended, with a task on record, nobody's delegation — a child
+  whose parent already took its answer is not carried on for an audience that
+  moved on — rested past `rest:`, and short of `most:` resumes.
+  """
+  @spec stalled(Snapshot.t(), integer(), keyword()) :: [term()]
+  def stalled(%Snapshot{} = snapshot, now, opts \\ []) do
+    rest = Keyword.get(opts, :rest, 300)
+    most = Keyword.get(opts, :most, 3)
+
+    for run <- Run.all(snapshot),
+        Snapshot.value(snapshot, run, "ended") == nil,
+        Snapshot.value(snapshot, run, "asked_by") == nil,
+        Snapshot.value(snapshot, run, "task") != nil,
+        length(resumes(snapshot, run)) < most,
+        quiet(snapshot, run) <= now - rest,
+        do: run
+  end
+
+  defp resumes(snapshot, run) do
+    snapshot |> Snapshot.find(id: run, attribute: "resumed") |> Enum.map(& &1.value)
+  end
+
+  # When the run last moved, as far as its own record says: begun, or resumed.
+  defp quiet(snapshot, run) do
+    Enum.max([Snapshot.value(snapshot, run, "began") || 0 | resumes(snapshot, run)])
+  end
+
+  # Finish is recorded only when the model actually answered. A run that ran
+  # out of stretches is stopped, not ended — which is exactly the difference
+  # the heartbeat reads.
+  defp carry(world, run, task, opts) do
+    case stretch(world, run, task, opts, Keyword.get(opts, :stretches, 1), []) do
+      {:done, said, made} ->
+        {:ok, _} = Run.finish(world, run)
+        {:ok, said, made}
+
+      {:paused, made} ->
+        {:ok, "out of stretches", made}
+
+      {:error, refusal} ->
+        {:error, refusal}
+    end
   end
 
   # One stretch of work, then reassemble and go again.
@@ -221,7 +346,7 @@ defmodule Blazie.Coding do
   # means a session has no length limit; what it has is an assembly that stays
   # the size the policy says however long the session runs.
   defp stretch(world, run, _task, _opts, 0, _made),
-    do: {:ok, "out of stretches", did(world, run)}
+    do: {:paused, did(world, run)}
 
   defp stretch(world, run, task, opts, left, made) do
     model = Keyword.fetch!(opts, :asks)
@@ -253,7 +378,7 @@ defmodule Blazie.Coding do
       case answered do
         # It answered without running out of calls, so it is done.
         {:ok, said, turns} ->
-          {:ok, said, made ++ turns}
+          {:done, said, made ++ turns}
 
         # It spent its calls without answering. That is not a failure of the
         # work, it is the end of a stretch — so the context is rebuilt, which
