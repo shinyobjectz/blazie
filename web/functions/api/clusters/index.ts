@@ -70,6 +70,22 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
     return refuse("name_taken", `You already hold a cluster called ${JSON.stringify(asked.name)}. Names are how you tell them apart, so pick another.`)
   }
 
+  // Asked before anything is made. A trial account's firewall cannot be
+  // disabled or modified and drops outbound 7844, which is the only port
+  // cloudflared can reach Cloudflare on — so a cluster opened on one installs
+  // perfectly and never connects. Three provisions found that out the long way.
+  const allowed = await upcloud.limits({ token: env.UPCLOUD_TOKEN! })
+
+  if (!allowed.ok) return refuse(allowed.problem, allowed.repair, 502)
+
+  if (allowed.trialFirewall) {
+    return refuse(
+      "trial_account",
+      "This UpCloud account is in trial mode, and a trial firewall cannot be changed or turned off. It drops outbound 7844, which is the only port a Cloudflare Tunnel can use — so a cluster opened here would install correctly and never become reachable. Take the account out of trial in the UpCloud control panel, then open it again.",
+      409,
+    )
+  }
+
   const reaching = {
     accountId: env.CLOUDFLARE_ACCOUNT_ID!,
     zoneId: env.CLOUDFLARE_ZONE_ID!,
@@ -122,6 +138,11 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
     await tunnel.unmake(reaching, made.made.id, hostname)
     return refuse(opened.problem, opened.repair, 502)
   }
+
+  // Before cloud-init gets as far as cloudflared, which takes a minute of apt.
+  // The machine is already booting, so this is a race worth winning early rather
+  // than a step that can wait.
+  await upcloud.letOut({ token: env.UPCLOUD_TOKEN! }, opened.host.uuid)
 
   const cluster: Held = {
     id: made.made.id,

@@ -129,6 +129,56 @@ export function known(list: readonly { id: string }[], id: string): boolean {
  */
 const TEMPLATE = "01000000-0000-4000-8000-000020070100"
 
+/**
+ * What the account will let you have, asked before anything is made.
+ *
+ * Two things, and the first one is fatal. A trial account's firewall cannot be
+ * disabled and cannot be modified — `TRIAL_FIREWALL`, on both endpoints — and
+ * its fixed rule set permits outbound 80, 443, 8080, 6443, DNS, NTP and ICMP
+ * while dropping everything else. cloudflared reaches Cloudflare's edge on 7844
+ * and Cloudflare's own documentation calls that non-negotiable, so a tunnelled
+ * cluster cannot work on a trial account at all.
+ *
+ * Which is worth knowing BEFORE making a tunnel, a DNS record and a server that
+ * can never connect. It cost three provisions to find out, each of which
+ * installed perfectly and then sat there.
+ *
+ * The second is capacity: cores and memory are capped and a machine that will
+ * not fit should be refused rather than attempted.
+ */
+export async function limits(
+  credentials: Credentials,
+): Promise<
+  | { ok: true; trialFirewall: boolean; cores: number | null; memory: number | null }
+  | { ok: false; problem: string; repair: string }
+> {
+  const said = await fetch(`${API}/account`, {
+    headers: { authorization: basic(credentials) },
+    signal: AbortSignal.timeout(20_000),
+  }).catch(() => null)
+
+  if (!said?.ok) {
+    return {
+      ok: false,
+      problem: "upcloud_unreachable",
+      repair: "UpCloud would not say what this account may have. Check UPCLOUD_TOKEN.",
+    }
+  }
+
+  const body = (await said.json().catch(() => null)) as {
+    account?: { trial_resource_limits?: Record<string, number | null> }
+  } | null
+
+  const trial = body?.account?.trial_resource_limits ?? {}
+
+  return {
+    ok: true,
+    trialFirewall: trial.trial_firewall_restrictions === 1,
+    cores: trial.trial_total_server_cores ?? null,
+    memory: trial.trial_total_server_memory ?? null,
+  }
+}
+
 export async function open(
   credentials: Credentials,
   opening: Opening,
@@ -192,6 +242,56 @@ export async function open(
     ok: true,
     host: { vendor: "upcloud", uuid, plan: opening.plan, zone: opening.zone },
   }
+}
+
+/**
+ * Let the machine dial the tunnel out.
+ *
+ * Switching the firewall on applies UpCloud's default rule set, which permits
+ * outbound 80, 443, 8080, 6443, 11550-11570, DNS, NTP and ICMP — and drops
+ * everything else. cloudflared reaches Cloudflare's edge on 7844, which is not
+ * on that list.
+ *
+ * So the machine could `apt-get`, could `docker pull` a hundred megabytes, and
+ * could never connect: `dial tcp [2606:4700:a8::4]:7844: i/o timeout`. Every
+ * step of the install worked and the one thing that makes a cluster reachable
+ * did not, which is the failure this whole reporting apparatus exists to make
+ * legible.
+ *
+ * Added rather than turning the firewall off, because "nothing listens" is the
+ * property worth keeping and the fix is one port in one direction. Both
+ * protocols, because cloudflared prefers QUIC on UDP and falls back to TCP, and
+ * a rule set permitting only the fallback silently costs the faster path.
+ */
+export async function letOut(credentials: Credentials, uuid: string): Promise<boolean> {
+  const made: boolean[] = []
+
+  for (const family of ["IPv4", "IPv6"]) {
+    for (const protocol of ["tcp", "udp"]) {
+      const said = await fetch(`${API}/server/${uuid}/firewall_rule`, {
+        method: "POST",
+        headers: { authorization: basic(credentials), "content-type": "application/json" },
+        body: JSON.stringify({
+          firewall_rule: {
+            direction: "out",
+            action: "accept",
+            family,
+            protocol,
+            destination_port_start: "7844",
+            destination_port_end: "7844",
+            // Ahead of the default set's closing drop, which sits last.
+            position: "1",
+            comment: "cloudflared to the edge",
+          },
+        }),
+        signal: AbortSignal.timeout(20_000),
+      }).catch(() => null)
+
+      made.push(Boolean(said?.ok))
+    }
+  }
+
+  return made.every(Boolean)
 }
 
 /**
@@ -310,7 +410,7 @@ ${backupEnv(opening)}
       # Every step is announced before and after, so a machine that dies mid-step
       # is stuck at a named place rather than simply silent.
       say() {
-        detail=$(printf '%s' "\${2-}" | tr -d '"\\\\' | tr '\\n\\r\\t' '   ' | cut -c1-1500)
+        detail=$(printf '%s' "\${2-}" | tr -d '"\\\\' | tr '\\n\\r\\t' '   ' | tail -c 1500)
         curl -fsS -m 15 -X POST '${said}' \\
           -H 'content-type: application/json' \\
           --data "{\\"hello\\":\\"${opening.hello}\\",\\"step\\":\\"$1\\",\\"detail\\":\\"$detail\\"}" \\
@@ -361,7 +461,8 @@ ${backupEnv(opening)}
       say serving
 
       docker run -d --name tunnel --restart always --network host \\
-        cloudflare/cloudflared:latest tunnel --no-autoupdate run \\
+        cloudflare/cloudflared:latest tunnel --no-autoupdate \\
+        --protocol http2 run \\
         --token ${opening.tunnelToken}
 
       # A container that stayed up is not a tunnel that connected — the

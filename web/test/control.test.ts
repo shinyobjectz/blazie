@@ -152,6 +152,70 @@ describe("making a machine", () => {
   })
 })
 
+describe("what the account will allow", () => {
+  it("notices a trial firewall, which no tunnel can survive", async () => {
+    stub()
+    answering({
+      ok: true,
+      body: { account: { trial_resource_limits: { trial_firewall_restrictions: 1, trial_total_server_cores: 6 } } },
+    })
+
+    const said = await upcloud.limits({ token: "t" })
+
+    assert.equal(said.ok, true)
+    if (!said.ok) return
+    assert.equal(said.trialFirewall, true)
+    assert.equal(said.cores, 6)
+  })
+
+  it("says a paid account has no such restriction", async () => {
+    stub()
+    answering({ ok: true, body: { account: { trial_resource_limits: {} } } })
+
+    const said = await upcloud.limits({ token: "t" })
+
+    assert.equal(said.ok, true)
+    if (!said.ok) return
+    assert.equal(said.trialFirewall, false)
+  })
+})
+
+describe("letting the tunnel out", () => {
+  it("opens 7844 outbound, both protocols, both families", async () => {
+    stub()
+    const sent_ok = { ok: true, body: {} }
+    answering(sent_ok, sent_ok, sent_ok, sent_ok)
+
+    assert.equal(await upcloud.letOut({ token: "t" }, "server-1"), true)
+
+    // UpCloud's default set permits 80, 443, 8080, 6443, DNS, NTP, ICMP out and
+    // drops the rest. cloudflared needs 7844, so the machine installed
+    // perfectly and never connected.
+    assert.equal(sent.length, 4)
+
+    for (const one of sent) {
+      const rule = (one.body as any).firewall_rule
+      assert.equal(rule.direction, "out")
+      assert.equal(rule.action, "accept")
+      assert.equal(rule.destination_port_start, "7844")
+      // Ahead of the closing drop, or it never matches.
+      assert.equal(rule.position, "1")
+    }
+
+    assert.deepEqual(
+      sent.map((one) => `${(one.body as any).firewall_rule.family}/${(one.body as any).firewall_rule.protocol}`).sort(),
+      ["IPv4/tcp", "IPv4/udp", "IPv6/tcp", "IPv6/udp"],
+    )
+  })
+
+  it("says so when a rule would not take", async () => {
+    stub()
+    answering({ ok: true, body: {} }, { ok: false, status: 400, body: {} })
+
+    assert.equal(await upcloud.letOut({ token: "t" }, "server-1"), false)
+  })
+})
+
 describe("taking a machine away", () => {
   const credentials = { token: "ucat_test" }
 
@@ -476,6 +540,21 @@ describe("what the machine is told to do", () => {
     // `docker.io` does not bring `apparmor_parser`, so `docker run` fails on a
     // system where `docker info` is perfectly happy.
     assert.match(rendered, /^ {2}- apparmor$/m)
+  })
+
+  it("dials out over tcp, not quic", () => {
+    // cloudflared prefers QUIC on UDP/7844 and the machine's firewall does not
+    // pass it — the log said "Initial protocol quic" and then never registered.
+    // http2 is cloudflared's own fallback and rides TCP/443 like everything
+    // else the machine does.
+    assert.match(script, /--protocol http2/)
+  })
+
+  it("quotes the END of a log, where the error is", () => {
+    // The first failure came back showing cloudflared's version banner, because
+    // the detail was cut from the front. A truncated log that omits the error is
+    // the same as no log.
+    assert.match(script, /tail -c 1500/)
   })
 
   it("proves the tunnel connected, not merely that a container is up", () => {
