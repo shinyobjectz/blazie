@@ -22,7 +22,17 @@ set positional-arguments
 
 CF_ACCOUNT := "6d4b74aeb10f455fbf88141901e7595d"
 
-monty := "uv run --project " + justfile_directory() + "/../montology/.monty/cli monty"
+# Where montology's cli is. It was `../montology`, which was right while this
+# repo sat inside socialite and became a path to nothing the moment it moved out
+# to a sibling — `just check` then found some other `monty` on PATH and failed on
+# a command that version does not have. A relative path that escapes a repo's own
+# root is a dependency on where the repo is checked out, and this one was.
+#
+# Overridable, because that is still true of the new default: montology is a
+# submodule of socialite, and this assumes socialite is a sibling.
+#   MONTOLOGY=/path/to/.monty/cli just check
+montology := env_var_or_default("MONTOLOGY", justfile_directory() + "/../socialite/montology/.monty/cli")
+monty := "uv run --project " + montology + " monty"
 
 _default:
     @just --list
