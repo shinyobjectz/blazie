@@ -199,7 +199,7 @@ defmodule Blazie.Backup do
         files
         |> Enum.map(fn file ->
           at = Map.get(held, file, 0)
-          %{world: file, local: at + readable(tail(Path.join(dir, file), at)), held: at}
+          %{world: file, local: at + Store.File.readable(Path.join(dir, file), at), held: at}
         end)
         |> Enum.reject(&(&1.local == &1.held))
 
@@ -251,8 +251,11 @@ defmodule Blazie.Backup do
     |> ledger_files()
     |> Enum.reduce_while({:ok, %{bytes: 0, segments: 0, held_after: 0}}, fn file, {:ok, acc} ->
       from = Map.get(held, file, 0)
+      # The store says how far the file is whole records — the format is its,
+      # and a second copy of its scan here went stale the day the format
+      # changed and silently found nothing readable (measured: 39 tests).
+      size = Blazie.Store.File.readable(Path.join(dir, file), from)
       chunk = tail(Path.join(dir, file), from)
-      size = readable(chunk)
 
       cond do
         size == 0 ->
@@ -504,17 +507,6 @@ defmodule Blazie.Backup do
       {:error, _} -> 0
     end
   end
-
-  # How much of this chunk is whole records. The same scan `Store.File` replays
-  # by: a record whose length runs past the end or whose checksum does not match
-  # is where reading stops, and everything after it is unreadable by definition.
-  defp readable(binary), do: readable(binary, 0)
-
-  defp readable(<<size::32, crc::32, payload::binary-size(size), rest::binary>>, acc) do
-    if :erlang.crc32(payload) == crc, do: readable(rest, acc + 8 + size), else: acc
-  end
-
-  defp readable(_incomplete_tail, acc), do: acc
 
   # ── configuration ──────────────────────────────────────────────────────────
 

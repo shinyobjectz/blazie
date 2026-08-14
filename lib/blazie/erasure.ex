@@ -143,7 +143,7 @@ defmodule Blazie.Erasure do
 
         case :crypto.crypto_one_time_aead(:aes_256_gcm, dek, iv, cipher, aad, tag, false) do
           :error -> failed(subject)
-          plain -> :erlang.binary_to_term(plain)
+          plain -> decoded(plain)
         end
 
       :forgotten ->
@@ -162,12 +162,22 @@ defmodule Blazie.Erasure do
       {:ok, dek} ->
         case :crypto.crypto_one_time_aead(:aes_256_gcm, dek, iv, cipher, <<>>, tag, false) do
           :error -> failed(subject)
-          plain -> :erlang.binary_to_term(plain)
+          plain -> decoded(plain)
         end
 
       :forgotten ->
         failed(subject)
     end
+  end
+
+  # The plaintext authenticated, so these bytes were sealed by somebody who
+  # held the key — but a restored key store can be the attacker's, and then
+  # the plaintext is theirs too. `:safe` so it cannot mint atoms (C7); a
+  # decode that fails is corruption, and corruption already has a name here.
+  defp decoded(plain) do
+    :erlang.binary_to_term(plain, [:safe])
+  rescue
+    _error -> :unreadable
   end
 
   def reveal(answer, _bound), do: answer

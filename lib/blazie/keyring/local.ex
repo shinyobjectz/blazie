@@ -92,14 +92,25 @@ defmodule Blazie.Keyring.Local do
   defp read(ring) do
     with {:ok, <<iv::binary-12, tag::binary-16, cipher::binary>>} <- File.read(ring.path),
          plain when is_binary(plain) <-
-           :crypto.crypto_one_time_aead(:aes_256_gcm, ring.master, iv, cipher, <<>>, tag, false) do
-      :erlang.binary_to_term(plain)
+           :crypto.crypto_one_time_aead(:aes_256_gcm, ring.master, iv, cipher, <<>>, tag, false),
+         # `:safe`, and the shape checked, because a key store can be restored
+         # from a bucket somebody else could write (C7). The plaintext
+         # authenticated under the master key, but the master key is exactly
+         # what a hostile restore replaces.
+         keks when is_map(keks) <- decoded(plain) do
+      keks
     else
       # No file yet, or one this master key cannot open. Either way there are
       # no keys to be had, which reads the same as everything being erased —
       # another reason this is not the production answer.
       _ -> %{}
     end
+  end
+
+  defp decoded(plain) do
+    :erlang.binary_to_term(plain, [:safe])
+  rescue
+    _error -> :unreadable
   end
 
   defp write(ring, keks) do
