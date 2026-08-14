@@ -7,11 +7,11 @@
  * that requires a working cluster to create would never be a first one.
  */
 
-import { answer, refuse, unauthenticated, unconfigured } from "@/lib/control/answer"
-import { asHostname, claimFirst, held, keep, mintToken, reach } from "@/lib/control/clusters"
-import { type Control, type Held, shown } from "@/lib/control/model"
+import { answer, refuse, unauthenticated } from "@/lib/control/answer"
+import { claimFirst, held, keep, reach } from "@/lib/control/clusters"
+import { type Control, shown } from "@/lib/control/model"
+import { type Asked, openFor } from "@/lib/control/opening"
 import { whoIs } from "@/lib/control/session"
-import * as tunnel from "@/lib/control/tunnel"
 import * as upcloud from "@/lib/control/upcloud"
 
 /**
@@ -34,179 +34,18 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
   const session = await whoIs(env, request)
   if (!session) return unauthenticated()
 
-  for (const [name, value] of [
-    ["UPCLOUD_TOKEN", env.UPCLOUD_TOKEN],
-    ["CLOUDFLARE_API_TOKEN", env.CLOUDFLARE_API_TOKEN],
-    ["CLOUDFLARE_ACCOUNT_ID", env.CLOUDFLARE_ACCOUNT_ID],
-    ["CLOUDFLARE_ZONE_ID", env.CLOUDFLARE_ZONE_ID],
-  ] as const) {
-    if (!value) return unconfigured(name)
-  }
+  const asked = (await request.json().catch(() => null)) as Asked | null
 
-  const asked = (await request.json().catch(() => null)) as {
-    name?: string
-    zone?: string
-    plan?: string
-  } | null
+  // Every check, every order, every refusal lives in `openFor`, which the MCP
+  // tool calls too. This turns the answer into HTTP and decides nothing — a
+  // second copy of the provisioning sequence would start correct and drift, and
+  // the drift would be invisible until an agent could provision something a
+  // person could not.
+  const opened = await openFor(env, session.login, asked ?? {}, new URL(request.url).origin)
 
-  if (!asked?.name) {
-    return refuse("no_name", "A cluster needs a name. It is what you will call it and what it answers at.")
-  }
+  if (!opened.ok) return refuse(opened.problem, opened.repair, opened.status)
 
-  const hostname = asHostname(asked.name)
-
-  if (!hostname) {
-    return refuse(
-      "unusable_name",
-      `${JSON.stringify(asked.name)} leaves nothing that can be a hostname. Use letters, digits and hyphens.`,
-    )
-  }
-
-  const zone = asked.zone ?? upcloud.ZONES[0].id
-  const plan = asked.plan ?? upcloud.PLANS[0].id
-
-  if (!upcloud.known(upcloud.ZONES, zone)) {
-    return refuse("no_such_zone", `There is no zone ${JSON.stringify(zone)}. Pick one of: ${upcloud.ZONES.map((z) => z.id).join(", ")}.`)
-  }
-
-  if (!upcloud.known(upcloud.PLANS, plan)) {
-    return refuse("no_such_plan", `There is no plan ${JSON.stringify(plan)}. Pick one of: ${upcloud.PLANS.map((p) => p.id).join(", ")}.`)
-  }
-
-  const already = await held(env, session.login)
-
-  if (already.some((c) => c.name === asked.name)) {
-    return refuse("name_taken", `You already hold a cluster called ${JSON.stringify(asked.name)}. Names are how you tell them apart, so pick another.`)
-  }
-
-  // Asked before anything is made. A trial account's firewall cannot be
-  // disabled or modified and drops outbound 7844, which is the only port
-  // cloudflared can reach Cloudflare on — so a cluster opened on one installs
-  // perfectly and never connects. Three provisions found that out the long way.
-  const allowed = await upcloud.limits({ token: env.UPCLOUD_TOKEN! })
-
-  if (!allowed.ok) return refuse(allowed.problem, allowed.repair, 502)
-
-  if (allowed.trialFirewall) {
-    return refuse(
-      "trial_account",
-      "This UpCloud account is in trial mode, and a trial firewall cannot be changed or turned off. It drops outbound 7844, which is the only port a Cloudflare Tunnel can use — so a cluster opened here would install correctly and never become reachable. Take the account out of trial in the UpCloud control panel, then open it again.",
-      409,
-    )
-  }
-
-  // Whether it fits, before anything is made. UpCloud refuses a machine that
-  // exceeds the account's cores or memory, and finding that out after a tunnel
-  // exists is finding it out too late — the same lesson as the name.
-  const wanted = upcloud.PLANS.find((p) => p.id === plan)!
-  const using = await upcloud.spent({ token: env.UPCLOUD_TOKEN! })
-
-  if (allowed.cores !== null && using.cores + wanted.cores > allowed.cores) {
-    return refuse(
-      "no_room",
-      `This account allows ${allowed.cores} cores and is using ${using.cores}. ${wanted.label} needs ${wanted.cores}, which does not fit — pick a smaller one, or take a cluster away first.`,
-      409,
-    )
-  }
-
-  if (allowed.memory !== null && using.memory + wanted.memory > allowed.memory) {
-    return refuse(
-      "no_room",
-      `This account allows ${allowed.memory}MB of memory and is using ${using.memory}. ${wanted.label} needs ${wanted.memory}MB, which does not fit — pick a smaller one, or take a cluster away first.`,
-      409,
-    )
-  }
-
-  const reaching = {
-    accountId: env.CLOUDFLARE_ACCOUNT_ID!,
-    zoneId: env.CLOUDFLARE_ZONE_ID!,
-    token: env.CLOUDFLARE_API_TOKEN!,
-    dnsToken: env.CLOUDFLARE_DNS_TOKEN,
-  }
-
-  // Asked of the zone, not of your own list. A cluster answers at
-  // `<name>.blazie.dev`, so the name is global — and finding that out from a
-  // failed DNS write, after a tunnel exists, is finding it out too late.
-  if (await tunnel.taken(reaching, `${hostname}.${env.CLUSTER_ZONE ?? "blazie.dev"}`)) {
-    return refuse(
-      "name_answered_for",
-      `${JSON.stringify(asked.name)} already answers on this zone. Cluster names are global rather than per account, because a cluster IS its name — pick another.`,
-    )
-  }
-
-  // The way in before the machine, so a machine is never made that cannot be
-  // reached. The other order leaves a server running and unreachable and
-  // billing, which is the failure worth designing against.
-  const made = await tunnel.make(reaching, hostname, env.CLUSTER_ZONE ?? "blazie.dev")
-  if (!made.ok) return refuse(made.problem, made.repair, 502)
-
-  const token = mintToken()
-  const hello = mintToken()
-
-  const opened = await upcloud.open(
-    { token: env.UPCLOUD_TOKEN! },
-    {
-      name: asked.name,
-      hostname,
-      zone,
-      plan,
-      tunnelToken: made.made.token,
-      secret: mintToken(),
-      masterKey: mintToken(),
-      // Where to report, taken from the request rather than written down, so a
-      // preview deployment provisions machines that call the preview back.
-      home: new URL(request.url).origin,
-      id: made.made.id,
-      hello,
-      // A prefix per cluster, keyed by id rather than name — a name can be
-      // given up and taken by somebody else, and a backup must not follow the
-      // name to a different cluster.
-      backup:
-        env.BACKUP_BUCKET && env.BACKUP_ENDPOINT && env.BACKUP_ACCESS_KEY_ID && env.BACKUP_SECRET_ACCESS_KEY
-          ? {
-              bucket: env.BACKUP_BUCKET,
-              endpoint: env.BACKUP_ENDPOINT,
-              accessKeyId: env.BACKUP_ACCESS_KEY_ID,
-              secretAccessKey: env.BACKUP_SECRET_ACCESS_KEY,
-              prefix: `clusters/${made.made.id}/`,
-            }
-          : undefined,
-      blobs:
-        env.BLOB_BUCKET && env.BACKUP_ENDPOINT && env.BACKUP_ACCESS_KEY_ID && env.BACKUP_SECRET_ACCESS_KEY
-          ? {
-              bucket: env.BLOB_BUCKET,
-              endpoint: env.BACKUP_ENDPOINT,
-              accessKeyId: env.BACKUP_ACCESS_KEY_ID,
-              secretAccessKey: env.BACKUP_SECRET_ACCESS_KEY,
-              prefix: `clusters/${made.made.id}/`,
-            }
-          : undefined,
-    },
-  )
-
-  if (!opened.ok) {
-    // Nothing half-made is left behind. A tunnel with no machine on it is
-    // invisible until somebody reads a bill.
-    await tunnel.unmake(reaching, made.made.id, hostname)
-    return refuse(opened.problem, opened.repair, 502)
-  }
-
-  const cluster: Held = {
-    id: made.made.id,
-    name: asked.name,
-    address: made.made.address,
-    token,
-    hello,
-    state: "opening",
-    host: opened.host,
-    opened: new Date().toISOString(),
-  }
-
-  // Written before the firewall, so a machine that reports a step has somewhere
-  // to report it to. The other order raced its own cloud-init.
-  await keep(env, session.login, [...already, cluster])
-
-  return answer({ cluster: shown(cluster) }, 201)
+  return answer({ cluster: shown(opened.cluster) }, 201)
 }
 
 /**

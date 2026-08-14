@@ -61,7 +61,7 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
   // attempts, not successes.
   await noteUsed(env, grant.owner, grant.id)
 
-  const said = await dispatch({ env, grant }, call)
+  const said = await dispatch({ env, grant, home: new URL(request.url).origin }, call)
   return answer({ jsonrpc: "2.0", id: call.id ?? null, ...said })
 }
 

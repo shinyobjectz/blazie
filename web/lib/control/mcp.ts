@@ -1,5 +1,6 @@
 import { held, keep, mintToken, reach } from "./clusters"
 import { type Control, type Held, shown } from "./model"
+import { type Asked, openFor, removeFor } from "./opening"
 import {
   type Grant,
   mayName,
@@ -41,6 +42,13 @@ import { WORDS } from "./words"
 export type Doing = {
   env: Control
   grant: Grant
+  /**
+   * Where a machine this opens should report back to.
+   *
+   * Taken from the request rather than written down, so a preview deployment
+   * provisions machines that call the preview back rather than production.
+   */
+  home: string
 }
 
 export type Tool = {
@@ -275,17 +283,24 @@ export const TOOLS: Tool[] = [
       },
       required: ["name"],
     },
-    run: async (doing) => {
+    run: async (doing, args) => {
       const all = await held(doing.env, doing.grant.owner)
       must(mayOpen(doing.grant.remit, all.length))
 
-      // Deliberately performed by the same endpoint a person uses, rather than
-      // reimplemented here — every check it makes (the name, the zone, the
-      // account's room, the tunnel) is a check an agent needs more, not less.
-      throw new Refused(
-        "not_yet",
-        "Opening a cluster from an agent is granted by this remit but not wired to the provisioning path yet. Open it in the console; every other tool works against it.",
-      )
+      // The same function the console's own endpoint calls. Every check it makes
+      // — the name, the zone, the account's room, the trial firewall, the name
+      // already answering on the zone — is a check an agent needs more than a
+      // person does, not less, and a second copy of them would drift.
+      const opened = await openFor(doing.env, doing.grant.owner, args as Asked, doing.home)
+
+      if (!opened.ok) throw new Refused(opened.problem, opened.repair)
+
+      return {
+        cluster: shown(opened.cluster),
+        // Said plainly, because an agent that thinks this is finished will
+        // immediately try to use it and get nothing.
+        next: "It is opening, not open. Ask `opening` for how far along it is — it takes two or three minutes and the machine reports each step.",
+      }
     },
   },
 
@@ -313,10 +328,11 @@ export const TOOLS: Tool[] = [
         )
       }
 
-      throw new Refused(
-        "not_yet",
-        "Removing a cluster from an agent is granted by this remit but not wired to the teardown path yet. Remove it in the console.",
-      )
+      const removed = await removeFor(doing.env, doing.grant.owner, cluster.id, true)
+
+      if (!removed.ok) throw new Refused(removed.problem, removed.repair)
+
+      return { removed: cluster.name, destroyed: true, ...(removed.note ? { note: removed.note } : {}) }
     },
   },
 ]

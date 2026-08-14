@@ -160,6 +160,22 @@ describe("the tool surface", () => {
     }
   })
 
+  it("performs through the same functions the console does", async () => {
+    // The property worth asserting is not what these return — that needs
+    // vendors — but that the agent path and the person path are ONE path.
+    // Two copies of the provisioning sequence would start correct and drift,
+    // and the drift would show up as an agent able to make something a person
+    // could not, or the reverse.
+    const opening = await import("../lib/control/opening.ts")
+
+    assert.equal(typeof opening.openFor, "function")
+    assert.equal(typeof opening.removeFor, "function")
+
+    const source = TOOLS.map((one) => one.run.toString()).join("\n")
+    assert.match(source, /openFor/)
+    assert.match(source, /removeFor/)
+  })
+
   it("names the destructive ones destructively", () => {
     // An agent reads these and nothing else before choosing. A tool that
     // destroys a fact log and describes itself neutrally is a trap.
