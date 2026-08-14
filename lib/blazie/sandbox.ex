@@ -70,8 +70,9 @@ defmodule Blazie.Sandbox do
     fuel = Keyword.get(opts, :fuel, @fuel)
     memory_bytes = Keyword.get(opts, :memory_bytes, @memory_bytes)
 
-    with {:ok, store} <- store(fuel, memory_bytes),
-         {:ok, pid, memory} <- instantiate(store, bytes),
+    with {:ok, engine, module} <- compiled(bytes),
+         {:ok, store} <- store(fuel, memory_bytes, engine),
+         {:ok, pid, memory} <- instantiate(store, module),
          {:ok, encoded} <- encode(input),
          {:ok, answer} <- exchange(store, pid, memory, encoded) do
       {:ok, answer, spent(store, memory, fuel)}
@@ -130,17 +131,40 @@ defmodule Blazie.Sandbox do
       preopen: Keyword.get(opts, :preopen, [])
     }
 
-    config = Wasmex.EngineConfig.consume_fuel(%Wasmex.EngineConfig{}, true)
-
-    with {:ok, engine} <- Wasmex.Engine.new(config),
+    with {:ok, engine, module} <- compiled(bytes),
          {:ok, store} <-
            Wasmex.Store.new_wasi(wasi, %Wasmex.StoreLimits{memory_size: memory_bytes}, engine),
          :ok <- Wasmex.StoreOrCaller.set_fuel(store, fuel),
-         {:ok, module} <- Wasmex.Module.compile(store, bytes),
          {:ok, pid} <- start_unlinked(store, module) do
       started(pid, store, stdout, stderr, fuel)
     else
       {:error, why} -> {:error, refusal(why)}
+    end
+  end
+
+  # Compiled once per distinct module, however many times it runs. The cost
+  # was paid per EVALUATION — for a CPython image that is most of a second,
+  # every read, forever (C9). The engine travels with the module because a
+  # wasmtime module only instantiates against stores from the engine that
+  # compiled it. `:persistent_term` on purpose: no owner to die, and a
+  # deployment's set of distinct modules is small and worth keeping warm for
+  # the life of the node.
+  defp compiled(bytes) do
+    key = {__MODULE__, :crypto.hash(:sha256, bytes)}
+
+    case :persistent_term.get(key, nil) do
+      {engine, module} ->
+        {:ok, engine, module}
+
+      nil ->
+        config = Wasmex.EngineConfig.consume_fuel(%Wasmex.EngineConfig{}, true)
+
+        with {:ok, engine} <- Wasmex.Engine.new(config),
+             {:ok, probe} <- Wasmex.Store.new(nil, engine),
+             {:ok, module} <- Wasmex.Module.compile(probe, bytes) do
+          :persistent_term.put(key, {engine, module})
+          {:ok, engine, module}
+        end
     end
   end
 
@@ -204,11 +228,8 @@ defmodule Blazie.Sandbox do
 
   # ── the world a guest is given ─────────────────────────────────────────────
 
-  defp store(fuel, memory_bytes) do
-    config = Wasmex.EngineConfig.consume_fuel(%Wasmex.EngineConfig{}, true)
-
-    with {:ok, engine} <- Wasmex.Engine.new(config),
-         {:ok, store} <- Wasmex.Store.new(%Wasmex.StoreLimits{memory_size: memory_bytes}, engine),
+  defp store(fuel, memory_bytes, engine) do
+    with {:ok, store} <- Wasmex.Store.new(%Wasmex.StoreLimits{memory_size: memory_bytes}, engine),
          :ok <- Wasmex.StoreOrCaller.set_fuel(store, fuel) do
       {:ok, store}
     else
@@ -225,9 +246,8 @@ defmodule Blazie.Sandbox do
   # kills whoever asked. A malformed image would have taken the job runner's
   # task down with it, and `Job.run`'s `rescue` would not have caught it,
   # because an exit is not an exception.
-  defp instantiate(store, bytes) do
-    with {:ok, module} <- Wasmex.Module.compile(store, bytes),
-         {:ok, pid} <- start_unlinked(store, module),
+  defp instantiate(store, module) do
+    with {:ok, pid} <- start_unlinked(store, module),
          {:ok, memory} <- Wasmex.memory(pid) do
       {:ok, pid, memory}
     else
@@ -247,12 +267,21 @@ defmodule Blazie.Sandbox do
 
     spawn(fn ->
       Process.flag(:trap_exit, true)
-      send(parent, {:started, Wasmex.start_link(%{store: store, module: module})})
-      # Hold the instance alive for as long as whoever asked for it lives.
-      ref = Process.monitor(parent)
+      result = Wasmex.start_link(%{store: store, module: module})
+      send(parent, {:started, result})
 
-      receive do
-        {:DOWN, ^ref, :process, ^parent, _why} -> :ok
+      # Hold the instance alive for as long as whoever asked for it lives —
+      # and STOP it when they die. The holder used to just exit, and a normal
+      # exit does not propagate through a link, so every evaluation left a
+      # live Wasmex server behind (C9's third defect: measured as a process
+      # per read, forever).
+      with {:ok, pid} <- result do
+        ref = Process.monitor(parent)
+
+        receive do
+          {:DOWN, ^ref, :process, ^parent, _why} -> stop_quietly(pid)
+          {:EXIT, ^pid, _why} -> :ok
+        end
       end
     end)
 
@@ -262,6 +291,12 @@ defmodule Blazie.Sandbox do
     after
       30_000 -> {:error, "the sandbox did not start"}
     end
+  end
+
+  defp stop_quietly(pid) do
+    if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+  catch
+    :exit, _reason -> :ok
   end
 
   defp encode(input) do
