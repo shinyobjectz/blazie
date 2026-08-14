@@ -92,6 +92,12 @@ export const WORDS: Record<string, Word> = {
     "definition": "What is put to a snapshot: which facts are wanted, described rather than fetched. A question is data and not code — it names ids, attributes and answers to match — so the same question travels over the wire, is stored as a fact, and caches against a name. A formula is a question somebody kept.",
     "test": "Is this a description of which facts are wanted, containing no instructions?"
   },
+  "run": {
+    "name": "run",
+    "code": "run",
+    "definition": "One turn-by-turn execution of the loop, and the trajectory it leaves behind. A run is an id every turn is written under — what was asked, what came back, what it cost, which tools it called, which requirements held — so it is a thing that can be resumed, forked and asked questions of rather than a log that scrolled past. Resuming one is reading its own facts; forking one is opening its snapshot at a transaction and continuing differently, and both branches stay answerable because nothing was overwritten to make the second.",
+    "test": "Could you ask what it did after it finished, and carry on from where it stopped? Then it is a run. If it left nothing behind, it was a call."
+  },
   "snp": {
     "name": "snapshot",
     "code": "snp",
