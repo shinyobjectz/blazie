@@ -66,5 +66,5 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: The ontology gate
         run: |
-          uvx --from "git+https://github.com/socialite-ml/montology@main#subdirectory=.monty/cli" \
+          uvx --from "git+https://github.com/shinyobjectz/montology@main#subdirectory=.monty/cli" \
             monty lint
