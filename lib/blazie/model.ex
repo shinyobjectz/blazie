@@ -159,46 +159,70 @@ defmodule Blazie.Model do
   defp turn(reference, messages, tools, run, opts, left, tries, made) do
     asked_at = System.monotonic_time(:millisecond)
 
-    case speaking(reference, opts).(reference, messages, tools, opts) do
-      {:error, refusal} ->
-        {:error, refusal}
+    # The account-wide door, before the vendor sees anything. The caller for
+    # fairness is whoever the work is FOR — a Studio, an org — falling back
+    # to the run, so one chatty tenant contends as one tenant however many
+    # runs it starts. A refusal carries retry-after and stops the turn: the
+    # vendor refusing the whole account is the outcome this trades away.
+    with :ok <- allowed(reference, opts) do
+      case speaking(reference, opts).(reference, messages, tools, opts) do
+        {:error, refusal} ->
+          {:error, refusal}
 
-      {:ok, {:said, said}, spent} ->
-        record(reference, opts, messages, said, spent, asked_at)
-        answered(reference, messages, tools, run, opts, left, tries, made, said)
+        {:ok, {:said, said}, spent} ->
+          record(reference, opts, messages, said, spent, asked_at)
+          answered(reference, messages, tools, run, opts, left, tries, made, said)
 
-      {:ok, {:calls, calls}, spent} ->
-        record(reference, opts, messages, calls, spent, asked_at)
+        {:ok, {:calls, calls}, spent} ->
+          record(reference, opts, messages, calls, spent, asked_at)
 
-        {results, made} =
-          Enum.reduce(calls, {[], made}, fn call, {results, made} ->
-            answered =
-              case run.(call) do
-                {:ok, result} -> result
-                {:error, refusal} -> %{"error" => Map.get(refusal, :repair, "the tool failed")}
-              end
+          {results, made} =
+            Enum.reduce(calls, {[], made}, fn call, {results, made} ->
+              answered =
+                case run.(call) do
+                  {:ok, result} -> result
+                  {:error, refusal} -> %{"error" => Map.get(refusal, :repair, "the tool failed")}
+                end
 
-            # `Tool.called/4` built exactly this fact and nothing ever called it,
-            # so a trajectory recorded what the model SAID and not what it DID.
-            # An agent's tool calls are the part worth learning from — the same
-            # arguments and the same answer, over and over, is a function nobody
-            # has written down yet.
-            wrote(opts, call, answered)
+              # `Tool.called/4` built exactly this fact and nothing ever called it,
+              # so a trajectory recorded what the model SAID and not what it DID.
+              # An agent's tool calls are the part worth learning from — the same
+              # arguments and the same answer, over and over, is a function nobody
+              # has written down yet.
+              wrote(opts, call, answered)
 
-            {[{call, answered} | results], [%{call: call, answered: answered} | made]}
-          end)
+              {[{call, answered} | results], [%{call: call, answered: answered} | made]}
+            end)
 
-        turn(
-          reference,
-          messages ++ replies(calls, Enum.reverse(results)),
-          tools,
-          run,
-          opts,
-          left - 1,
-          tries,
-          made
-        )
+          turn(
+            reference,
+            messages ++ replies(calls, Enum.reverse(results)),
+            tools,
+            run,
+            opts,
+            left - 1,
+            tries,
+            made
+          )
+      end
     end
+  end
+
+  # One token from the vendor's account-wide bucket, or the refusal with its
+  # retry-after. A node with no limiter running has no ceilings written down,
+  # and inventing one would refuse traffic on a guess — the same position the
+  # price table takes about costs.
+  defp allowed(reference, opts) do
+    caller = Keyword.get(opts, :for) || Keyword.get(opts, :by, "anonymous")
+
+    # The provider travels as an atom inside a Reference and as a string in
+    # configuration, because vendors are configuration — stringified here so
+    # the two can never miss each other, which they did: the limits map was
+    # consulted with :openai, found nothing, and every call passed.
+    vendor = to_string(reference.provider)
+    Blazie.Limit.ask(Keyword.get(opts, :limiter, Blazie.Limit), vendor, caller)
+  catch
+    :exit, _no_limiter -> :ok
   end
 
   # Every model call, written down where it happened.
@@ -221,13 +245,21 @@ defmodule Blazie.Model do
          by when not is_nil(by) <- Keyword.get(opts, :by) do
       took = System.monotonic_time(:millisecond) - asked_at
 
+      # The booking lands in the same transaction as the turn, attributed to
+      # whoever the call was FOR, priced from the table or marked unpriced —
+      # never silently zero (an unpriced vendor books NOTHING, because a zero
+      # row reads as measured-and-free).
+      billed = Keyword.get(opts, :for, by)
+
       Blazie.World.append(
         world,
         [
           {by, "asked", asking(messages), by},
           {by, "answered", answering(answer), by},
           {by, "took_ms", took, by}
-        ] ++ Blazie.Spend.of(by, spent, by, named(reference))
+        ] ++
+          Blazie.Spend.of(by, spent, by, named(reference)) ++
+          Blazie.Price.booking(billed, named(reference), spent, prices(opts))
       )
     end
 
@@ -253,6 +285,16 @@ defmodule Blazie.Model do
   end
 
   defp named(%Reference{provider: provider, name: name}), do: "#{provider}:#{name}"
+
+  # A test hands its own prices snapshot in; production reads the configured
+  # prices world. Absent either, `booking/4` books nothing and says nothing —
+  # the `unpriced` marker requires a table to have been missing FROM.
+  defp prices(opts) do
+    case Keyword.fetch(opts, :prices) do
+      {:ok, snapshot} -> snapshot
+      :error -> Blazie.Price.current()
+    end
+  end
 
   # One tool call, written where the turns are. Best effort, for the same reason
   # the turn is: a diary that cannot be written must not stop the work.

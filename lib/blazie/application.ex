@@ -77,6 +77,10 @@ defmodule Blazie.Application do
         # One engine for every world: it caches by formula and snapshot name,
         # and a name already says which ledgers it composed.
         {Blazie.Formula.Engine, name: Blazie.Formula.Engine},
+        # The one bucket per vendor account. A vendor's rate limit is global
+        # by definition, so it has to be held somewhere that sees every
+        # Studio's traffic — here, before any provider does.
+        Blazie.Limit,
         {Phoenix.PubSub, name: Blazie.PubSub},
         Blazie.Surface.Endpoint
       ] ++ vitals() ++ storage() ++ agents() ++ backup() ++ drill()
