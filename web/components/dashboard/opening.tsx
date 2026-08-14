@@ -39,9 +39,22 @@ export function Opening({ cluster }: { cluster: Cluster }) {
   const since = useElapsed(cluster.opened)
 
   const step = cluster.saying?.step
-  const failed = step === "failed"
-  const reached = failed ? -1 : STEPS.findIndex((s) => s.id === step)
   const done = cluster.state === "open"
+
+  // Stopped is what the CONSOLE could not reach, not what the machine claimed.
+  //
+  // A machine reported `failed` having registered four tunnel connections and
+  // answered on its own name, and this said "it stopped" over a cluster that
+  // was serving. The claim is still shown — the detail below is often the most
+  // useful thing on the screen — but it no longer overrules a live connection.
+  const failed = !done && cluster.state === "unreachable"
+
+  // The last step actually reached. A `failed` report says nothing about how
+  // far it got, so the sequence is read from what was reported rather than
+  // thrown away because the final entry was bad news.
+  const reported = (cluster.said ?? []).filter((one) => one.step !== "failed")
+  const last = reported.at(-1)?.step ?? (step !== "failed" ? step : undefined)
+  const reached = done ? STEPS.length - 1 : STEPS.findIndex((s) => s.id === last)
 
   return (
     <div>
@@ -116,6 +129,10 @@ export function Opening({ cluster }: { cluster: Cluster }) {
         })}
       </ol>
 
+      {/* Shown whenever the machine said something went wrong, even once the
+          cluster is answering — a provision that complained and worked anyway
+          is worth reading, and hiding it is how the last four went unexplained.
+          What it no longer does is decide whether the cluster is broken. */}
       {cluster.saying?.step === "failed" && cluster.saying.detail ? (
         <pre className="font-mono mt-8 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-flame/30 bg-flame/5 p-4 text-[11px] leading-relaxed text-flame">
           {cluster.saying.detail}

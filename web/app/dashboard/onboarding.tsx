@@ -87,8 +87,19 @@ export function Onboarding() {
    * or, when a tick overlapped the next, not at all. The animation was waiting
    * on the one call that cannot answer while there is anything to animate.
    */
+  // Keyed on the id, NOT on the cluster.
+  //
+  // `refresh` replaces the array every two seconds, so the cluster object is a
+  // new identity every time — and depending on it tore both timers down and
+  // rebuilt them on every read. The two-second one survived long enough to
+  // fire; the ten-second one was destroyed and recreated before it ever could,
+  // so `look` never ran once. A machine that had been answering for twenty-four
+  // minutes sat at "opening" because the only call that can say otherwise was
+  // being cancelled five times for every chance it had to happen.
+  const watching = held?.id
+
   useEffect(() => {
-    if (!held) return
+    if (!watching) return
 
     const reading = setInterval(() => {
       void refresh().catch(() => undefined)
@@ -100,11 +111,15 @@ export function Onboarding() {
       void look().catch(() => undefined)
     }, 10_000)
 
+    // And once immediately, so a page opened onto an already-answering cluster
+    // does not wait ten seconds to find out.
+    void look().catch(() => undefined)
+
     return () => {
       clearInterval(reading)
       clearInterval(reaching)
     }
-  }, [held, refresh])
+  }, [watching, refresh])
 
   // Only what the console has actually failed to reach, never merely what the
   // machine claimed. A provision reported `failed` having connected its tunnel
