@@ -10,8 +10,11 @@ defmodule Blazie.Snapshot do
   A caller outside the cluster does not hold the bytes. It holds the
   snapshot's `name/1` — which ledgers, at which transaction — and asks
   questions of it. The part that matters survives the wire: an answer at a
-  named snapshot is the same answer forever, so a client caches on
-  `{name, question}` and never invalidates.
+  named snapshot is the same answer forever, **or `:erased`** — erasure is
+  the one event that changes what an old name answers, so a client that
+  caches on `{name, question}` holds the answer until a key is destroyed,
+  and flushing its copy then is the deployment's job, because nothing here
+  can reach a cache it never knew was taken.
   """
 
   alias Blazie.{Fact, World}

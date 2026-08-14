@@ -3,13 +3,16 @@ defmodule Blazie.Formula.EngineTest do
   The engine decides whether to keep an answer. Nobody declares it.
 
   The property that makes this easy: an answer at a named snapshot never
-  changes, so a cache keyed by that name can never be stale. It needs eviction,
-  not invalidation — there is no cache-coherence problem here because there is
-  nothing to cohere.
+  changes, so a cache keyed by the name AND the body can only go stale one
+  way — erasure, the single event that changes what an old name answers.
+  The cache watches the erasure epoch and drops everything when it moves;
+  everything else is eviction, which is a size problem.
   """
-  use ExUnit.Case, async: true
+  # Serial: the caching assertions count computations, and any concurrent
+  # test that erases moves the global epoch and flushes every engine.
+  use ExUnit.Case, async: false
 
-  alias Blazie.{Attribute, Formula, World, Snapshot, TestLedger}
+  alias Blazie.{Attribute, Erasure, Formula, Keyring, World, Snapshot, TestLedger}
   alias Blazie.Formula.Engine
 
   setup do
@@ -149,6 +152,81 @@ defmodule Blazie.Formula.EngineTest do
       Engine.answer(engine, "doubled", snapshot)
 
       assert %{"doubled" => %{asked: 3, computed: 1}} = Engine.stats(engine)
+    end
+  end
+
+  describe "the code is part of the question" do
+    # C11, reproduced: the cache was keyed on {id, name}, register/2 replaces
+    # in place, so a formula multiplying by 100 returned the old doubling's
+    # 20 at every name already asked — the build cache that omitted the
+    # compiler version.
+    defp times(factor) do
+      Formula.new("f", fn snapshot ->
+        for fact <- Snapshot.find(snapshot, attribute: "height") do
+          {fact.id, "doubled", fact.value * factor}
+        end
+      end)
+    end
+
+    test "changing a formula's body changes its answers at an already-asked name",
+         %{world: world} do
+      {:ok, _} = World.append(world, [{1, "height", 10}])
+      engine = start_engine(world, [times(2)])
+      snapshot = Snapshot.open([world])
+
+      assert {:ok, [{1, "doubled", 20, "f"}]} = Engine.answer(engine, "f", snapshot)
+
+      # The same id, new code — and the same closure SITE with a different
+      # capture, which is the subtler half: the stamp covers the environment,
+      # because two closures from one site over different values are two
+      # formulas.
+      :ok = Engine.register(engine, times(100))
+
+      assert {:ok, [{1, "doubled", 1000, "f"}]} = Engine.answer(engine, "f", snapshot)
+    end
+
+    test "the same body asked twice is still one computation", %{world: world} do
+      # The stamp must not break what the cache is for.
+      {:ok, agent} = Agent.start_link(fn -> 0 end)
+      {:ok, _} = World.append(world, [{1, "height", 10}])
+      engine = start_engine(world, [counting_formula(agent)])
+      snapshot = Snapshot.open([world])
+
+      Engine.answer(engine, "doubled", snapshot)
+      Engine.answer(engine, "doubled", snapshot)
+      assert Agent.get(agent, & &1) == 1
+    end
+  end
+
+  describe "erasure reaches the cache" do
+    # C10, reproduced: the key was destroyed and the SAME name at the SAME
+    # engine kept serving the plaintext, because "a cache keyed by a name
+    # cannot go stale" and "an old name answers :erased" were both in the
+    # repository and the cache implemented the wrong one.
+    test "a cached answer derived from a sealed fact dies with the key", %{world: world} do
+      {:ok, _} = World.append(world, Erasure.seed())
+      subject = "person-#{System.unique_integer([:positive])}"
+      on_exit(fn -> Keyring.destroy(subject) end)
+
+      {:ok, _} = World.append(world, [{7, "subject", subject}])
+      {:ok, _} = World.append(world, [{7, "height", 180}])
+
+      echo =
+        Formula.new("echo", fn snapshot ->
+          for fact <- Snapshot.find(snapshot, id: 7, attribute: "height") do
+            {fact.id, "echoed", fact.value}
+          end
+        end)
+
+      engine = start_engine(world, [echo])
+      snapshot = Snapshot.open([world])
+
+      assert {:ok, [{7, "echoed", 180, "echo"}]} = Engine.answer(engine, "echo", snapshot)
+
+      :ok = Erasure.erase(subject)
+
+      # Same engine, same name: the destroyed plaintext is not served.
+      assert {:ok, [{7, "echoed", :erased, "echo"}]} = Engine.answer(engine, "echo", snapshot)
     end
   end
 end

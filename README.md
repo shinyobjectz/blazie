@@ -76,9 +76,14 @@ There is one door. `run` opens a snapshot, evaluates the chunk against it, and
 appends whatever the chunk wrote — three steps that used to be three operations
 a caller had to know the vocabulary for.
 
-A caller holds the snapshot's *name*, never its bytes. Because an answer at a
-name never changes, a client caches on `{name, source}` and never invalidates —
-there is no cache-coherence protocol because there is nothing to cohere.
+A caller holds the snapshot's *name*, never its bytes. An answer at a name is
+the same answer forever, **or `:erased`** — erasure is the one operation that
+makes an old name answer differently, and it is the law's operation, not a
+write. So a client caches on `{name, source}` and invalidates for exactly one
+event: caches inside the cluster flush themselves when a key is destroyed,
+and a deployment that erases is responsible for flushing any cache it built
+outside — this system cannot reach a copy it never knew was taken, and
+pretending otherwise would be a compliance claim nothing enforces.
 
 `claim` takes a world name and grants it to whoever claimed it; that is the
 only other thing the wire does.

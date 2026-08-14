@@ -61,8 +61,34 @@ defmodule Blazie.Erasure do
     # a restored key store resurrects somebody with nothing left to say it
     # should not have. The other order is recoverable; this one is not.
     unless erased?(subject), do: record(subject)
-    Keyring.destroy(subject)
+    result = Keyring.destroy(subject)
+
+    # The epoch bumps LAST, after the key is gone: a cache flushed on the bump
+    # recomputes against a key that no longer opens, where a bump before the
+    # destroy would let a recompute in the gap re-cache the plaintext.
+    bump_epoch()
+    result
   end
+
+  @doc """
+  A number that changes on every erasure.
+
+  Erasure is the one operation that makes an old snapshot name answer
+  differently — the caching guarantee everywhere else is "the same answer
+  forever", and here it is "the same answer forever, or `:erased`". A cache
+  inside this system checks the epoch and drops everything when it moves
+  (C10): coarse on purpose, the same judgement as the read-set widening — a
+  flush on a rare event costs recomputation, where anything finer would need
+  provenance nobody records and would fail toward serving destroyed data.
+
+  A cache OUTSIDE this system cannot be reached by this number, and the
+  README says so where it hands out the caching advice: a deployment that
+  erases is responsible for flushing its own clients.
+  """
+  @spec epoch() :: non_neg_integer()
+  def epoch, do: :persistent_term.get({__MODULE__, :epoch}, 0)
+
+  defp bump_epoch, do: :persistent_term.put({__MODULE__, :epoch}, epoch() + 1)
 
   @doc "Has this subject been erased? Answered from the tombstones, not the keys."
   @spec erased?(term()) :: boolean()

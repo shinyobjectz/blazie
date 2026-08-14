@@ -59,8 +59,11 @@ defmodule Blazie.FormulaTest do
 
     test "a formula carries nothing but its identity and its answer" do
       # No inputs field, no dependency list, no schedule. If one is ever added,
-      # the graph has stopped being observed and this fails.
-      assert doubled() |> Map.from_struct() |> Map.keys() |> Enum.sort() == [:compute, :id]
+      # the graph has stopped being observed and this fails. `stamp` is part
+      # of identity, not scheduling — it identifies the BODY, because the
+      # question a cache answers is the code, not the name (C11).
+      assert doubled() |> Map.from_struct() |> Map.keys() |> Enum.sort() ==
+               [:compute, :id, :stamp]
     end
   end
 

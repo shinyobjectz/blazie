@@ -364,6 +364,16 @@ until the box had been running a while. etcd shipped the same checkpoint design
 and ran it ten months, because on a single node the symptom is that nothing is
 wrong, it is only slow, and only later.
 
+**Two true sentences, one false system.** The formula cache said "a cache
+keyed by a name cannot go stale — there is nothing to cohere". The erasure
+doc said "an old name still answers — it answers `:erased`". Both were in the
+repository, they cannot both be true, and the cache implemented the wrong
+one: after a key was destroyed, the same name at the same engine kept serving
+the plaintext. The repair is an erasure epoch every cache watches, and the
+published guarantee now says the exception out loud — the same answer
+forever, *or `:erased`* — because a guarantee with an unstated exception is
+how the two sentences got written in the first place.
+
 ---
 
 ## Where the real source is

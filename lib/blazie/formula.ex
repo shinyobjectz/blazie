@@ -28,15 +28,35 @@ defmodule Blazie.Formula do
   alias Blazie.{Fact, World, Snapshot}
 
   @enforce_keys [:id, :compute]
-  defstruct [:id, :compute]
+  defstruct [:id, :compute, :stamp]
 
-  @type t :: %__MODULE__{id: term(), compute: (Snapshot.t() -> [assertion()])}
+  @typedoc """
+  `stamp` identifies the BODY, not the name. A cache keyed only by the name
+  keeps answering with old code after the code changes — the same defect as a
+  build cache that omits the compiler version (C11, reproduced: a formula
+  replaced with one that multiplies by 100 kept returning the doubling's
+  answer at every name already asked). For a source formula it is a hash of
+  the source; for a closure it covers the code site and the captured
+  environment, because two closures from one site over different values are
+  two formulas.
+  """
+  @type t :: %__MODULE__{
+          id: term(),
+          compute: (Snapshot.t() -> [assertion()]),
+          stamp: term()
+        }
   @type assertion :: {term(), String.t(), term()}
   @type read_set :: [keyword()]
 
   @doc "Declare a formula. Nothing runs."
   @spec new(term(), (Snapshot.t() -> [assertion()])) :: t()
-  def new(id, compute) when is_function(compute, 1), do: %__MODULE__{id: id, compute: compute}
+  def new(id, compute) when is_function(compute, 1) do
+    # `phash2` over the whole of `fun_info` — module, code-site index, uniq,
+    # AND the captured environment. In-process only, which is why hashing
+    # terms is safe here: this cache dies with the node, so EEP-18's warning
+    # about term encodings changing across OTP releases does not reach it.
+    %__MODULE__{id: id, compute: compute, stamp: :erlang.phash2(:erlang.fun_info(compute))}
+  end
 
   @doc """
   A formula whose body is Lua held in the world.
@@ -62,6 +82,9 @@ defmodule Blazie.Formula do
   def of_source(id, source) when is_binary(source) do
     %__MODULE__{
       id: id,
+      # The source IS the body, so the stamp is its hash — a redeclared
+      # formula with different Lua is a different question.
+      stamp: :crypto.hash(:sha256, source),
       compute: fn snapshot ->
         # `watching/3` rather than `run/3`: a guest runs in a process of its own,
         # so what it read lands in that process's dictionary and the

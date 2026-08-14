@@ -6,17 +6,28 @@ defmodule Blazie.Formula.Engine do
   A formula says what, never when — so something has to decide when. That is
   this, and doctrine 5 says it is the engine's job rather than the author's.
 
-  ## A cache keyed by a name cannot go stale
+  ## A cache keyed by a name cannot go stale — except the one way it can
 
   An answer at a named snapshot is the same answer forever, so caching on
-  `{formula, name}` is trivially correct. There is no invalidation here and
-  there is no cache-coherence protocol, because there is nothing to cohere — a
-  later write produces a *different* name, which is a miss rather than a
-  conflict. What the cache needs is eviction, which is a size problem, not a
-  correctness one.
+  `{formula, its body, name}` is correct for every ordinary write: a later
+  write produces a *different* name, which is a miss rather than a conflict.
+  The body is in the key because the actual question is the formula's CODE,
+  not its name — a formula replaced in place kept answering with the old
+  code's answers forever, at every name already asked (C11).
 
-  That is the whole reason this is small. In a mutable database the same
-  component would be the hardest thing in the system.
+  The exception is erasure, and for a while this module and the README each
+  held one of two true sentences that could not both be true: "never
+  invalidates" here, "an old name answers `:erased`" there — and the cache
+  implemented the wrong one, serving destroyed plaintext under a destroyed
+  key (C10). So the engine watches `Erasure.epoch/0` and drops everything it
+  holds when the epoch moves. Coarse on purpose: erasure is rare, recomputing
+  is always available, and anything finer needs provenance nobody records —
+  the same direction the read-set widens in, toward re-answering rather than
+  toward a stale answer.
+
+  What the cache needs beyond that is eviction, which is a size problem, not
+  a correctness one. That is the whole reason this is small. In a mutable
+  database the same component would be the hardest thing in the system.
 
   ## What it decides today, and what it is collecting for
 
@@ -37,7 +48,7 @@ defmodule Blazie.Formula.Engine do
 
   use GenServer
 
-  alias Blazie.{Formula, Snapshot}
+  alias Blazie.{Erasure, Formula, Snapshot}
 
   @type option ::
           {:formulas, [Formula.t()]}
@@ -89,7 +100,8 @@ defmodule Blazie.Formula.Engine do
        # key => answer, plus the order they were last wanted in.
        kept: %{},
        order: [],
-       stats: %{}
+       stats: %{},
+       epoch: Erasure.epoch()
      }}
   end
 
@@ -108,8 +120,9 @@ defmodule Blazie.Formula.Engine do
   def handle_call(:cached, _from, state), do: {:reply, map_size(state.kept), state}
 
   defp reply_with_answer(formula, snapshot, state) do
-    key = {formula.id, Snapshot.name(snapshot)}
-    state = count(state, formula.id, :asked)
+    # The body's stamp is in the key: the question is the code, not the name.
+    key = {formula.id, formula.stamp, Snapshot.name(snapshot)}
+    state = state |> current() |> count(formula.id, :asked)
 
     case Map.fetch(state.kept, key) do
       {:ok, answer} ->
@@ -128,6 +141,17 @@ defmodule Blazie.Formula.Engine do
   end
 
   # ── keeping ────────────────────────────────────────────────────────────────
+
+  # Everything kept was derived under keys that opened at the time. When an
+  # erasure happens, some of those keys no longer open, and no record says
+  # which answers they fed — so all of it goes, and the next ask recomputes
+  # against the world as it now answers.
+  defp current(state) do
+    case Erasure.epoch() do
+      epoch when epoch == state.epoch -> state
+      epoch -> %{state | kept: %{}, order: [], epoch: epoch}
+    end
+  end
 
   defp keep(state, key, answer) do
     %{
