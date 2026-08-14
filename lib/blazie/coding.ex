@@ -193,22 +193,98 @@ defmodule Blazie.Coding do
   @spec work(World.ref(), term(), String.t(), keyword()) ::
           {:ok, String.t(), [map()]} | {:error, map()}
   def work(world, run, task, opts) do
+    {:ok, _} = Run.begin(world, run)
+    stretch(world, run, task, opts, Keyword.get(opts, :stretches, 1), [])
+  end
+
+  # One stretch of work, then reassemble and go again.
+  #
+  # `converse/5` accumulates its messages in memory for the length of one call —
+  # correct for a call, and the one thing in this stack that grows without a
+  # bound. A long session is therefore several calls, and between them the
+  # context is rebuilt from facts under whatever policy `keep:` names.
+  #
+  # Which is Mellea's position reached from the other side: the context is per
+  # call and the durable thing is the record. Our own harness says it plainly —
+  # a frozen spec plus a fresh context has almost nothing to persist, so a run
+  # that dies mid-flight loses one call and not a conversation. Here it also
+  # means a session has no length limit; what it has is an assembly that stays
+  # the size the policy says however long the session runs.
+  defp stretch(world, run, _task, _opts, 0, _made),
+    do: {:ok, "out of stretches", did(world, run)}
+
+  defp stretch(world, run, task, opts, left, made) do
     model = Keyword.fetch!(opts, :asks)
     agent = Keyword.get(opts, :as, "coder")
+
+    with :ok <- shorten(world, run, opts) do
+      snapshot = Snapshot.open([world])
+
+      answered =
+        Model.converse(
+          model,
+          [%{"role" => "user", "content" => prompt(snapshot, agent, task)}] ++
+            Run.messages(snapshot, run, keep: Keyword.get(opts, :keep, 6)),
+          Tool.available(snapshot, agent),
+          &running(world, run, &1),
+          Keyword.merge(
+            [into: world, by: run, calls: Keyword.get(opts, :calls, 12)],
+            Keyword.take(opts, [:provider, :timeout, :answers, :snapshot, :tries])
+          )
+        )
+
+      case answered do
+        # It answered without running out of calls, so it is done.
+        {:ok, said, turns} ->
+          {:ok, said, made ++ turns}
+
+        # It spent its calls without answering. That is not a failure of the
+        # work, it is the end of a stretch — so the context is rebuilt, which
+        # is where compaction happens, and it carries on with what it did
+        # already visible to it as facts.
+        {:error, %{problem: :too_many_calls}} ->
+          stretch(world, run, task, opts, left - 1, made)
+
+        {:error, refusal} ->
+          {:error, refusal}
+      end
+    end
+  end
+
+  # What it did, read back from the run rather than carried.
+  #
+  # `converse/5` answers `{:error, :too_many_calls}` with no trace, so a stretch
+  # that ended at its ceiling loses the calls it made — carried in memory. They
+  # are not lost: every one was written as a `called` fact when it happened, and
+  # the record is the durable account. Reading them back is both simpler and
+  # the same answer a query would give afterwards.
+  defp did(world, run) do
+    Snapshot.open([world])
+    |> Snapshot.find(id: run, attribute: "called")
+    |> Enum.map(fn fact ->
+      %{
+        call: %{
+          name: Map.get(fact.value, "tool"),
+          arguments: Map.get(fact.value, "arguments", %{})
+        },
+        answered: Map.get(fact.value, "answered")
+      }
+    end)
+  end
+
+  # Fold the older turns into a summary when there are more than the policy
+  # keeps. Skipped silently when there is nothing to fold, and a failure to
+  # summarise does not stop the work — a long context is a cost, and stopping
+  # is worse than paying it.
+  defp shorten(world, run, opts) do
     snapshot = Snapshot.open([world])
+    keep = Keyword.get(opts, :keep, 6)
 
-    {:ok, _} = Run.begin(world, run)
+    if Run.outstanding(snapshot, run) > keep * 2 do
+      Run.compact_with(world, run, snapshot, Keyword.put(opts, :keep, keep))
+    end
 
-    Model.converse(
-      model,
-      prompt(snapshot, agent, task),
-      Tool.available(snapshot, agent),
-      &running(world, run, &1),
-      Keyword.merge(
-        [into: world, by: run, calls: Keyword.get(opts, :calls, 12)],
-        Keyword.take(opts, [:provider, :timeout, :answers, :snapshot, :tries])
-      )
-    )
+    :ok
   end
 
   # One tool call. A `write` is applied here rather than in the tool, because a

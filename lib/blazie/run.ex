@@ -35,6 +35,22 @@ defmodule Blazie.Run do
   JSONL file, which is the same idea reached by building a file format. Here the
   database already is one.
 
+  ## Long horizon: the context is assembled, never accumulated
+
+  Mellea's position, which this tree arrived at from the other direction: the
+  context is per call, built fresh, and the durable thing is the record rather
+  than a buffer. Our own harness puts it plainly — "a call expressed as a frozen
+  spec plus a fresh context has almost nothing to persist, so a run that dies
+  mid-flight loses one call, not a conversation."
+
+  `messages/3` is that assembly, and it takes a policy. Which is the whole of
+  long-horizon context management here: what to include is a decision made
+  fresh each time against facts that are all still there, not a buffer somebody
+  has to prune before it overflows.
+
+  So a run has no length limit. What it has is an assembly that stays the size
+  the policy says, however long the run gets.
+
   ## Compaction adds, it does not replace
 
   A long run's early turns get summarised so the context stays affordable. The
@@ -109,9 +125,20 @@ defmodule Blazie.Run do
   passing this where the prompt would go. Compacted turns come back as their
   summary instead, which is the whole point of having compacted them.
   """
-  @spec messages(Snapshot.t(), term()) :: [map()]
-  def messages(%Snapshot{} = snapshot, id) do
+  @spec messages(Snapshot.t(), term(), keyword()) :: [map()]
+  def messages(%Snapshot{} = snapshot, id, opts \\ []) do
     kept = Snapshot.value(snapshot, id, "summarised_to") || 0
+    all = turns(snapshot, id)
+
+    # A window on the end, after whatever was summarised. `keep:` is the policy:
+    # the last N turns verbatim, everything before them represented by their
+    # summaries. Absent, everything unsummarised comes back, which is right for
+    # a short run and is what a long one grows out of.
+    within =
+      case Keyword.get(opts, :keep) do
+        nil -> Enum.drop(all, kept)
+        n -> all |> Enum.drop(kept) |> Enum.take(-n)
+      end
 
     summaries =
       case ordered(snapshot, id, "summary") do
@@ -119,18 +146,78 @@ defmodule Blazie.Run do
         said -> [%{"role" => "user", "content" => "Earlier: " <> Enum.join(said, " ")}]
       end
 
-    turned =
-      snapshot
-      |> turns(id)
-      |> Enum.drop(kept)
-      |> Enum.flat_map(fn turn ->
+    summaries ++
+      Enum.flat_map(within, fn turn ->
         [
           %{"role" => "user", "content" => to_string(turn.asked)},
           %{"role" => "assistant", "content" => to_string(turn.answered)}
         ]
       end)
+  end
 
-    summaries ++ turned
+  @doc """
+  How many turns are not yet summarised.
+
+  What a caller checks to decide whether to compact — the thing that grows, as
+  against the thing that was already dealt with.
+  """
+  @spec outstanding(Snapshot.t(), term()) :: non_neg_integer()
+  def outstanding(%Snapshot{} = snapshot, id) do
+    length(turns(snapshot, id)) - (Snapshot.value(snapshot, id, "summarised_to") || 0)
+  end
+
+  @doc """
+  Summarise everything but the last `keep:` turns, using a model.
+
+  The summary is generated, so it is written as a fact like any other generated
+  thing and the turns it covers stay exactly where they were. What this buys is
+  an assembly that stops growing; what it costs is that a summary is a lossy
+  account, which is why the originals are still readable and why nothing here
+  deletes them.
+
+  Answers `{:ok, count}` with how many turns are now covered, or `:enough` when
+  there is nothing worth compacting yet.
+  """
+  @spec compact_with(World.ref(), term(), Snapshot.t(), keyword()) ::
+          {:ok, non_neg_integer()} | :enough | {:error, term()}
+  def compact_with(world, id, %Snapshot{} = snapshot, opts) do
+    keep = Keyword.get(opts, :keep, 6)
+    model = Keyword.fetch!(opts, :asks)
+    all = turns(snapshot, id)
+    already = Snapshot.value(snapshot, id, "summarised_to") || 0
+    upto = length(all) - keep
+
+    if upto <= already do
+      :enough
+    else
+      folding = all |> Enum.drop(already) |> Enum.take(upto - already)
+
+      asked = """
+      Summarise what happened in these steps of a working session, for somebody
+      who will carry on from where they left off. Say what was done, what was
+      learned, and anything still outstanding. Be brief and concrete.
+
+      #{Enum.map_join(folding, "\n", fn t -> "- asked: #{t.asked}\n  answered: #{t.answered}" end)}
+      """
+
+      # Through `converse/5` with no tools rather than `generate/3`, because
+      # that is the path with a seam a test can drive — and a summary is just an
+      # answer with nothing to call.
+      case Blazie.Model.converse(
+             model,
+             asked,
+             [],
+             fn _ -> {:ok, %{}} end,
+             Keyword.take(opts, [:provider, :timeout])
+           ) do
+        {:ok, said, _made} ->
+          {:ok, _tx} = compact(world, id, upto, said)
+          {:ok, upto}
+
+        {:error, refusal} ->
+          {:error, refusal}
+      end
+    end
   end
 
   @doc """
