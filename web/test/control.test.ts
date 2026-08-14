@@ -573,6 +573,31 @@ describe("what the machine is told to do", () => {
     execFileSync("bash", ["-n", path])
   })
 
+  it("writes an upgrade script that is also valid bash", () => {
+    // A script inside a heredoc inside a script inside YAML. Checking only the
+    // outer one would leave the inner one exactly as unchecked as the whole
+    // cloud-init used to be — and it is the one that runs unattended, forever,
+    // on a timer.
+    const from = script.indexOf("<<'UPGRADE'") + "<<'UPGRADE'\n".length
+    const to = script.indexOf("UPGRADE\n", from)
+    const inner = script
+      .slice(from, to)
+      .split("\n")
+      .map((line) => line.replace(/^ {6}/, ""))
+      .join("\n")
+
+    const dir = mkdtempSync(join(tmpdir(), "blazie-"))
+    const path = join(dir, "blazie-upgrade")
+    writeFileSync(path, inner)
+
+    execFileSync("bash", ["-n", path])
+
+    // And it must be pointed somewhere before it runs, which a `sed` in the
+    // outer script does.
+    assert.match(inner, /HOME_URL\/image\?hello=HELLO_TOKEN/)
+    assert.match(script, /sed -i "s\|HOME_URL\|/)
+  })
+
   it("runs one command, and it is the script", () => {
     const runcmd = rendered.slice(rendered.indexOf("\nruncmd:"))
     const entries = runcmd.split("\n").filter((l) => l.trimStart().startsWith("- "))
@@ -632,6 +657,16 @@ describe("what the machine is told to do", () => {
     // A provision once reported `tunnelled` while Cloudflare served 1033: the
     // container had stayed up and never registered. Those are different facts.
     assert.match(script, /Registered tunnel connection/)
+  })
+
+  it("installs an upgrade it ASKS for, since nothing can push at it", () => {
+    // A cluster listens on nothing, so an upgrade cannot be pushed — and a port
+    // to be upgraded through would undo the reason it has none.
+    assert.match(script, /blazie-upgrade/)
+    assert.match(script, /systemctl enable --now blazie-upgrade\.timer/)
+    // Compared by digest, so `latest` moving is the signal and a restart only
+    // happens when the image actually changed.
+    assert.match(script, /docker inspect --format/)
   })
 
   it("closes everything inbound", () => {

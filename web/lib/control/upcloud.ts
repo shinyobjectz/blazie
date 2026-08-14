@@ -530,6 +530,61 @@ ${backupEnv(opening)}
         || { say failed "cloudflared never registered: $(docker logs --tail 60 tunnel 2>&1)"; exit 1; }
       say tunnelled
 
+      # Asking what to run, on a timer. A cluster listens on nothing, so an
+      # upgrade cannot be pushed at one — and giving it a port to be upgraded
+      # through would undo the reason it has none.
+      #
+      # Deploys reset in-flight work, which this repo already knows and paid for
+      # once. A restart here kills a running job mid-chunk; what it does not do
+      # is lose a fact, because nothing is acknowledged until it is appended.
+      cat > /usr/local/bin/blazie-upgrade <<'UPGRADE'
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
+
+      wanted=$(curl -fsS -m 20 "HOME_URL/image?hello=HELLO_TOKEN" | sed -n 's/.*"image":"\\([^"]*\\)".*/\\1/p')
+      [ -n "$wanted" ] || exit 0
+
+      docker pull "$wanted" >/dev/null
+
+      running=$(docker inspect --format '{{.Image}}' blazie 2>/dev/null || echo none)
+      latest=$(docker inspect --format '{{.Id}}' "$wanted" 2>/dev/null || echo none)
+
+      [ "$running" = "$latest" ] && exit 0
+
+      docker rm -f blazie
+      docker run -d --name blazie --restart always \\
+        --env-file /etc/blazie.env \\
+        -v /var/lib/blazie:/data \\
+        -p 127.0.0.1:4000:4000 \\
+        "$wanted"
+      UPGRADE
+
+      sed -i "s|HOME_URL|${opening.home}/api/clusters/${opening.id}|; s|HELLO_TOKEN|${opening.hello}|" /usr/local/bin/blazie-upgrade
+      sed -i 's/^      //' /usr/local/bin/blazie-upgrade
+      chmod +x /usr/local/bin/blazie-upgrade
+
+      cat > /etc/systemd/system/blazie-upgrade.service <<'UNIT'
+      [Unit]
+      Description=Ask what image this cluster should run
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/blazie-upgrade
+      UNIT
+
+      cat > /etc/systemd/system/blazie-upgrade.timer <<'TIMER'
+      [Unit]
+      Description=Ask on a cadence
+      [Timer]
+      OnBootSec=15min
+      OnUnitActiveSec=15min
+      [Install]
+      WantedBy=timers.target
+      TIMER
+
+      sed -i 's/^      //' /etc/systemd/system/blazie-upgrade.service /etc/systemd/system/blazie-upgrade.timer
+      systemctl daemon-reload
+      systemctl enable --now blazie-upgrade.timer
+
 runcmd:
   # One entry, and a file rather than folded lines. The previous version put
   # multi-line \`docker run\` invocations directly in \`runcmd\`, which relies on
