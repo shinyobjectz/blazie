@@ -76,8 +76,14 @@ defmodule Blazie.Model do
   @spec object(String.t(), String.t(), keyword(), keyword()) ::
           {:ok, map()} | {:error, refusal()}
   def object(model, prompt, schema, opts \\ []) do
-    with {:ok, %Reference{} = model} <- Reference.from(model) do
-      Provider.for(model).object(model, messages(prompt), schema, opts)
+    with {:ok, %Reference{} = reference} <- Reference.from(model) do
+      # The same seam `converse/5` has: a test drives the shape without a
+      # vendor, and what the seam bypasses is only the wire — never the
+      # checking around it.
+      case Keyword.get(opts, :object_provider) do
+        nil -> Provider.for(reference).object(reference, messages(prompt), schema, opts)
+        fun when is_function(fun, 4) -> fun.(reference, messages(prompt), schema, opts)
+      end
     end
   end
 

@@ -150,6 +150,7 @@ defmodule Blazie.Store.Paged do
   end
 
   @doc "The transaction this store has reached."
+  @impl true
   @spec last_tx(map()) :: non_neg_integer()
   def last_tx(state), do: state.last_tx
 
@@ -161,6 +162,7 @@ defmodule Blazie.Store.Paged do
   which is `replay/1` with a ceiling; callers with a pattern pay only for
   what mentions it.
   """
+  @impl true
   @spec seek(map(), keyword(), non_neg_integer()) :: [Fact.t()]
   def seek(state, pattern, upto) do
     state
@@ -170,6 +172,7 @@ defmodule Blazie.Store.Paged do
   end
 
   @doc "The last `count` transactions' facts, oldest first — a world's resident tail."
+  @impl true
   @spec tail(map(), pos_integer()) :: [Fact.t()]
   def tail(state, count) do
     state.offsets

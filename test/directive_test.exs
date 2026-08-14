@@ -37,14 +37,14 @@ defmodule Blazie.DirectiveTest do
 
   describe "the registry is the bound" do
     test "what the runtime can do is a list somebody can read" do
-      assert Enum.sort(Map.keys(Directive.known())) == ["ask", "run", "write"]
+      assert Enum.sort(Map.keys(Directive.known())) == ["ask", "research", "run", "write"]
     end
 
     test "asking for something absent is refused with what is available", %{world: world} do
       assert {:error, refusal} = Directive.perform(doing(world), %{"do" => "rm -rf"})
 
       assert refusal.problem == :no_such_directive
-      assert refusal.repair =~ "ask, run, write"
+      assert refusal.repair =~ "ask, research, run, write"
 
       # Absent rather than forbidden. A tool cannot reach past this list because
       # the list is what reaching means.

@@ -56,7 +56,8 @@ defmodule Blazie.Directive do
     Application.get_env(:blazie, :directives, %{
       "write" => Blazie.Directive.Write,
       "run" => Blazie.Directive.Run,
-      "ask" => Blazie.Directive.Ask
+      "ask" => Blazie.Directive.Ask,
+      "research" => Blazie.Directive.Research
     })
   end
 
