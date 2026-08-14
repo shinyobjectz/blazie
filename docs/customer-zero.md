@@ -379,12 +379,19 @@ discovering them.
   are in its moduledoc). Also `pairs` order is unspecified, so anything
   order-sensitive must sort — `facts/1` already does.
 - **Cold start and teardown of tunneled clusters.** A cluster is reachable
-  only through cloudflared dialing out; opening is minutes of machine boot
-  plus tunnel establishment, ordered so nothing irreversible happens before
-  the way in exists (`web/lib/control/opening.ts` — every check there was
-  paid for by a failure), and tunnels with live connections take minutes to
-  drain on removal. Fine for a person; an agent on a remit will hit the
-  in-between states constantly.
+  only through cloudflared dialing out, ordered so nothing irreversible
+  happens before the way in exists (`web/lib/control/opening.ts` — every
+  check there was paid for by a failure), and tunnels with live connections
+  take minutes to drain on removal. Fine for a person; an agent on a remit
+  will hit the in-between states constantly. **Measured 2026-08-14 on a real
+  provision (uk-lon1, 1xCPU-2GB): request→reachable was 697s, and the split
+  is the finding — UpCloud machine provision+boot was 671s while the entire
+  blazie install *including the docker image pull* was 13s.** So the earlier
+  assumption that image caching is the cold-start lever is wrong: caching the
+  image saves ~13s of a ~12-minute wait. The real levers are a warm pool of
+  pre-booted machines, a faster plan/zone, or keeping clusters long-lived
+  rather than on-demand — none of which is image caching. One sample, but a
+  measured one, and it points somewhere different than the guess did.
 - **Generated-surface budgets.** Socialite's rendered vocabulary skill
   already exceeds montology's 24k disclosure budget, carried as a known gap.
   Blazie's MCP tool prose is generated from the ontology (`mcp.ts`); as the
