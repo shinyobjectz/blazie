@@ -1,4 +1,4 @@
-ExUnit.start(exclude: [:gcp, :crash, :load, :live, :object_storage, :throughput])
+ExUnit.start(exclude: [:gcp, :crash, :load, :live, :object_storage, :python, :throughput])
 
 defmodule Blazie.TestLedger do
   @moduledoc """

@@ -78,6 +78,112 @@ defmodule Blazie.Sandbox do
     end
   end
 
+  @doc """
+  Run a WASI module, handing it stdin and reading stdout.
+
+  The other contract, and the one a real language runtime needs. `run/3` speaks
+  a bespoke protocol — export `alloc`, take a pointer, hand back a packed i64 —
+  which is fine for a module written to be a blazie guest and impossible for one
+  that was not. CPython compiled to wasm does not export `alloc`; it exports
+  `_start`, and it talks over stdio like every other program.
+
+  So: input goes in on stdin, whatever it prints comes back on stdout, and a
+  non-zero exit comes back as a refusal carrying stderr. That is enough to run
+  an interpreter, which is what makes a guest able to be Python rather than
+  hand-written wasm.
+
+  ## The fence is unchanged, which is the part worth checking
+
+  Fuel is on the engine, so it bounds a WASI guest exactly as it bounds any
+  other — the reason it exists does not change: a NIF runs to completion and no
+  supervisor reaches inside one.
+
+  What WASI adds is capability, and it is all opt-in. No `preopen` means no
+  filesystem: a guest sees no directories at all unless a caller names one. No
+  `env` means no environment. There is no network in WASI preview 1 to grant.
+  A caller that hands over a directory has widened the fence deliberately and
+  can be asked why; the default hands over nothing.
+  """
+  @spec run_wasi(binary(), binary(), keyword()) ::
+          {:ok, String.t(), %{fuel: non_neg_integer()}} | {:error, refusal()}
+  def run_wasi(bytes, input \\ "", opts \\ []) when is_binary(bytes) do
+    fuel = Keyword.get(opts, :fuel, @fuel)
+    memory_bytes = Keyword.get(opts, :memory_bytes, @memory_bytes)
+
+    {:ok, stdin} = Wasmex.Pipe.new()
+    {:ok, stdout} = Wasmex.Pipe.new()
+    {:ok, stderr} = Wasmex.Pipe.new()
+
+    if input != "" do
+      Wasmex.Pipe.write(stdin, input)
+      Wasmex.Pipe.seek(stdin, 0)
+    end
+
+    wasi = %Wasmex.Wasi.WasiOptions{
+      stdin: stdin,
+      stdout: stdout,
+      stderr: stderr,
+      args: Keyword.get(opts, :args, []),
+      # Nothing by default. A guest that can read the disk is not a sandbox, and
+      # every one of these is a hole somebody has to have decided to make.
+      env: Keyword.get(opts, :env, %{}),
+      preopen: Keyword.get(opts, :preopen, [])
+    }
+
+    config = Wasmex.EngineConfig.consume_fuel(%Wasmex.EngineConfig{}, true)
+
+    with {:ok, engine} <- Wasmex.Engine.new(config),
+         {:ok, store} <-
+           Wasmex.Store.new_wasi(wasi, %Wasmex.StoreLimits{memory_size: memory_bytes}, engine),
+         :ok <- Wasmex.StoreOrCaller.set_fuel(store, fuel),
+         {:ok, module} <- Wasmex.Module.compile(store, bytes),
+         {:ok, pid} <- start_unlinked(store, module) do
+      started(pid, store, stdout, stderr, fuel)
+    else
+      {:error, why} -> {:error, refusal(why)}
+    end
+  end
+
+  # `_start` is WASI's entry point. It returning an error is the guest exiting
+  # non-zero, which is a failure the caller wants to read rather than a crash.
+  defp started(pid, store, stdout, stderr, fuel) do
+    case Wasmex.call_function(pid, :_start, []) do
+      {:ok, _} ->
+        Wasmex.Pipe.seek(stdout, 0)
+        {:ok, Wasmex.Pipe.read(stdout), spent_fuel(store, fuel)}
+
+      {:error, why} ->
+        Wasmex.Pipe.seek(stderr, 0)
+        said = Wasmex.Pipe.read(stderr)
+
+        {:error,
+         %{
+           problem: problem_of(why),
+           repair:
+             "The guest exited without finishing: #{String.slice(to_string(why), 0, 200)}" <>
+               if(said == "", do: "", else: " It said: #{String.slice(said, 0, 400)}")
+         }}
+    end
+  end
+
+  defp problem_of(why) do
+    if to_string(why) =~ "fuel", do: :out_of_fuel, else: :would_not_finish
+  end
+
+  defp spent_fuel(store, started_with) do
+    case Wasmex.StoreOrCaller.get_fuel(store) do
+      {:ok, left} -> %{fuel: started_with - left}
+      _ -> %{fuel: 0}
+    end
+  end
+
+  defp refusal(why) do
+    %{
+      problem: :would_not_start,
+      repair: "The module would not start: #{String.slice(to_string(why), 0, 300)}"
+    }
+  end
+
   @doc "What a job declares when its work is a module rather than a function."
   @spec declare(term(), Blob.t(), keyword()) :: [tuple()]
   def declare(id, %Blob{} = image, opts \\ []) do
