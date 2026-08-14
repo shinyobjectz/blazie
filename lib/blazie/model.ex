@@ -178,6 +178,13 @@ defmodule Blazie.Model do
                 {:error, refusal} -> %{"error" => Map.get(refusal, :repair, "the tool failed")}
               end
 
+            # `Tool.called/4` built exactly this fact and nothing ever called it,
+            # so a trajectory recorded what the model SAID and not what it DID.
+            # An agent's tool calls are the part worth learning from — the same
+            # arguments and the same answer, over and over, is a function nobody
+            # has written down yet.
+            wrote(opts, call, answered)
+
             {[{call, answered} | results], [%{call: call, answered: answered} | made]}
           end)
 
@@ -246,6 +253,19 @@ defmodule Blazie.Model do
   end
 
   defp named(%Reference{provider: provider, name: name}), do: "#{provider}:#{name}"
+
+  # One tool call, written where the turns are. Best effort, for the same reason
+  # the turn is: a diary that cannot be written must not stop the work.
+  defp wrote(opts, call, answered) do
+    with world when not is_nil(world) <- Keyword.get(opts, :into),
+         by when not is_nil(by) <- Keyword.get(opts, :by) do
+      Blazie.World.append(world, [Blazie.Tool.called(by, call, answered, by)])
+    end
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
 
   # The last thing said to the model, not the whole conversation. A turn is
   # already a fact per call, so writing the accumulated messages every time
