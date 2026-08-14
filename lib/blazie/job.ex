@@ -53,7 +53,8 @@ defmodule Blazie.Job do
     Attribute.define("every", answers: "integer") ++
       Attribute.define("ran_at", answers: "integer", cardinality: "many") ++
       Attribute.define("failed", answers: "any", cardinality: "many") ++
-      Attribute.define("reads", answers: "any", cardinality: "many")
+      Attribute.define("reads", answers: "any", cardinality: "many") ++
+      Attribute.define("after", answers: "name", cardinality: "many")
   end
 
   @doc "Declare a job. Nothing runs."
@@ -87,10 +88,14 @@ defmodule Blazie.Job do
   """
   @spec declare(term(), keyword()) :: [assertion()]
   def declare(id, opts \\ []) do
-    case Keyword.get(opts, :every) do
-      nil -> [{id, "is", "job"}]
-      seconds -> [{id, "is", "job"}, {id, "every", seconds}]
-    end
+    [{id, "is", "job"}] ++
+      case Keyword.get(opts, :every) do
+        nil -> []
+        seconds -> [{id, "every", seconds}]
+      end ++
+      for upstream <- List.wrap(Keyword.get(opts, :after, [])) do
+        {id, "after", upstream}
+      end
   end
 
   @doc """
@@ -144,12 +149,45 @@ defmodule Blazie.Job do
   @doc """
   Is this job due at `now`?
 
-  Due when it has a cadence and has either never run or not run within it. A
-  job without a cadence is never due on its own.
+  Three ways to be: its cadence came round; something it read has changed;
+  or a job it runs AFTER has completed more recently than it has. A job
+  without any of those is never due on its own.
   """
   @spec due?(Snapshot.t(), term(), integer()) :: boolean()
   def due?(%Snapshot{} = snapshot, id, now) do
-    cadence_due?(snapshot, id, now) or touched?(snapshot, id)
+    cadence_due?(snapshot, id, now) or touched?(snapshot, id) or after_due?(snapshot, id)
+  end
+
+  # The DAG, without a second queue: `after` is a fact, "has my upstream
+  # completed since I last did" is a comparison of two `ran_at` facts, and a
+  # restart mid-chain resumes from exactly where the facts say — no scheduler
+  # state to reconcile, which is the property the whole runner is built on.
+  #
+  # ALL upstreams must have completed since this job last ran, because a job
+  # downstream of two producers wants both inputs fresh — half a join firing
+  # twice is the classic DAG bug, and requiring the conjunction makes it
+  # unrepresentable.
+  defp after_due?(%Snapshot{} = snapshot, id) do
+    case upstreams(snapshot, id) do
+      [] ->
+        false
+
+      ups ->
+        mine = last_run(snapshot, id) || -1
+
+        Enum.all?(ups, fn upstream ->
+          case last_run(snapshot, upstream) do
+            nil -> false
+            theirs -> theirs > mine
+          end
+        end)
+    end
+  end
+
+  @doc "The jobs this job runs after."
+  @spec upstreams(Snapshot.t(), term()) :: [term()]
+  def upstreams(%Snapshot{} = snapshot, id) do
+    snapshot |> Snapshot.find(id: id, attribute: "after") |> Enum.map(& &1.value)
   end
 
   defp cadence_due?(snapshot, id, now) do
