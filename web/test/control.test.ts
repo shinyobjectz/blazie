@@ -29,6 +29,31 @@ import * as upcloud from "../lib/control/upcloud.ts"
 
 type Sent = { url: string; method: string; headers: Record<string, string>; body: unknown }
 
+/**
+ * The shapes these assertions expect to have been sent.
+ *
+ * Named rather than reached into with `any`, because writing down what a
+ * request should look like IS the test — the sending code chose this shape and
+ * these types are the second opinion about it.
+ */
+type ServerCreate = {
+  server: {
+    firewall: string
+    login_user: { create_password: string; ssh_keys?: unknown }
+    user_data: string
+    storage_devices: { storage_device: { storage: string }[] }
+  }
+}
+
+type FirewallRule = { firewall_rule: Record<string, string> }
+type StopServer = { stop_server: { stop_type: string } }
+type TunnelConfig = { config: { ingress: { hostname?: string; service: string }[] } }
+type DnsRecord = { type: string; content: string; proxied: boolean }
+
+function bodyOf<T>(one: Sent): T {
+  return one.body as T
+}
+
 let sent: Sent[] = []
 let answers: (() => { ok: boolean; status?: number; body: unknown })[] = []
 const realFetch = globalThis.fetch
@@ -92,7 +117,7 @@ describe("making a machine", () => {
     answering({ ok: true, body: { server: { uuid: "server-1" } } })
     await upcloud.open(credentials, opening)
 
-    const storage = (sent[0].body as any).server.storage_devices.storage_device[0]
+    const storage = bodyOf<ServerCreate>(sent[0]).server.storage_devices.storage_device[0]
 
     // The uuid written here first was not a template at all, and nothing said so
     // until a machine failed to clone four minutes into a provision that had
@@ -105,7 +130,7 @@ describe("making a machine", () => {
     answering({ ok: true, body: { server: { uuid: "server-1" } } })
     await upcloud.open(credentials, opening)
 
-    const server = (sent[0].body as any).server
+    const server = bodyOf<ServerCreate>(sent[0]).server
 
     // The machine is not something anybody logs into. It runs one container and
     // dials out, and the whole security story rests on there being nothing to
@@ -194,7 +219,7 @@ describe("letting the tunnel out", () => {
     assert.equal(sent.length, 4)
 
     for (const one of sent) {
-      const rule = (one.body as any).firewall_rule
+      const rule = bodyOf<FirewallRule>(one).firewall_rule
       assert.equal(rule.direction, "out")
       assert.equal(rule.action, "accept")
       assert.equal(rule.destination_port_start, "7844")
@@ -203,7 +228,7 @@ describe("letting the tunnel out", () => {
     }
 
     assert.deepEqual(
-      sent.map((one) => `${(one.body as any).firewall_rule.family}/${(one.body as any).firewall_rule.protocol}`).sort(),
+      sent.map((one) => `${bodyOf<FirewallRule>(one).firewall_rule.family}/${bodyOf<FirewallRule>(one).firewall_rule.protocol}`).sort(),
       ["IPv4/tcp", "IPv4/udp", "IPv6/tcp", "IPv6/udp"],
     )
   })
@@ -232,7 +257,7 @@ describe("taking a machine away", () => {
     assert.equal(gone, true)
     assert.match(sent[0].url, /\/server\/server-1\/stop$/)
     assert.equal(sent[0].method, "POST")
-    assert.equal((sent[0].body as any).stop_server.stop_type, "hard")
+    assert.equal(bodyOf<StopServer>(sent[0]).stop_server.stop_type, "hard")
 
     const deleted = sent.at(-1)!
     assert.equal(deleted.method, "DELETE")
@@ -298,7 +323,7 @@ describe("the way in", () => {
     answering(madeTunnel, ok, { ok: true, body: { success: true, result: { id: "dns-1" } } })
     await tunnel.make(reaching, "atlas", "blazie.dev")
 
-    const ingress = (sent[1].body as any).config.ingress
+    const ingress = bodyOf<TunnelConfig>(sent[1]).config.ingress
 
     assert.deepEqual(ingress[0], {
       hostname: "atlas.blazie.dev",
@@ -315,7 +340,7 @@ describe("the way in", () => {
     answering(madeTunnel, ok, { ok: true, body: { success: true, result: { id: "dns-1" } } })
     await tunnel.make(reaching, "atlas", "blazie.dev")
 
-    const record = sent[2].body as any
+    const record = bodyOf<DnsRecord>(sent[2])
 
     assert.equal(record.type, "CNAME")
     assert.equal(record.content, "tunnel-1.cfargotunnel.com")
@@ -458,7 +483,7 @@ describe("what the machine is told to do", () => {
       },
     )
 
-    rendered = (sent[0].body as any).server.user_data
+    rendered = bodyOf<ServerCreate>(sent[0]).server.user_data
 
     // Pulled out the way cloud-init would, rather than by matching on text.
     const at = rendered.indexOf("      #!/usr/bin/env bash")
@@ -598,7 +623,7 @@ describe("what the machine is told to do", () => {
       },
     )
 
-    const yaml = (sent[0].body as any).server.user_data
+    const yaml = bodyOf<ServerCreate>(sent[0]).server.user_data
 
     assert.match(yaml, /BACKUP_BUCKET=blazie-clusters/)
     assert.match(yaml, /BACKUP_PREFIX=clusters\/CID\//)
