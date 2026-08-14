@@ -73,71 +73,23 @@ monty *ARGS:
 # 791KB of facts — nothing caught that but a person asking how many it could
 # see. So the gate here is not "does it answer", it is "can it still read what
 # it had", and the previous image stays tagged so a bad one is one command back.
-ship host="209.50.60.180":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "== gate =="
-    just check >/dev/null
-    echo "   {{ "green" }}"
-
-    # Counted from the FILES on disk, not from `open_worlds` — that reports what
-    # happens to be open, which varies with what has been touched since boot. A
-    # gate on a number that moves on its own is a gate that cries wolf, and
-    # worse, would not notice a world going missing if nothing had opened it.
-    echo "== what the node can see now =="
-    before=$(ssh -o BatchMode=yes root@{{host}} 'docker exec blazie /app/bin/blazie rpc "
-      dir = Application.get_env(:blazie, :ledger_dir)
-      IO.puts(File.ls!(dir)
-        |> Enum.filter(&String.ends_with?(&1, \".ledger\"))
-        |> Enum.map(fn file ->
-             name = file |> String.trim_trailing(\".ledger\") |> Base.url_decode64!(padding: false) |> :erlang.binary_to_term()
-             {:ok, r} = Blazie.World.open(name)
-             length(Blazie.Snapshot.find(Blazie.Snapshot.open([r]), []))
-           end) |> Enum.sum())"' 2>/dev/null | tr -d "[:space:]")
-    echo "   ${before} facts on disk, across every world"
-
-    echo "== sync and build =="
-    rsync -az --delete --exclude '.git' --exclude '_build' --exclude 'deps' \
-      --exclude 'node_modules' --exclude 'web/out' --exclude 'web/.next' \
-      ./ root@{{host}}:/srv/blazie/
-    ssh -o BatchMode=yes root@{{host}} '
-      docker tag blazie:latest blazie:previous 2>/dev/null || true
-      cd /srv/blazie && docker build -t blazie:latest . >/tmp/build.log 2>&1 || { tail -20 /tmp/build.log; exit 1; }
-      systemctl restart blazie'
-
-    echo "== waiting for it to answer =="
-    for i in $(seq 1 60); do
-      code=$(curl -s -o /dev/null -w '%{http_code}' -X POST https://api.blazie.dev/run \
-        -H 'content-type: application/json' -d '{}' --max-time 5 || true)
-      [ "$code" = "401" ] && break
-      sleep 2
-    done
-    [ "$code" = "401" ] || { echo "   it never answered ($code)"; just rollback {{host}}; exit 1; }
-    echo "   answering"
-
-    echo "== can it still read what it had? =="
-    after=$(ssh -o BatchMode=yes root@{{host}} 'docker exec blazie /app/bin/blazie rpc "
-      dir = Application.get_env(:blazie, :ledger_dir)
-      IO.puts(File.ls!(dir)
-        |> Enum.filter(&String.ends_with?(&1, \".ledger\"))
-        |> Enum.map(fn file ->
-             name = file |> String.trim_trailing(\".ledger\") |> Base.url_decode64!(padding: false) |> :erlang.binary_to_term()
-             {:ok, r} = Blazie.World.open(name)
-             length(Blazie.Snapshot.find(Blazie.Snapshot.open([r]), []))
-           end) |> Enum.sum())"' 2>/dev/null | tr -d "[:space:]")
-    echo "   ${after} facts (was ${before})"
-
-    # A node that came up healthy and empty is the failure this exists to catch.
-    if [ "${after:-0}" -lt "$(( ${before:-0} / 2 ))" ]; then
-      echo "   LOST MORE THAN HALF THE FACTS — rolling back"
-      just rollback {{host}}
-      exit 1
-    fi
-    echo "== shipped =="
-
-# One command back. The previous image is tagged on every ship.
-rollback host="209.50.60.180":
-    @ssh -o BatchMode=yes root@{{host}} 'docker tag blazie:previous blazie:latest && systemctl restart blazie && echo "rolled back"'
+# Ship a cluster onto the current image.
+#
+# `ship` used to rsync this tree to 209.50.60.180 and build there, and
+# `rollback` retagged an image on the same host. That server was deleted when
+# clusters became things the console makes, so both pointed at nothing — and
+# neither would have failed loudly, because ssh to a dead address hangs. A
+# recipe that cannot work is worse than an absent one: somebody reaches for it
+# in a hurry.
+#
+# What replaces them is not written yet (bla-a1b3): a cluster pulls the image CI
+# publishes, and the control plane tells it when. The fact-count gate the old
+# `ship` carried was a good idea and belongs in whatever does.
+ship:
+    @echo "there is no ship. clusters are opened from the console and upgraded"
+    @echo "by the control plane — see bla-a1b3. CI publishes the image:"
+    @echo "  ghcr.io/shinyobjectz/blazie:latest"
+    @exit 1
 
 # Regenerate the README banner from the running site, so it cannot drift from
 # the hero it is meant to look like. Needs `just web` running on :3111.
