@@ -40,19 +40,36 @@ defmodule Blazie.Surface.Controller do
   there is nothing to say it with that is not a fact again.
   """
   def run(conn, %{"world" => name, "source" => source} = params) when is_binary(source) do
-    with {:ok, snapshot} <- world_for(name, params),
-         {:ok, value, staged} <- evaluate(source, snapshot, params),
-         {:ok, at} <- append(name, staged),
-         {:ok, body} <-
-           encodable(%{
-             "value" => value,
-             "name" => Map.merge(Snapshot.name(snapshot), at),
-             "wrote" => length(staged)
-           }) do
-      conn |> put_resp_content_type("application/json") |> send_resp(200, body)
-    else
-      {:error, [refusal | _]} -> refuse(conn, refusal)
-      {:error, refusal} -> refuse(conn, refusal)
+    asked_at = System.monotonic_time(:millisecond)
+
+    answered =
+      with {:ok, snapshot} <- world_for(name, params),
+           {:ok, value, staged} <- evaluate(source, snapshot, params),
+           {:ok, at} <- append(name, staged),
+           {:ok, body} <-
+             encodable(%{
+               "value" => value,
+               "name" => Map.merge(Snapshot.name(snapshot), at),
+               "wrote" => length(staged)
+             }) do
+        {:ok, conn |> put_resp_content_type("application/json") |> send_resp(200, body),
+         length(staged)}
+      end
+
+    # The request-level span — model calls already speak, and a trace that
+    # starts at the model cannot say what the caller asked for.
+    case answered do
+      {:ok, conn, wrote} ->
+        surface_span(name, asked_at, "ok", wrote)
+        conn
+
+      {:error, [refusal | _]} ->
+        surface_span(name, asked_at, to_string(refusal.problem), 0)
+        refuse(conn, refusal)
+
+      {:error, refusal} ->
+        surface_span(name, asked_at, to_string(refusal.problem), 0)
+        refuse(conn, refusal)
     end
   end
 
@@ -230,6 +247,28 @@ defmodule Blazie.Surface.Controller do
       {:ok, refs} -> {:ok, Enum.reverse(refs)}
       error -> error
     end
+  end
+
+  @doc "The facts, projected for whatever scrapes. Text, because that is what scrapers read."
+  def metrics(conn, _params) do
+    conn
+    |> put_resp_content_type("text/plain")
+    |> send_resp(200, Blazie.Metrics.render())
+  end
+
+  defp surface_span(world, asked_at, outcome, wrote) do
+    Blazie.Otel.span("surface.run", world,
+      took_ms: System.monotonic_time(:millisecond) - asked_at,
+      attributes: [
+        {"blazie.world", to_string(world)},
+        {"blazie.outcome", outcome},
+        {"blazie.wrote", wrote}
+      ]
+    )
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp refuse(conn, refusal) do

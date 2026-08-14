@@ -47,6 +47,7 @@ defmodule Blazie.Surface.Router do
     pipe_through(:api)
 
     get("/me", Controller, :me)
+    get("/metrics", Controller, :metrics)
 
     post("/run", Controller, :run)
   end
