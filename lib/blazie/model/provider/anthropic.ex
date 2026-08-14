@@ -28,7 +28,7 @@ defmodule Blazie.Model.Provider.Anthropic do
       }
       |> put_system(system)
 
-    with {:ok, answered} <- Provider.post(url(opts, "/messages"), headers(opts), body) do
+    with {:ok, answered} <- Provider.post(url(opts, "/messages"), headers(opts), body, opts) do
       text(answered)
     end
   end
@@ -56,7 +56,7 @@ defmodule Blazie.Model.Provider.Anthropic do
       }
       |> put_system(system)
 
-    with {:ok, answered} <- Provider.post(url(opts, "/messages"), headers(opts), body) do
+    with {:ok, answered} <- Provider.post(url(opts, "/messages"), headers(opts), body, opts) do
       tool_input(answered)
     end
   end
@@ -81,7 +81,7 @@ defmodule Blazie.Model.Provider.Anthropic do
       }
       |> put_system(system)
 
-    with {:ok, answered} <- Provider.post(url(opts, "/messages"), headers(opts), body) do
+    with {:ok, answered} <- Provider.post(url(opts, "/messages"), headers(opts), body, opts) do
       case turn(answered) do
         {:ok, said} -> {:ok, said, Provider.spent(answered)}
         {:error, refusal} -> {:error, refusal}

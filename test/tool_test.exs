@@ -159,48 +159,54 @@ defmodule Blazie.ToolTest do
 
   describe "the loop ends" do
     test "a model that only ever calls runs out and says so" do
-      # No provider is reached: this drives the loop directly to prove the cap
-      # is what stops it. Without this a tool loop is a bill with no ceiling.
+      # Drives `Model.converse/5` itself. This used to drive a `FakeLoop` in
+      # this file carrying its own copy of the recursion, which proves a copy
+      # stops at its cap and says nothing about the function that spends the
+      # money. The `provider:` seam exists so the real one can be tested.
       always_calls = fn _reference, _messages, _tools, _opts ->
-        {:ok, {:calls, [%{id: "1", name: "x", arguments: %{}}]}}
+        {:ok, {:calls, [%{id: "1", name: "x", arguments: %{}}]}, %{in: 1, out: 1}}
       end
 
-      assert {:error, refusal} = drive(always_calls, 3)
+      assert {:error, refusal} =
+               Blazie.Model.converse("openai:x", "go", [], fn _ -> {:ok, %{}} end,
+                 provider: always_calls,
+                 calls: 3
+               )
+
       assert refusal.problem == :too_many_calls
       assert refusal.repair =~ "calls_allowed"
     end
 
     test "and one that answers ends it" do
-      answers = fn _r, _m, _t, _o -> {:ok, {:said, "done"}} end
-      assert {:ok, "done", []} = drive(answers, 3)
-    end
-  end
+      answers = fn _r, _m, _t, _o -> {:ok, {:said, "done"}, %{in: 1, out: 1}} end
 
-  # A stand-in provider, so the loop is tested rather than somebody's uptime.
-  defp drive(converse, calls) do
-    Process.put(:fake_converse, converse)
-    Blazie.ToolTest.FakeLoop.converse(calls)
-  end
-
-  defmodule FakeLoop do
-    @moduledoc false
-    def converse(calls) do
-      run = fn _call -> {:ok, %{"ok" => true}} end
-      loop(Process.get(:fake_converse), [], run, calls, [])
+      assert {:ok, "done", []} =
+               Blazie.Model.converse("openai:x", "go", [], fn _ -> {:ok, %{}} end,
+                 provider: answers,
+                 calls: 3
+               )
     end
 
-    defp loop(_c, _made, _run, 0, made),
-      do: {:error, %{problem: :too_many_calls, repair: "raise `calls_allowed`"}}
-
-    defp loop(converse, messages, run, left, made) do
-      case converse.(nil, messages, [], []) do
-        {:ok, {:said, said}} ->
-          {:ok, said, Enum.reverse(made)}
-
-        {:ok, {:calls, calls}} ->
-          Enum.each(calls, run)
-          loop(converse, messages, run, left - 1, made)
+    test "every tool call it made comes back with it" do
+      # The trace the caller gets, which is what `Run` and `Learned` read. A
+      # loop that ran tools and returned only the answer would leave the most
+      # useful half of a trajectory nowhere.
+      once = fn _r, messages, _t, _o ->
+        if length(messages) > 1,
+          do: {:ok, {:said, "found"}, %{in: 1, out: 1}},
+          else:
+            {:ok, {:calls, [%{id: "1", name: "lookup", arguments: %{"q" => "ada"}}]},
+             %{in: 1, out: 1}}
       end
+
+      assert {:ok, "found", [made]} =
+               Blazie.Model.converse("openai:x", "who", [], fn _ -> {:ok, %{"plan" => "pro"}} end,
+                 provider: once,
+                 calls: 3
+               )
+
+      assert made.call.name == "lookup"
+      assert made.answered == %{"plan" => "pro"}
     end
   end
 end

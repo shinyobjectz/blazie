@@ -17,11 +17,16 @@ defmodule Blazie.Model.Provider.OpenAI do
   @impl true
   def generate(%Reference{} = model, messages, opts) do
     with {:ok, answered} <-
-           Provider.post(url(opts, "/chat/completions"), headers(opts), %{
-             "model" => model.name,
-             "messages" => messages,
-             "temperature" => Keyword.get(opts, :temperature, 0.0)
-           }) do
+           Provider.post(
+             url(opts, "/chat/completions"),
+             headers(opts),
+             %{
+               "model" => model.name,
+               "messages" => messages,
+               "temperature" => Keyword.get(opts, :temperature, 0.0)
+             },
+             opts
+           ) do
       text(answered)
     end
   end
@@ -45,7 +50,8 @@ defmodule Blazie.Model.Provider.OpenAI do
       }
     }
 
-    with {:ok, answered} <- Provider.post(url(opts, "/chat/completions"), headers(opts), body),
+    with {:ok, answered} <-
+           Provider.post(url(opts, "/chat/completions"), headers(opts), body, opts),
          {:ok, raw} <- text(answered) do
       case Jason.decode(raw) do
         {:ok, decoded} when is_map(decoded) ->
@@ -70,7 +76,8 @@ defmodule Blazie.Model.Provider.OpenAI do
       "tools" => Enum.map(tools, &as_tool/1)
     }
 
-    with {:ok, answered} <- Provider.post(url(opts, "/chat/completions"), headers(opts), body) do
+    with {:ok, answered} <-
+           Provider.post(url(opts, "/chat/completions"), headers(opts), body, opts) do
       case turn(answered) do
         {:ok, said} -> {:ok, said, Provider.spent(answered)}
         {:error, refusal} -> {:error, refusal}
@@ -127,10 +134,12 @@ defmodule Blazie.Model.Provider.OpenAI do
   @impl true
   def embed(%Reference{} = model, texts, opts) do
     with {:ok, answered} <-
-           Provider.post(url(opts, "/embeddings"), headers(opts), %{
-             "model" => model.name,
-             "input" => texts
-           }) do
+           Provider.post(
+             url(opts, "/embeddings"),
+             headers(opts),
+             %{"model" => model.name, "input" => texts},
+             opts
+           ) do
       vectors(answered)
     end
   end

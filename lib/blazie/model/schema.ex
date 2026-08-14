@@ -12,6 +12,20 @@ defmodule Blazie.Model.Schema do
   the failure mode where a prompt says "reply with an integer" and the
   declaration says `answers: "name"` cannot occur, because there is one sentence.
 
+  ## `any` is permissive here and hostile at a provider
+
+  `answers: "any"` becomes `%{}`, an empty schema. That is correct JSON Schema —
+  it constrains nothing — and it is a shape some providers reject outright under
+  `strict`, because a property with no type is not something they can build a
+  constrained decoder from. Measured: a request whose only free field answered
+  `any` came back as prose with the format ignored entirely, which looks exactly
+  like a model that will not follow instructions and is not.
+
+  So `any` is right for a field nobody wants to constrain and wrong for one a
+  provider has to enforce. A declaration asking a model for something should say
+  what shape it is; `any` is for what a world may hold, not for what a model is
+  asked for.
+
   ## What a shape cannot say
 
   `answers: "any"` becomes a permissive schema rather than a refusal. A model

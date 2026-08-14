@@ -99,6 +99,36 @@ defmodule Blazie.RefinementTest do
     end
   end
 
+  describe "the bound is written once" do
+    test "the brief a model is given lists exactly what adopt will accept", %{world: world} do
+      # Three copies of one bound is the shape of thing that drifts, and this is
+      # the copy that would drift silently: a model told it may change five
+      # things when the code accepts four proposes the fifth, gets refused, and
+      # nobody learns why except by reading both.
+      brief = Refinement.brief(snapshot(world), "severity", "kept answering with prose")
+
+      for attribute <- Refinement.refinable() do
+        assert brief =~ attribute, "the brief does not offer #{attribute}, which adopt accepts"
+      end
+    end
+
+    test "and it is what it is on purpose", %{world: _world} do
+      # Spelled out so widening it is a deliberate act with a failing test in
+      # front of it, rather than a line somebody added to a list.
+      assert Refinement.refinable() == ["describe", "one_of", "calls_allowed", "requires"]
+    end
+
+    test "everything outside it is refused, by name", %{world: world} do
+      for attribute <- ~w(may_name source answers cardinality is) do
+        assert {:error, %{problem: :outside_the_bound}} =
+                 Refinement.adopt(world, "thing", %{attribute: attribute, value: "x"},
+                   because: "a plausible reason"
+                 ),
+               "#{attribute} was accepted and should not have been"
+      end
+    end
+  end
+
   describe "a refinement is a fact" do
     test "so it carries why it was made", %{world: world} do
       {:ok, _} =

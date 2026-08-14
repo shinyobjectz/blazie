@@ -8,10 +8,14 @@ defmodule Blazie.Refinement do
 
   ## What may be refined, and why the bound is the design
 
-  Only what a thing SAYS about itself: `describe`, `one_of`, `calls_allowed`,
-  `requires`. Never a formula's `source` — that belongs to `Formula.Generated`
-  and is gated by examples, which is a stronger gate than anything here. Never a
-  grant, never anything in a `$` world.
+  Only what a thing SAYS about itself. Never a formula's `source` — that belongs
+  to `Formula.Generated` and is gated by examples, which is a stronger gate than
+  anything here. Never a grant, never anything in a `$` world.
+
+  The list is `refinable/0` and it is not written down anywhere else. It was in
+  this sentence, in the brief a model is given, and in the word's own note in the
+  ontology — three copies of one bound, which is exactly the shape of thing that
+  drifts and is dangerous when it does. The other two now read it.
 
   That bound is not caution, it is the whole safety argument. An agent that
   could refine its own authority would eventually refine it wider, and it would
@@ -142,7 +146,11 @@ defmodule Blazie.Refinement do
            brief(snapshot, subject, reason),
            [
              attribute: [answers: "name", one_of: @refinable, describe: "which one to change"],
-             value: [answers: "any", describe: "what to set it to"]
+             # A string, not `any`. `any` renders an empty schema, which some
+             # providers refuse under `strict` and then answer with prose —
+             # measured, and it looks exactly like a model ignoring the format.
+             # A number arrives as its own text and is cast on adoption.
+             value: [answers: "name", describe: "what to set it to"]
            ],
            opts
          ) do
@@ -175,13 +183,25 @@ defmodule Blazie.Refinement do
     with :ok <- within_bounds(attribute),
          :ok <- not_reserved(subject) do
       World.append(world, [
-        {subject, attribute, value, by},
+        {subject, attribute, cast(attribute, value), by},
         {id, "refined", subject, by},
         {id, "because", because, by},
         {id, "refined_at", now, by}
       ])
     end
   end
+
+  # `calls_allowed` answers an integer and a model proposes text, so the one
+  # numeric thing in the bound is cast here rather than refused for arriving as
+  # what a json string can carry.
+  defp cast("calls_allowed", value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {number, _rest} -> number
+      :error -> value
+    end
+  end
+
+  defp cast(_attribute, value), do: value
 
   defp within_bounds(attribute) when attribute in @refinable, do: :ok
 

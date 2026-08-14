@@ -70,11 +70,25 @@ defmodule Blazie.Model.Provider do
            repair: "The provider answered #{status}: #{String.slice(to_string(raw), 0, 400)}"
          }}
 
+      {:error, :timeout} ->
+        {:error,
+         %{
+           problem: :timed_out,
+           repair:
+             "#{url} did not answer within #{timeout}ms. Reasoning models spend tokens thinking " <>
+               "before they write any, and one asked something hard exceeds this regularly — " <>
+               "measured on a Workers AI model that took longer than a minute on a single " <>
+               "proposal. Pass `timeout:` if the work is honestly that slow; a cap raised to hide " <>
+               "a hung provider only makes the wait longer."
+         }}
+
       {:error, why} ->
         {:error,
          %{
            problem: :unreachable,
-           repair: "Nothing answered at #{url}: #{inspect(why)}"
+           repair:
+             "Nothing answered at #{url}: #{inspect(why)}. That is the network or the address " <>
+               "rather than the model — check the base url the provider was given."
          }}
     end
   end
