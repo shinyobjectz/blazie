@@ -32,7 +32,14 @@ defmodule Blazie.AgentDeclarationTest do
 
     test "an unknown provider says which are known" do
       assert {:error, refusal} = Reference.from("nope:x")
-      assert refusal.repair =~ "anthropic, openai"
+
+      # Asked of the registry rather than written out. Spelled here, this went
+      # red the moment a provider was added — which is a test failing because
+      # the thing it describes grew, not because anything broke. The repair has
+      # to name every provider, and that is what this says.
+      for provider <- Reference.providers() do
+        assert refusal.repair =~ provider
+      end
     end
 
     test "a provider name from outside cannot mint an atom" do

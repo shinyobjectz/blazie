@@ -14,6 +14,10 @@ defmodule Blazie.AgentUnattendedTest do
   alias Blazie.{Agent, Agents, Attribute, Job, Snapshot, World}
 
   @moduletag :live
+
+  # Whatever you point it at — see `model_live_test.exs`. Pinned to one vendor,
+  # a live test proves that one vendor answers, which is not the question.
+  defp live_chat, do: System.get_env("LIVE_CHAT") || "openrouter:anthropic/claude-haiku-4.5"
   @moduletag timeout: 90_000
 
   setup do
@@ -30,7 +34,7 @@ defmodule Blazie.AgentUnattendedTest do
         Agent.declare("severity",
           produces: "ticket",
           watches: ["body"],
-          asks: "openrouter:anthropic/claude-haiku-4.5",
+          asks: live_chat(),
           answers: "name",
           describe: "exactly one of: low, medium, high"
         ) ++

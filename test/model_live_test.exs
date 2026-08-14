@@ -5,7 +5,7 @@ defmodule Blazie.Model.LiveTest do
   Excluded by default — a suite that needs an API key and a network is not a
   suite. But never running it at all is the failure this tree keeps having: a
   thing built, tested against its own assumptions, and never once pointed at
-  reality. `mix test --include live` with OPENROUTER_API_KEY set.
+  reality. `mix test --include live`, with a key for whatever LIVE_CHAT names.
   """
   use ExUnit.Case, async: false
 
@@ -14,8 +14,16 @@ defmodule Blazie.Model.LiveTest do
 
   @moduletag :live
 
-  @chat "openrouter:anthropic/claude-haiku-4.5"
-  @embed "openrouter:openai/text-embedding-3-small"
+  # Whatever you point it at. A live test pinned to one vendor proves that one
+  # vendor answers, and this is the only test in the tree whose whole job is to
+  # find out whether an ENDPOINT behaves — so which endpoint has to be an
+  # argument. Defaults keep the previous behaviour for anyone who had it working.
+  #
+  #   LIVE_CHAT=cloudflare:@cf/zai-org/glm-4.7-flash \
+  #   LIVE_EMBED=cloudflare:@cf/baai/bge-base-en-v1.5 \
+  #   mix test --include live test/model_live_test.exs
+  @chat System.get_env("LIVE_CHAT") || "openrouter:anthropic/claude-haiku-4.5"
+  @embed System.get_env("LIVE_EMBED") || "openrouter:openai/text-embedding-3-small"
 
   test "text comes back" do
     assert {:ok, said} = Blazie.Model.generate(@chat, "Reply with exactly the word: pong")
@@ -51,7 +59,7 @@ defmodule Blazie.Model.LiveTest do
     {:ok, _} =
       World.append(
         world,
-        Embedding.declare("embedding", embeds: "body", into: "text-3-small", asks: @embed)
+        Embedding.declare("embedding", embeds: "body", into: "live-space", asks: @embed)
       )
 
     {:ok, _} =

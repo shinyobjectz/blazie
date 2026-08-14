@@ -11,6 +11,10 @@ defmodule Blazie.ToolLiveTest do
   alias Blazie.{Attribute, Snapshot, Tool, World}
 
   @moduletag :live
+
+  # Whatever you point it at — see `model_live_test.exs`. Pinned to one vendor,
+  # a live test proves that one vendor answers, which is not the question.
+  defp live_chat, do: System.get_env("LIVE_CHAT") || "openrouter:anthropic/claude-haiku-4.5"
   @moduletag timeout: 90_000
 
   setup do
@@ -43,7 +47,7 @@ defmodule Blazie.ToolLiveTest do
 
     {:ok, said, made} =
       Blazie.Model.converse(
-        "openrouter:openai/gpt-4o-mini",
+        live_chat(),
         "Which plan is customer c_9134 on? Answer with just the plan name.",
         tools,
         &Tool.run(snapshot, &1),

@@ -19,9 +19,10 @@ defmodule Blazie.Model.Reference do
   @known %{
     "openai" => Blazie.Model.Provider.OpenAI,
     "anthropic" => Blazie.Model.Provider.Anthropic,
-    "openrouter" => Blazie.Model.Provider.OpenRouter
+    "openrouter" => Blazie.Model.Provider.OpenRouter,
+    "cloudflare" => Blazie.Model.Provider.Cloudflare
   }
-  @provider_atoms [:openai, :anthropic, :openrouter]
+  @provider_atoms [:openai, :anthropic, :openrouter, :cloudflare]
   @doc false
   def known_atoms, do: @provider_atoms
 
