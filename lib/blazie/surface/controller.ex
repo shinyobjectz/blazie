@@ -249,6 +249,37 @@ defmodule Blazie.Surface.Controller do
     end
   end
 
+  @doc """
+  Share a held world with a successor's fingerprint — rotation's first verb.
+
+  The sharer proves it holds the world by holding it; the successor's secret
+  never crosses this wire, only its hash. Refused for worlds the caller does
+  not hold and for the reserved ledgers, with the repair either way.
+  """
+  def share(conn, %{"world" => world, "to" => fingerprint})
+      when is_binary(world) and is_binary(fingerprint) do
+    case Authority.share(conn.assigns.caller, fingerprint, world) do
+      {:ok, _tx} -> json(conn, %{"shared" => world, "with" => fingerprint})
+      {:error, refusal} -> refuse(conn, refusal)
+    end
+  end
+
+  def share(conn, _params),
+    do:
+      refuse(conn, %{
+        problem: :incomplete_request,
+        repair: "Sharing needs `world` (one you hold) and `to` (the successor's fingerprint)."
+      })
+
+  @doc "Drop your own grant — rotation's last verb, once the successor answers."
+  def drop(conn, %{"world" => world}) when is_binary(world) do
+    {:ok, _tx} = Authority.revoke(conn.assigns.caller, world)
+    json(conn, %{"dropped" => world})
+  end
+
+  def drop(conn, _params),
+    do: refuse(conn, %{problem: :incomplete_request, repair: "Dropping needs `world`."})
+
   @doc "The facts, projected for whatever scrapes. Text, because that is what scrapers read."
   def metrics(conn, _params) do
     conn

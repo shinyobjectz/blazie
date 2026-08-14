@@ -216,6 +216,22 @@ describe("the tool surface", () => {
     assert.match(toolNamed("open_cluster")!.description, /SPENDS MONEY/)
   })
 
+  it("stays inside the disclosure budget, with the strategy on file", () => {
+    // Socialite's rendered vocabulary already exceeds montology's 24k
+    // disclosure budget, carried as a known gap — the same ceiling arrives
+    // here as the vocabulary and remit surface grow. The budget is decided
+    // BEFORE it is exceeded: 20k with the last 4k as headroom, and when this
+    // fails the strategy is progressive disclosure (the tools.py library
+    // argument: a library has help(), so the list gets a summary tier and a
+    // describe-on-demand tier), never deleting prose to fit.
+    const size = JSON.stringify(listed()).length;
+    assert.ok(
+      size < 20_000,
+      `the generated MCP surface is ${size} bytes — the budget is 20k, and the repair is ` +
+        "progressive disclosure, not shorter truths",
+    );
+  });
+
   it("quotes the ontology rather than paraphrasing it", () => {
     // `words.ts` is generated from `.monty/ontology.db` and `just check` fails
     // when it is stale, so a description built from it cannot describe a cluster

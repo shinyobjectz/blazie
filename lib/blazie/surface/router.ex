@@ -50,5 +50,10 @@ defmodule Blazie.Surface.Router do
     get("/metrics", Controller, :metrics)
 
     post("/run", Controller, :run)
+
+    # Rotation, in two verbs: share a held world with a successor's
+    # fingerprint, and drop your own grant when the window closes.
+    post("/grants", Controller, :share)
+    post("/grants/drop", Controller, :drop)
   end
 end

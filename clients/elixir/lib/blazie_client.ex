@@ -86,6 +86,16 @@ defmodule BlazieClient do
   @spec me(t()) :: {:ok, map()} | {:error, refusal()}
   def me(%__MODULE__{} = client), do: get(client, "/me")
 
+  @doc "Share a held world with a successor's fingerprint — rotation's first verb."
+  @spec share(t(), String.t(), String.t()) :: {:ok, map()} | {:error, refusal()}
+  def share(%__MODULE__{} = client, world, fingerprint),
+    do: post(client, "/grants", %{"world" => world, "to" => fingerprint})
+
+  @doc "Drop this token's own grant — rotation's last verb."
+  @spec drop(t(), String.t()) :: {:ok, map()} | {:error, refusal()}
+  def drop(%__MODULE__{} = client, world),
+    do: post(client, "/grants/drop", %{"world" => world})
+
   # ── the cache ──────────────────────────────────────────────────────────────
 
   @doc """

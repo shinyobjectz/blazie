@@ -126,6 +126,47 @@ defmodule Blazie.Authority do
   @spec revoke(String.t(), World.name()) :: {:ok, pos_integer()}
   def revoke(token, world), do: write(caller(token), @revoked, world)
 
+  @doc """
+  A holder shares a world with another caller's FINGERPRINT — the whole of
+  token rotation, and nothing else.
+
+  Rotation is: mint a successor, share every world with its fingerprint,
+  verify the successor answers, revoke the elder. Both live during the
+  window, which is the grace; each step is a fact, which is the audit. The
+  fingerprint rather than the token, because the sharer never needs to see
+  the successor's secret — the control plane mints it and only the hash
+  travels.
+
+  Refused when the sharer does not hold the world (sharing what you do not
+  hold is granting yourself reach), and for the reserved ledgers before any
+  grant is consulted.
+  """
+  @spec share(String.t(), String.t(), World.name()) ::
+          {:ok, pos_integer()} | {:error, refusal()}
+  def share(_token, _fingerprint, world) when world in @reserved,
+    do:
+      {:error,
+       %{
+         problem: :not_nameable,
+         repair:
+           "#{inspect(world)} changes what callers may do, so no caller may share it — the " <>
+             "same rule as granting it."
+       }}
+
+  def share(token, fingerprint, world) do
+    if may_name?(token, world) do
+      write(fingerprint, @may_name, world)
+    else
+      {:error,
+       %{
+         problem: :not_yours_to_share,
+         repair:
+           "This caller may not name #{inspect(world)}, so it cannot share it. A rotation " <>
+             "shares only what the retiring token actually holds."
+       }}
+    end
+  end
+
   @doc "Every grant and revocation for this caller and world, oldest first."
   @spec history(String.t(), World.name()) :: [Blazie.Fact.t()]
   def history(token, world) do
