@@ -143,6 +143,7 @@ export const onRequestPost: PagesFunction<Control> = async ({ env, request }) =>
       plan,
       tunnelToken: made.made.token,
       secret: mintToken(),
+      masterKey: mintToken(),
       // Where to report, taken from the request rather than written down, so a
       // preview deployment provisions machines that call the preview back.
       home: new URL(request.url).origin,

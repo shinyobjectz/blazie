@@ -111,6 +111,7 @@ describe("making a machine", () => {
     plan: "1xCPU-2GB",
     tunnelToken: "TUNNEL",
     secret: "SECRET",
+    masterKey: "MASTER",
     home: "https://blazie.dev",
     id: "CLUSTER",
     hello: "HELLO",
@@ -521,6 +522,7 @@ describe("what the machine is told to do", () => {
         plan: "1xCPU-2GB",
         tunnelToken: "TUNNEL",
         secret: "SECRET",
+    masterKey: "MASTER",
         home: "https://blazie.dev",
         id: "CLUSTER",
         hello: "HELLO",
@@ -648,6 +650,12 @@ describe("what the machine is told to do", () => {
     assert.match(rendered, /SECRET_KEY_BASE=SECRET/)
   })
 
+  it("carries a master key, so sealing protects something", () => {
+    // Without one the keyring falls back to a constant in a public repository:
+    // sealing appears to work and anybody can decrypt it. Silent, until this.
+    assert.match(rendered, /BLAZIE_MASTER_KEY=MASTER/)
+  })
+
   it("carries where to back up, when there is somewhere", async () => {
     stub()
     answering({ ok: true, body: { server: { uuid: "s" } } })
@@ -656,7 +664,7 @@ describe("what the machine is told to do", () => {
       { token: "t" },
       {
         name: "atlas", hostname: "atlas", zone: "us-nyc1", plan: "1xCPU-2GB",
-        tunnelToken: "T", secret: "S", home: "https://blazie.dev", id: "CID", hello: "H",
+        tunnelToken: "T", secret: "S", masterKey: "M", home: "https://blazie.dev", id: "CID", hello: "H",
         backup: {
           bucket: "blazie-clusters",
           endpoint: "https://acct.r2.cloudflarestorage.com",

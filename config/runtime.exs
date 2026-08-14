@@ -99,6 +99,15 @@ if config_env() == :prod do
     )
   end
 
+  unless Blazie.Keyring.Local.master_supplied?() do
+    IO.warn(
+      "BLAZIE_MASTER_KEY is not set, so key-encryption keys are protected by a constant that is " <>
+        "in the repository. Sealing and erasure will appear to work and protect nothing. Set it " <>
+        "to something random and keep it — a master key that changes cannot open what the old " <>
+        "one sealed."
+    )
+  end
+
   # No github here. Signing in is the control plane's, which is what makes
   # "no clusters yet" a state you can be in: asking a cluster to trade an oauth
   # code meant holding no cluster left you unable to reach the page that would

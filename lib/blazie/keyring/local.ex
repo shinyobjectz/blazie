@@ -22,7 +22,13 @@ defmodule Blazie.Keyring.Local do
 
   @behaviour Blazie.Keyring
 
-  @master_env "LAZY_RIVER_MASTER_KEY"
+  @master_env "BLAZIE_MASTER_KEY"
+
+  # The name this used to have, still read. Nothing is deployed under it, but
+  # this tree has lost data three times to a stored shape changing under a green
+  # suite, and a key read from the wrong variable does not fail — it silently
+  # encrypts under a different one and cannot open what came before.
+  @master_was "LAZY_RIVER_MASTER_KEY"
 
   @impl true
   def open(opts) do
@@ -109,10 +115,26 @@ defmodule Blazie.Keyring.Local do
   # The master key is never written next to what it protects. In development it
   # is derived so tests need no setup; anywhere else it must be supplied, and a
   # derived one would be no protection at all.
+  # The key everything else is encrypted under.
+  #
+  # The fallback is a constant in a public repository, which is worth saying
+  # plainly: a cluster running on it has key-encryption keys that anybody can
+  # decrypt, so sealing protects nothing. That is correct for a test and a
+  # catastrophe in production, and it used to happen silently — a provisioned
+  # cluster was given no master key at all and said nothing about it.
+  #
+  # `runtime.exs` warns at boot when it is missing in prod. Here it is only
+  # named honestly.
   defp master do
-    case System.get_env(@master_env) do
-      nil -> :crypto.hash(:sha256, "lazy-river-development-master-key-not-a-secret")
+    case System.get_env(@master_env) || System.get_env(@master_was) do
+      nil -> :crypto.hash(:sha256, "blazie-development-master-key-not-a-secret")
       supplied -> :crypto.hash(:sha256, supplied)
     end
+  end
+
+  @doc false
+  # Somewhere for a boot check to ask, rather than re-deriving the rule.
+  def master_supplied? do
+    (System.get_env(@master_env) || System.get_env(@master_was)) != nil
   end
 end

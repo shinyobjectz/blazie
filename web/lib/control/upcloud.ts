@@ -35,6 +35,19 @@ export type Opening = {
   home: string
   id: string
   hello: string
+  /**
+   * What this cluster's key-encryption keys are kept under.
+   *
+   * Without one the keyring falls back to a constant in a public repository, so
+   * sealing appears to work and protects nothing — which is what a provisioned
+   * cluster was doing, silently. Per cluster, so one cannot open another's.
+   *
+   * It is held here, which means the control plane could decrypt what a cluster
+   * sealed. That is not a widening: it already holds the token that can read
+   * everything the cluster holds unsealed.
+   */
+  masterKey: string
+
   /** Where this cluster copies itself to. Absent means it does not. */
   backup?: Backup
   /**
@@ -436,6 +449,7 @@ write_files:
     content: |
       BLAZIE_CLUSTER=${opening.hostname}
       SECRET_KEY_BASE=${opening.secret}
+      BLAZIE_MASTER_KEY=${opening.masterKey}
 ${backupEnv(opening)}
 
   - path: /usr/local/bin/blazie-open
