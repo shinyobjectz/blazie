@@ -335,6 +335,12 @@ recorded by the tests themselves: **`string.gmatch` raises `badarg`**
 (match/find/gsub-with-function-replacement/format all work — a ~10-line
 pure-Lua gmatch shim is now a prelude candidate), and **number `tostring`
 renders `43.0`** (authored code wants `string.format("%d")`). Suite 884
-green. Remaining for LT2's full verdict: the coding LOOP driven end-to-end
-with a scripted model choosing the run tool, and a wall-clock number on a
-representative dossier computation.
+green. **Completed same day:** the coding LOOP end-to-end — a scripted model
+writes a `.lua` file, runs it, and answers from what it printed; the run
+tool's answer carries the guest's print; the whole write→run→answer loop
+measures **well under 100ms**. The stdlib repair landed alongside (a
+find-based `gmatch` shim in the workspace grant), and the guest library
+shelf opened with both survey keepers passing their Luerl smoke tests first
+run — json.lua (round trip + structured state through the workspace) and
+lust (describe/it/expect with counters, report through the captured print:
+the tenant-test core, existing instead of written). LT2 verdict complete.

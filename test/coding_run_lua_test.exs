@@ -70,4 +70,69 @@ defmodule Blazie.CodingRunLuaTest do
     assert {:ok, answered} = Coding.execute(world, "run-1", "bad.lua", snapshot)
     assert is_binary(answered["failed"])
   end
+
+  test "the whole loop: a scripted model writes a .lua file, runs it, reads the answer", %{
+    world: world
+  } do
+    {:ok, _} =
+      World.append(
+        world,
+        Blazie.Spend.seed() ++ Blazie.Model.seed() ++ Blazie.Run.seed() ++ Blazie.Tool.seed()
+      )
+
+    {:ok, _} = World.append(world, Coding.declare("coder"))
+
+    turns = [
+      {:call, "write",
+       %{
+         "path" => "sum.lua",
+         "content" => """
+         local total = 0
+         for n in string.gmatch(file.read("numbers.txt"), "%d+") do
+           total = total + tonumber(n)
+         end
+         print(string.format("%d", total))
+         """
+       }},
+      {:call, "run", %{"path" => "sum.lua"}},
+      {:say, "the total is 12"}
+    ]
+
+    t0 = System.monotonic_time(:millisecond)
+
+    assert {:ok, "the total is 12", made} =
+             Coding.work(world, "run-lua-1", "sum the numbers",
+               asks: "openai:x",
+               provider: scripted(turns)
+             )
+
+    elapsed = System.monotonic_time(:millisecond) - t0
+
+    # The run tool's answer carried what the guest printed.
+    ran = Enum.find(made, &(&1.call.name == "run"))
+    assert ran.answered["printed"] == "12"
+
+    # And the loop stayed interactive — the LT2 verdict's wall-clock number.
+    assert elapsed < 2_000, "the write→run→answer loop took #{elapsed}ms"
+  end
+
+  defp scripted(turns) do
+    at = :counters.new(1, [])
+
+    fn _r, _m, _t, _o ->
+      i = :counters.get(at, 1)
+      :counters.add(at, 1, 1)
+
+      case Enum.at(turns, i) do
+        nil ->
+          {:ok, {:said, "done"}, %{in: 1, out: 1}}
+
+        {:say, said} ->
+          {:ok, {:said, said}, %{in: 1, out: 1}}
+
+        {:call, name, args} ->
+          {:ok, {:calls, [%{id: "c", name: name, arguments: args}]}, %{in: 1, out: 1}}
+      end
+    end
+  end
 end
