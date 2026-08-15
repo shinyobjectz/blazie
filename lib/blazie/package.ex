@@ -199,7 +199,7 @@ defmodule Blazie.Package do
   """
   @spec install(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, map()}
   def install(name, version, opts) do
-    fetch = Keyword.fetch!(opts, :fetch)
+    fetch = Keyword.get(opts, :fetch, &default_fetch/1)
 
     case fetch.(name) do
       {:ok, source, license} ->
@@ -251,6 +251,36 @@ defmodule Blazie.Package do
       repair:
         "#{inspect(request)} is not in the library. Available: #{if(shelf == "", do: "(empty)", else: shelf)}."
     }
+  end
+
+  # The production fetch boundary: reach the package bytes through the egress
+  # door. A source string of "luarocks:name@version" or "git:host/o/r@ref"
+  # names where; anything else is a plain URL. Left injectable so the vetting
+  # gate is testable without a network (the install tests do exactly that).
+  defp default_fetch(name) do
+    egress = Application.get_env(:blazie, :egress, [])
+
+    result =
+      case String.split(name, ":", parts: 2) do
+        ["luarocks", spec] ->
+          [n, v] = String.split(spec, "@", parts: 2)
+          Blazie.Egress.luarocks(n, v, egress)
+
+        ["git", spec] ->
+          [repo, ref] = String.split(spec, "@", parts: 2)
+          Blazie.Egress.git(repo, ref, egress)
+
+        _ ->
+          Blazie.Egress.webfetch(name, egress)
+      end
+
+    case result do
+      # A fetched rock/tarball is bytes; the license rides in the package
+      # metadata a real fetcher would parse. Absent one, MIT is not assumed —
+      # the caller must pass license: or an injected fetch that supplies it.
+      {:ok, bytes} -> {:ok, bytes, nil}
+      {:error, refusal} -> {:error, refusal.repair}
+    end
   end
 
   defp maybe_license(id, opts) do

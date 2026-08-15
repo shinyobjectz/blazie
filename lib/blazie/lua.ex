@@ -378,13 +378,17 @@ defmodule Blazie.Lua do
   # The one capability that makes a job a job. Deliberately small: a string in,
   # a string or nil out. A job that needs more should be given more one
   # deliberate binding at a time, because every widening is a hole in the fence.
+  # http.get is a job's one reach, and it goes through the hardened egress
+  # door (Blazie.Egress): allowlisted, SSRF-guarded, rate-limited, audited —
+  # never a bare socket. A refused or failed fetch is nil, as before, so
+  # authored code handles it; the reason is the door's to log, not the
+  # guest's to see.
   defp http_get([url | _], state) when is_binary(url) do
-    case :httpc.request(:get, {String.to_charlist(url), []}, [{:timeout, 30_000}], []) do
-      {:ok, {{_, status, _}, _headers, body}} when status in 200..299 ->
-        {[to_string(body)], state}
+    egress_opts = Application.get_env(:blazie, :egress, [])
 
-      _ ->
-        {[nil], state}
+    case Blazie.Egress.webfetch(url, egress_opts) do
+      {:ok, body} -> {[body], state}
+      {:error, _refusal} -> {[nil], state}
     end
   end
 

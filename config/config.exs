@@ -24,6 +24,18 @@ config :blazie, key_dir: if(config_env() == :test, do: "tmp/test_keys", else: "p
 # vendor is a per-space opt-in through the same seam, not a default.
 config :blazie, :index, {Blazie.Index.Exact, []}
 
+# The egress allowlist — the ONE outbound door (Blazie.Egress). Default-deny:
+# nothing is reachable until a host is named here. A deployment adds exactly
+# the hosts its jobs need — package sources, the webfetch targets it trusts.
+config :blazie, :egress,
+  allow: [
+    "luarocks.org",
+    "github.com",
+    "gitlab.com",
+    "raw.githubusercontent.com",
+    "codeload.github.com"
+  ]
+
 # Vitals take a reading on this cadence. Unset means the job does not run at
 # all, which is right for tests and wrong for anything watching itself.
 config :blazie, vitals_every: if(config_env() == :test, do: 3600, else: 60)

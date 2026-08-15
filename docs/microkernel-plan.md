@@ -235,3 +235,37 @@ Design reference: lde (lde-org/lde) — the shape (project-local,
 version-locked, isolated deps) adopted; its mechanism (LuaJIT runtime, git
 fetching) rejected as fence-breaking. 20 package tests; full suite 1044
 green.
+
+## EG — the egress port (2026-08-15): COMPLETE
+
+"A very well secured host port to manage the external comms." The insight
+that made it one job instead of three: git, luarocks and webfetch are all
+HTTPS — a rock is a zip from luarocks.org, a git dep is a tarball from a
+git host, webfetch is a GET — so there is ONE hardened door and three thin
+consumers, which means one place to get the security exactly right.
+
+**`Blazie.Egress.fetch/2`** — every outbound byte in the tree passes here,
+guarded in order before a byte is dialed: (1) HTTPS only; (2) default-deny
+ALLOWLIST (host must be named in `config :blazie, :egress`); (3) SSRF —
+resolve the host to IPs and reject every private/loopback/link-local/
+metadata range, AFTER the allowlist and on the RESOLVED address, so a
+rebind (allowlisted name → 127.0.0.1) or the 169.254.169.254 metadata
+endpoint is refused even when the name is allowed; (4) LIMIT per vendor
+(the account-wide bucket `Model` passes); (5) CREDENTIAL from the Secret
+plane injected as a header and SCRUBBED from the response, so a token used
+never rides back out. Then a response size cap, a redirect-off-the-
+allowlist refusal, and an AUDIT FACT per call (host, status, bytes,
+provenance — never the secret). transport/resolve/limit/secret are
+injectable, so the whole security surface is tested without a network.
+
+Consumers (`webfetch/2`, `git/3`, `luarocks/3`) build the right HTTPS URL
+and inherit every guard — delete Egress and they reach nothing. Two
+integrations landed: the guest's `http.get` (a `:job`'s one reach) now
+goes THROUGH the door (an unlisted host returns nil, live-verified; a
+formula still has no http at all), and `Package.install`'s production
+`fetch:` resolves `luarocks:`/`git:`/URL specs through the port. The
+config allowlist ships default-deny with the package sources named.
+
+23 egress tests (12 port incl. every SSRF/rebind/metadata attack + 4
+consumers + integration), full suite 1060 green. This is the boundary the
+package plane's install and any future webfetch stand on.
