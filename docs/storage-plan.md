@@ -245,4 +245,13 @@ storage phase.
 
 ## Verdicts
 
-*(appended per phase as they land)*
+**P0 (2026-08-15): PASS.** `test/store_conformance_test.exs` — one macro,
+29 assertions of the seam's contract run against Memory, File and Paged
+(ordering, resumption, bounded-residency-never-changes-answers, old names
+answer forever, erasure reaches evicted facts), including the two
+within-transaction ordering guards that no per-store file had (landmine 1's
+tripwire, now armed before any SQL is written). Existing per-store files
+untouched — format-level claims (tears, checkpoints, same-file-either-store)
+stay where they belong. Full suite 852 green, and green again under
+`LEDGER_SYNC=true`. `Store.SQLite` now has a definition of done before it
+has a line of code.
