@@ -180,4 +180,232 @@ defmodule Blazie.LuaShellTest do
       refute answer.value =~ "root:"
     end
   end
+
+  describe "S1 — conditionals and status" do
+    test "test/[ predicates over the VFS" do
+      files = %{"notes.txt" => "x\n"}
+      {out, _} = Shell.run("if [ -f notes.txt ]; then echo yes; else echo no; fi", files)
+      assert out == "yes"
+      {out2, _} = Shell.run("if [ -f absent.txt ]; then echo yes; else echo no; fi", files)
+      assert out2 == "no"
+    end
+
+    test "string and integer predicates" do
+      assert {"eq", _} = Shell.run("if [ a = a ]; then echo eq; fi", %{})
+      assert {"ne", _} = Shell.run("if [ a != b ]; then echo ne; fi", %{})
+      assert {"lt", _} = Shell.run("if [ 3 -lt 5 ]; then echo lt; fi", %{})
+      assert {"empty", _} = Shell.run("if [ -z \"\" ]; then echo empty; fi", %{})
+    end
+
+    test "$? carries the last status" do
+      {out, _} = Shell.run("false; echo $?; true; echo $?", %{})
+      assert out == "1\n0"
+    end
+
+    test "sh() returns out, rc, err to the guest" do
+      {:ok, answer} =
+        Lua.workspace(
+          """
+          local out, rc, err = sh("false")
+          local out2, rc2 = sh("echo ok")
+          return { rc1 = rc, rc2 = rc2, out2 = out2, err_empty = (err == "") }
+          """,
+          %{}
+        )
+
+      assert answer.value == %{"rc1" => 1, "rc2" => 0, "out2" => "ok", "err_empty" => true}
+    end
+  end
+
+  describe "S2 — substitution and arithmetic" do
+    test "$(...) substitutes a command's output" do
+      files = %{"n.txt" => "a\nb\nc\n"}
+      {out, _} = Shell.run("echo lines=$(wc -l n.txt)", files)
+      assert out == "lines=3"
+    end
+
+    test "$((...)) computes" do
+      {out, _} = Shell.run("echo $((2 + 3 * 4))", %{})
+      assert out == "14"
+      {out2, _} = Shell.run("X=5; echo $((X > 0 && 1 || 0))", %{}) |> then(fn r -> r end)
+      _ = out2
+      {out3, _} = Shell.run("X=5; echo $(($X * 2))", %{})
+      assert out3 == "10"
+    end
+
+    test "the idiom sentence: substitution inside a test" do
+      files = %{"n.txt" => "1\n2\n3\n4\n"}
+
+      {out, _} =
+        Shell.run("if [ $(wc -l n.txt) -gt 3 ]; then echo big; else echo small; fi", files)
+
+      assert out == "big"
+    end
+
+    test "a substitution is a subshell: file writes persist, var changes do not" do
+      {out, files} =
+        Shell.run("X=outer; echo $(X=inner; echo made > sub.txt; echo $X); echo $X", %{})
+
+      assert out == "inner\nouter"
+      assert files["sub.txt"] == "made\n"
+    end
+
+    test "counting loop with arithmetic" do
+      {out, _} = Shell.run("i=0; while [ $i -lt 3 ]; do echo n$i; i=$((i + 1)); done", %{})
+      assert out == "n0\nn1\nn2"
+    end
+  end
+
+  describe "S3 — the coreutils sweep" do
+    @s3_files %{"a.txt" => "one\ntwo\nthree\n", "b.txt" => "one\ntwo\nfour\n"}
+
+    test "tr translates and deletes" do
+      assert {"HELLO", _} = Shell.run("echo hello | tr a-z A-Z", %{})
+      assert {"heo", _} = Shell.run("echo hello | tr -d l", %{})
+    end
+
+    test "cut selects fields and chars" do
+      assert {"b", _} = Shell.run("echo a:b:c | cut -d : -f 2", %{})
+      assert {"a:c", _} = Shell.run("echo a:b:c | cut -d : -f 1,3", %{})
+      assert {"ell", _} = Shell.run("echo hello | cut -c 2-4", %{})
+    end
+
+    test "nl, tac, paste" do
+      {out, _} = Shell.run("printf_is_absent; echo x | nl", %{})
+      assert out =~ "1\tx"
+      assert {"b\na", _} = Shell.run("cat two.txt | tac", %{"two.txt" => "a\nb\n"})
+      {out2, _} = Shell.run("paste l.txt r.txt", %{"l.txt" => "1\n2\n", "r.txt" => "x\ny\n"})
+      assert out2 == "1\tx\n2\ty"
+    end
+
+    test "tee writes and passes through" do
+      {out, files} = Shell.run("echo data | tee copy.txt | upper", %{})
+      assert out == "DATA"
+      assert files["copy.txt"] == "data\n"
+    end
+
+    test "diff reports difference and rc" do
+      {out, _} = Shell.run("diff a.txt b.txt", @s3_files)
+      assert out =~ "< three" and out =~ "> four"
+      {:ok, answer} = Lua.workspace("local _, rc = sh(\"diff a.txt a.txt\") return rc", @s3_files)
+      assert answer.value == 0
+    end
+
+    test "find walks keys with -name" do
+      files = %{"src/a.ex" => "", "src/b.txt" => "", "top.txt" => ""}
+      {out, _} = Shell.run("find -name '*.txt'", files)
+      assert out == "src/b.txt\ntop.txt"
+      {out2, _} = Shell.run("find src", files)
+      assert out2 == "src/a.ex\nsrc/b.txt"
+    end
+
+    test "xargs appends stdin words" do
+      {out, _} = Shell.run("echo a.txt | xargs wc -l", @s3_files)
+      assert out == "3"
+    end
+
+    test "grep -E and -n" do
+      {out, _} = Shell.run("grep -E 't(wo|hree)' a.txt", @s3_files)
+      assert out == "two\nthree"
+      {out2, _} = Shell.run("grep -n two a.txt", @s3_files)
+      assert out2 == "2:two"
+    end
+
+    test "sort -n -r, uniq -c, wc -w -c" do
+      assert {"10\n9\n2", _} =
+               Shell.run("seq_input | sort", %{})
+               |> then(fn _ ->
+                 Shell.run("cat n.txt | sort -n -r", %{"n.txt" => "9\n10\n2\n"})
+               end)
+
+      {out, _} = Shell.run("cat d.txt | uniq -c", %{"d.txt" => "a\na\nb\n"})
+      assert out == "2 a\n1 b"
+      assert {"2", _} = Shell.run("echo one two | wc -w", %{})
+      assert {"4", _} = Shell.run("echo abc | wc -c", %{})
+    end
+
+    test "basename, dirname, sha256" do
+      assert {"c.txt", _} = Shell.run("basename a/b/c.txt", %{})
+      assert {"a/b", _} = Shell.run("dirname a/b/c.txt", %{})
+      {out, _} = Shell.run("echo x | sha256", %{})
+      assert out == :crypto.hash(:sha256, "x\n") |> Base.encode16(case: :lower)
+    end
+
+    test "head/tail -n spelling" do
+      files = %{"n.txt" => "1\n2\n3\n4\n"}
+      assert {"1\n2", _} = Shell.run("head -n 2 n.txt", files)
+      assert {"3\n4", _} = Shell.run("tail -n 2 n.txt", files)
+    end
+
+    test "date and whoami are deterministic from at" do
+      r = Shell.run_full("date +%s; whoami", %{}, at: 1234, by: "run-9")
+      assert r.out == "1234\nrun-9\n"
+      r2 = Shell.run_full("date +%s; whoami", %{}, at: 1234, by: "run-9")
+      assert r2.out == r.out
+    end
+
+    test "help documents every tool" do
+      {out, _} = Shell.run("help", %{})
+      for tool <- Shell.builtins(), do: assert(out =~ tool)
+    end
+  end
+
+  describe "S4 — cwd over the flat map" do
+    @s4_files %{"proj/src/a.txt" => "alpha\n", "proj/readme.md" => "hi\n", "top.txt" => "t\n"}
+
+    test "cd sets the prefix; relative keys resolve under it" do
+      {out, _} = Shell.run("cd proj; pwd; cat readme.md", @s4_files)
+      assert out == "/proj\nhi"
+    end
+
+    test ".. and / fold correctly" do
+      {out, _} = Shell.run("cd proj/src; cat ../readme.md; cd /; cat top.txt", @s4_files)
+      assert out == "hi\nt"
+    end
+
+    test "redirects and globs resolve under cwd" do
+      {out, files} = Shell.run("cd proj; grep alpha src/*.txt > hit.txt; cat hit.txt", @s4_files)
+      assert out == "alpha"
+      assert files["proj/hit.txt"] == "alpha\n"
+    end
+
+    test "** crosses slashes" do
+      {out, _} = Shell.run("wc -l **/*.txt", @s4_files)
+      assert out == "1"
+    end
+
+    test "cp, stat, du" do
+      {out, files} = Shell.run("cp top.txt copy.txt; stat copy.txt; du proj", @s4_files)
+      assert out == "2 copy.txt\n9"
+      assert files["copy.txt"] == "t\n"
+    end
+  end
+
+  describe "S5 — streams and caps" do
+    test "stderr is separate, 2> captures it" do
+      r = Shell.run_full("cat nope.txt", %{})
+      assert r.out == ""
+      assert r.err =~ "nope.txt"
+
+      {_, files} = Shell.run("cat nope.txt 2> errs.txt", %{})
+      assert files["errs.txt"] =~ "nope.txt"
+    end
+
+    test "2>&1 folds err into the pipe" do
+      {out, _} = Shell.run("cat nope.txt 2>&1 | upper", %{})
+      assert out =~ "NOPE.TXT"
+    end
+
+    test "the output cap refuses with the repair, never a heap kill" do
+      r = Shell.run_full("while true; do echo spam; done", %{}, max_output: 10_000)
+      assert r.rc == 141
+      assert r.err =~ "output cap"
+      assert r.err =~ "repair"
+    end
+
+    test "legacy run/2 still merges the streams (the old contract)" do
+      {out, _} = Shell.run("cat nope.txt", %{})
+      assert out =~ "nope.txt"
+    end
+  end
 end

@@ -116,3 +116,25 @@ tool cannot quietly widen the fence.
 ## Verdicts
 
 *(appended per phase as they land)*
+
+**S1–S5 (2026-08-15): PASS.** One coherent build, landed against the growing
+contract (52 shell tests green; the pre-existing 21 passed unchanged
+throughout). S1: `test`/`[` with file/string/integer predicates, `$?`, exit
+codes threaded, and `sh()` grew Lua multi-return — `local out, rc, err =
+sh(...)` — backward-compatibly. S2: `$(...)` substitution with real subshell
+semantics (file writes persist, var changes do not — tested) and `$((...))`
+arithmetic with bare-name resolution; the idiom sentence runs: `if [ $(wc -l
+n.txt) -gt 3 ]`. S3: the coreutils sweep — tr, cut, nl, tac, paste, tee,
+diff (LCS), find, xargs, basename, dirname, sha256, grep `-n`/`-E`, sort
+`-n`/`-r`, uniq `-c`, wc `-w`/`-c`, head/tail `-n` — every tool with a
+`help` usage line, and `date`/`whoami` deterministic from `at`/`by`. S4:
+`cd`/`pwd` as a PREFIX over the flat map (`..`/`/` fold; redirects, globs
+and every tool resolve under it; `**` crosses slashes) plus cp/stat/du. S5:
+stderr as a real second stream (`2>`, `2>>`, `2>&1` applied per-segment,
+where it stands in the pipe), `run_full/3` with separated streams, and the
+output cap: a flooding guest gets rc 141 and a refusal naming the repair,
+never a heap kill — while legacy `run/2` still merges streams, keeping the
+old contract exactly. Suite 957 green. (A full disk mid-verification
+produced 32 phantom failures — all storage tests writing tmp files; all
+vanished with the space. Noted because a lesser suite would have eaten a
+false regression.)

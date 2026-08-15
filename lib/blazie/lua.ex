@@ -143,6 +143,7 @@ defmodule Blazie.Lua do
           Process.flag(:max_heap_size, %{size: heap, kill: true, error_logger: false})
           Process.put(:blazie_workspace, files)
           Process.put(:blazie_printed, [])
+          Process.put(:blazie_at, at)
           if sql_path, do: Process.put(:blazie_sql_path, sql_path)
           send(caller, {self(), evaluate_workspace(source, at, snapshot, prelude)})
         end)
@@ -517,12 +518,21 @@ defmodule Blazie.Lua do
 
   defp sql_value(other), do: other
 
-  # The shell grant (LT5a): builtins over the workspace map, pipes and all —
-  # terminal ergonomics with no terminal, no process, no host path anywhere.
+  # The shell grant: the native shell over the workspace map — terminal
+  # ergonomics with no terminal, no process, no host path anywhere. Multiple
+  # returns, Lua-style: `local out, rc, err = sh("...")` — out is the merged
+  # display (what a terminal would show), rc the exit status, err the stderr
+  # stream alone. The shell reads the guest's frozen `at`, so date/whoami
+  # stay deterministic per snapshot.
   defp ws_sh([line | _], state) when is_binary(line) do
-    {out, files} = Blazie.Lua.Shell.run(line, Process.get(:blazie_workspace, %{}))
-    Process.put(:blazie_workspace, files)
-    {[out], state}
+    r =
+      Blazie.Lua.Shell.run_full(line, Process.get(:blazie_workspace, %{}),
+        at: Process.get(:blazie_at, 0)
+      )
+
+    Process.put(:blazie_workspace, r.files)
+    display = String.trim_trailing(r.out <> r.err, "\n")
+    {[display, r.rc, r.err], state}
   end
 
   defp ws_sh(_args, state), do: {[nil, "sh takes one command line."], state}
