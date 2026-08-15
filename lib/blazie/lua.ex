@@ -132,23 +132,53 @@ defmodule Blazie.Lua do
     heap = Keyword.get(opts, :heap, @heap)
     at = Keyword.get(opts, :at, 0)
     snapshot = Keyword.get(opts, :snapshot)
-    caller = self()
 
-    {pid, ref} =
-      spawn_monitor(fn ->
-        Process.flag(:max_heap_size, %{size: heap, kill: true, error_logger: false})
-        Process.put(:blazie_workspace, files)
-        Process.put(:blazie_printed, [])
-        send(caller, {self(), evaluate_workspace(source, at, snapshot)})
-      end)
+    with {:ok, prelude} <- preludes(Keyword.get(opts, :prelude, [])) do
+      caller = self()
 
-    case await(pid, ref, deadline, heap) do
-      {:ok, value, printed, files_after} ->
-        {:ok, %{value: value, printed: printed, files: files_after}}
+      {pid, ref} =
+        spawn_monitor(fn ->
+          Process.flag(:max_heap_size, %{size: heap, kill: true, error_logger: false})
+          Process.put(:blazie_workspace, files)
+          Process.put(:blazie_printed, [])
+          send(caller, {self(), evaluate_workspace(source, at, snapshot, prelude)})
+        end)
 
-      other ->
-        other
+      case await(pid, ref, deadline, heap) do
+        {:ok, value, printed, files_after} ->
+          {:ok, %{value: value, printed: printed, files: files_after}}
+
+        other ->
+          other
+      end
     end
+  end
+
+  # The shelf: vendored pure-Lua single-files in priv/lua, each smoke-tested
+  # under Luerl before anything trusts it (docs/storage-plan.md, the guest
+  # library shelf). Loaded by name into a global — no require, no package
+  # path, no filesystem in the guest; the host reads the file.
+  defp preludes(names) do
+    Enum.reduce_while(names, {:ok, []}, fn name, {:ok, acc} ->
+      path = Path.join([Application.app_dir(:blazie, "priv"), "lua", "#{name}.lua"])
+
+      if File.exists?(path) do
+        {:cont, {:ok, acc ++ [{to_string(name), File.read!(path)}]}}
+      else
+        shelf =
+          Path.join([Application.app_dir(:blazie, "priv"), "lua"])
+          |> Path.join("*.lua")
+          |> Path.wildcard()
+          |> Enum.map_join(", ", &Path.basename(&1, ".lua"))
+
+        {:halt,
+         {:error,
+          %{
+            problem: :no_such_prelude,
+            repair: "#{inspect(name)} is not on the shelf. Vendored preludes: #{shelf}."
+          }}}
+      end
+    end)
   end
 
   @doc false
@@ -352,10 +382,18 @@ defmodule Blazie.Lua do
   # The workspace guest: the :formula base (frozen clock, nothing that
   # reaches) plus the file table and a captured print. Runs in the guest's
   # process, so the process dictionary IS the workspace for the duration.
-  defp evaluate_workspace(source, at, snapshot) do
+  defp evaluate_workspace(source, at, snapshot, prelude \\ []) do
     state = world(:formula, at)
     state = if snapshot, do: Blazie.Lua.Binding.bind(state, snapshot), else: state
     state = grant_workspace(state)
+
+    # Each vendored module becomes a global: `name = (function() ...source... end)()`
+    # — the module-style `return m` at the file's end lands in the assignment.
+    state =
+      Enum.reduce(prelude, state, fn {name, module_source}, state ->
+        {:ok, _, state} = :luerl.do("#{name} = (function()\n#{module_source}\nend)()", state)
+        state
+      end)
 
     case :luerl.do(source, state) do
       {:ok, returned, after_state} ->
