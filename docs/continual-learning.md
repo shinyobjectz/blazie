@@ -26,8 +26,9 @@ rule would refuse one, and read-set reactivity makes it unnecessary.
 
 Luerl's immutable tables make the inner `dot` loop slow. The SHAPE
 (facts → job → checkpoint blob → Judge verdict) is substrate-level and
-permanent; the inner loop can migrate to the wasm lane or a host-side
-Model-provider seam without changing a concept. learn-on-Luerl is the
+permanent; the inner loop can migrate to a host-side Model-provider seam or
+a Rustler NIF without changing a concept (the wasm lane is being removed —
+see the Lua runtime track in storage-plan.md). learn-on-Luerl is the
 reference implementation and proof of shape, not the production trainer.
 
 ## Phases (smallest first; Phase 0 gates all)

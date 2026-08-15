@@ -190,6 +190,59 @@ serialized-check hole (landmine 4) first.
 importer; `Store.File` demoted to the read-only legacy path. Retiring it buys
 nothing; not scheduled.
 
+## The Lua runtime track (LT) — one language, one fence
+
+*Decided 2026-08-15, alongside this plan: blazie gets super-opinionated about
+authored code. Everything a guest runs is Lua on Luerl — wasmex, the wasm
+lane, and WASI-CPython are removed. One guest runtime, one capability
+function (`Lua.capabilities/1`), BEAM process isolation (unlinked process,
+deadline, `max_heap_size`) instead of fuel. Rustler NIFs stay available for
+HOST-side performance; guests never see them.*
+
+Why the trade is good: inside a no-network fence, Python's ecosystem
+advantage mostly evaporates — you cannot `pip install` behind the fabrication
+fence anyway, so the interpreter was carrying its weight in syntax, not in
+libraries. Lua is one small language the model writes fluently, guests stay
+pure, and heavy numerics escape to host seams (Model providers, NIFs) — the
+same escape hatch the continual-learning sketch already names. Pure-Lua
+vendoring only (the `learn` treatment); luarocks C modules cannot load under
+Luerl and the capability model would refuse what they do anyway.
+
+**LT1 — the workspace grant (steal tiny-lasers' VFS).** The Coding agent's
+`run` tool needs files; Luerl guests deliberately have none. The answer is
+`~/Apps/workbooks/tiny-lasers`' `Wasm.VFS` design (101 lines, barely
+wasm-coupled): a key→bytes map mediated entirely in Elixir — "a guest path is
+never a host path… there is no filesystem to traverse out of, because there
+is no filesystem" — with a backend seam whose second backend is already a
+tenant-partitioned SQLite store, converging with P1 on its own. For Lua we
+skip tiny-lasers' 372-line fd_table entirely (that half is WASI emulation):
+guests get `file.read/write/list` as granted host functions over the VFS,
+scoped per run, `:job`-only like every reaching capability. Workspace bytes
+land in the tenant's file (or as blob refs), so P4 replication covers the
+workspace for free.
+
+**LT2 — Coding runs Lua.** The `run` tool executes Lua in a Luerl guest over
+the granted workspace instead of Python in WASI. The coding loop's tools
+(list/read/write) re-point at the VFS. Verdict written on: suite damage,
+deadline/heap parity with fuel for runaway guests, and a wall-clock number
+for a representative dossier computation.
+
+**LT3 — wasmex out.** Delete `Sandbox`'s wasm/WASI lanes, the wasmex dep, and
+the Python image path; `Lua.capabilities/1` is the single fence (doctrine 14
+becomes literally one function). `sandbox_fence_test` properties re-pointed
+at the Lua fence — the *claims* (no network, no clock, no reach) all survive,
+only the engine underneath changes.
+
+**LT4 — the expressive grants (after P1).** `sql(query)` — host-executed,
+read-only, against exactly the tenant's staged SQLite file; the fence is the
+file, guests never hold handles. `http.get_many` if a fan-out case demands
+it — async is more guests or a granted concurrent primitive, never an event
+loop inside one.
+
+Ordering: LT1–LT2 can start immediately (only LT4 waits on P1); LT3 lands
+when LT2's verdict is green. Each LT phase gets a verdict below like every
+storage phase.
+
 ## Verdicts
 
 *(appended per phase as they land)*
