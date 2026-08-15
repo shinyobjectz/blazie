@@ -90,6 +90,81 @@ defmodule Blazie.CompactTest do
     assert Snapshot.value(Snapshot.open([world]), 2, "v") == 8
   end
 
+  test "a SQLite world compacts the same properties: UPDATE, VACUUM, nothing else", %{dir: dir} do
+    name = {:compact_sq, System.unique_integer([:positive])}
+    subject = "person-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Keyring.destroy(subject) end)
+
+    {:ok, world} = World.open(name, store: {Store.SQLite, dir: dir})
+    {:ok, _} = World.append(world, Attribute.seed() ++ Erasure.seed())
+    {:ok, _} = World.append(world, Attribute.define("secret", answers: "any"))
+    {:ok, _} = World.append(world, Attribute.define("public", answers: "integer"))
+
+    # An erased subject holding a big sealed value, and an unrelated public one.
+    {:ok, _} = World.append(world, [{42, "subject", subject}])
+    {:ok, _} = World.append(world, [{42, "secret", String.duplicate("x", 20_000)}])
+    {:ok, name_before} = capture(world)
+    {:ok, _} = World.append(world, [{99, "public", 180}])
+
+    :ok = Erasure.erase(subject)
+    :ok = World.close(name)
+
+    path = Path.join(dir, Store.SQLite.filename(name))
+    size_before = File.stat!(path).size
+
+    assert {:ok, %{tombstoned: 1, reclaimed: reclaimed}} =
+             Compact.erased(name, dir: dir, erased: %{subject => true})
+
+    # It reclaimed most of a 20KB ciphertext.
+    assert reclaimed > 10_000
+    assert File.stat!(path).size < size_before - 10_000
+
+    # Reopen: the public answer is exactly what it was, the erased one is
+    # still :erased, and the id still exists (the row was kept).
+    {:ok, world} = World.open(name, store: {Store.SQLite, dir: dir})
+    on_exit(fn -> World.close(name) end)
+    now = Snapshot.open([world])
+
+    assert Snapshot.value(now, 99, "public") == 180
+    assert Snapshot.value(now, 42, "secret") == :erased
+    assert [_] = Snapshot.find(now, id: 42, attribute: "secret")
+
+    # And an OLD snapshot name — taken before the erasure — still resolves,
+    # and still answers :erased. The guarantee held, in the new engine too.
+    {:ok, then} = Blazie.Snapshot.reopen(name_before)
+    assert Snapshot.value(then, 42, "secret") == :erased
+  end
+
+  test "a migrated world compacts both files, and both answer the same after", %{dir: dir} do
+    name = {:compact_both, System.unique_integer([:positive])}
+    subject = "person-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Keyring.destroy(subject) end)
+
+    # A world that lived as a ledger first...
+    {:ok, world} = World.open(name, store: {Store.File, dir: dir})
+    {:ok, _} = World.append(world, Attribute.seed() ++ Erasure.seed())
+    {:ok, _} = World.append(world, Attribute.define("secret", answers: "any"))
+    {:ok, _} = World.append(world, [{1, "subject", subject}])
+    {:ok, _} = World.append(world, [{1, "secret", String.duplicate("y", 8_000)}])
+    :ok = World.close(name)
+
+    # ...and crossed the one-way door.
+    {:ok, _} = Store.Migrate.ledger_to_sqlite(name, dir: dir)
+
+    :ok = Erasure.erase(subject)
+
+    assert {:ok, %{tombstoned: 2, reclaimed: reclaimed}} =
+             Compact.erased(name, dir: dir, erased: %{subject => true})
+
+    # One hit per layout: the sqlite row and the ledger record both held the
+    # ciphertext, and both gave it back.
+    assert reclaimed > 8_000
+
+    {:ok, world} = World.open(name, store: {Store.SQLite, dir: dir})
+    on_exit(fn -> World.close(name) end)
+    assert Snapshot.value(Snapshot.open([world]), 1, "secret") == :erased
+  end
+
   defp capture(world) do
     {:ok, Snapshot.name(Snapshot.open([world]))}
   end

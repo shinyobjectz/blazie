@@ -141,6 +141,51 @@ defmodule Blazie.SerialisedCheckTest do
     end
   end
 
+  describe "the check sees the whole history, not the resident cache" do
+    test "a uniqueness check is not fooled by eviction" do
+      # Landmine 4, armed: the resident tail is a cache, and a check that
+      # was handed only the cache re-admitted an id whose fact had aged out.
+      # This world keeps two transactions warm; ada's claim is twenty deep.
+      dir = Path.join(System.tmp_dir!(), "check_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+      name = {:check_evicted, System.unique_integer([:positive])}
+
+      {:ok, world} =
+        World.open(name, store: {Blazie.Store.SQLite, dir: dir}, resident: 2)
+
+      on_exit(fn -> World.close(name) end)
+
+      {:ok, _} = World.append(world, [{"ada", "height", 180}])
+      for i <- 1..20, do: {:ok, _} = World.append(world, [{"filler-#{i}", "height", i}])
+
+      assert {:error, [refusal]} =
+               World.append(world, [{"ada", "height", 200}], check: &only_once/2)
+
+      assert refusal.problem == :taken
+    end
+
+    test "and under resident: :none, where the store is the only reading" do
+      dir = Path.join(System.tmp_dir!(), "check_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+      name = {:check_none, System.unique_integer([:positive])}
+
+      {:ok, world} =
+        World.open(name, store: {Blazie.Store.SQLite, dir: dir}, resident: :none)
+
+      on_exit(fn -> World.close(name) end)
+
+      {:ok, _} = World.append(world, [{"ada", "height", 180}])
+
+      assert {:error, [refusal]} =
+               World.append(world, [{"ada", "height", 200}], check: &only_once/2)
+
+      assert refusal.problem == :taken
+      assert {:ok, _} = World.append(world, [{"grace", "height", 175}], check: &only_once/2)
+    end
+  end
+
   describe "the vocabulary check, serialised" do
     test "two writers cannot both narrow an attribute past the facts", %{world: world} do
       {:ok, _} = World.append(world, Attribute.define("tags", answers: "any"))

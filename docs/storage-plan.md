@@ -388,3 +388,28 @@ suffixes: `.ledger` forever (the migration door finds pre-flip disks by
 that exact name) and `.sqlite` as the layout the replicator's pattern
 watches. Memory default unchanged. Suite 888 green, and the conformance +
 default files green under `LEDGER_SYNC=true`.
+
+**P6 (2026-08-15): PASS.** Compaction first, because it is the safe half:
+`Compact.erased/2` now compacts whichever layout is on disk — the `.sqlite`
+as the plan's promised UPDATE-then-VACUUM (the erased set found by decoding
+value blobs in Elixir, `[:safe]` and shape-gated, never by searching values
+in SQL — sealed values stay value-unsearchable even here; the UPDATE lives
+in Compact, not the store, so INSERT stays the only statement `Store.SQLite`
+ever issues), the `.ledger` as the walk-and-rewrite it always was, and a
+migrated world as both, outcomes summed, because the legacy record's erased
+ciphertext is still bytes somebody pays for. Same four properties asserted
+in the new engine: live answers unchanged, erased answers `:erased`, old
+snapshot names resolve, file smaller by the ciphertext. Then residency,
+with landmine 4 dealt with FIRST as the plan ordered: the serialized check
+is now handed `matching/3`'s answer — the whole history through the store —
+not the resident cache, and the tripwire that proves it is a uniqueness
+check refusing an id whose claim was twenty transactions past the resident
+tail. The honest cost, stated: a checked append on a bounded world now
+reads through the store; a wrong admission cost the vocabulary. On top of
+that fix, `resident: :none` is one `tail_of` clause and one `trim` clause —
+the world holds no tail, `oldest` sits just past the current tx, and every
+read is the store's. The conformance suite gained a fourth consumer
+(`SQLite, resident: :none`) answering all the same questions, including
+erasure-reaches-everything; `storage_events_test` unchanged and green — no
+storage event became a fact on the way through. Suite 903 green, and the
+WHOLE suite green under `LEDGER_SYNC=true`, both layouts fsyncing.

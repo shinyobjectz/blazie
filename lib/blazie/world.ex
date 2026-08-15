@@ -487,7 +487,9 @@ defmodule Blazie.World do
   # How many transactions a paged world keeps warm. `resident:` when given —
   # the same knob it always was — and a bound rather than everything when
   # not, because holding everything is the exact behaviour a seeking store
-  # exists to end.
+  # exists to end. `:none` is the far end of the knob: the store owns ALL
+  # reads, the world holds no tail at all.
+  defp tail_of(:none), do: 0
   defp tail_of(:unbounded), do: 1_000
   defp tail_of(count) when is_integer(count), do: count
 
@@ -496,8 +498,16 @@ defmodule Blazie.World do
   # on, in the one process that appends. A check that raises becomes a refusal
   # rather than a crash — this runs where everybody's facts live, and a write
   # that cannot be judged must not be able to destroy the thing it was judging.
+  #
+  # The facts it is handed come through `matching/3`, NOT off the resident
+  # list — the landmine the plan numbered 4: the resident tail is a cache,
+  # and a check that saw only the cache admitted what the evicted history
+  # forbade (a uniqueness check re-admitting an id whose fact had aged out).
+  # Reading the whole history through the store costs a seek per checked
+  # append on a bounded world; a wrong admission costs the vocabulary. Under
+  # `resident: :none` this is the only reading there could be.
   def handle_call({:append, assertions, check}, from, state) do
-    case run_check(check, assertions, Enum.reverse(state.facts)) do
+    case run_check(check, assertions, matching(state, state.tx, [])) do
       :ok -> handle_call({:append, assertions}, from, state)
       {:error, refusals} -> answer({:error, refusals}, state)
     end
@@ -663,6 +673,22 @@ defmodule Blazie.World do
   # Trimming rebuilds the sort orders, so it runs on a high-water mark rather
   # than on every append once the limit is reached — otherwise the cost would
   # land on every write forever.
+
+  # `:none` keeps nothing at all: the store answers every read, so the facts
+  # a write just indexed are dropped the moment the write is done. `oldest`
+  # moves to just past the current transaction — everything at or before it
+  # is "evicted", which is to say, the store's.
+  defp trim(%{resident: :none} = state) do
+    %{
+      state
+      | facts: [],
+        count: 0,
+        by_id: %{},
+        by_attribute: %{},
+        by_value: %{},
+        oldest: if(state.tx == 0, do: nil, else: state.tx + 1)
+    }
+  end
 
   defp trim(%{resident: :unbounded} = state), do: state
 
