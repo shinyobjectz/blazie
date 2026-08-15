@@ -42,6 +42,51 @@ defmodule Blazie.Replication do
   @spec drain(GenServer.server()) :: :ok
   def drain(server), do: GenServer.call(server, :drain, 30_000)
 
+  @doc """
+  Close a world AND remove its local file — disk pressure, when R2 is truth.
+
+  Idle eviction (`evict_after:` on the world) closes the process and keeps
+  the file; this is the harder step, for when the disk itself is the
+  pressure. It refuses unless the replica actually holds the world, because
+  "R2 is truth" is a claim this function must check rather than assume —
+  deleting the only copy is erasure by accident, and erasure here destroys a
+  key, never a file. The evicted world comes back through
+  `restore_if_missing/2` on its next cold open.
+  """
+  @spec evict(term(), Path.t(), keyword()) :: :ok | {:error, refusal()}
+  def evict(name, dir, opts \\ []) do
+    replica_url = Keyword.fetch!(opts, :replica_url)
+
+    if replicated?(name, replica_url) do
+      case Blazie.World.close(name) do
+        ok when ok in [:ok, {:error, :not_found}] ->
+          path = Path.join(dir, Store.SQLite.filename(name))
+          File.rm(path)
+          File.rm(path <> "-wal")
+          File.rm(path <> "-shm")
+          :ok
+
+        {:error, :timeout} ->
+          {:error,
+           %{
+             problem: :world_would_not_close,
+             repair:
+               "#{inspect(name)} did not close within the timeout. Nothing was deleted; " <>
+                 "a file must never be removed from under a live world."
+           }}
+      end
+    else
+      {:error,
+       %{
+         problem: :replica_does_not_hold,
+         repair:
+           "The replica has no LTX for #{inspect(name)}, so its local file is the only " <>
+             "copy. Evicting it would be deletion, not eviction. Let the replicator ship " <>
+             "it first (litestream ltx will show it), then evict."
+       }}
+    end
+  end
+
   @impl true
   def init(opts) do
     dir = Keyword.fetch!(opts, :dir)
@@ -49,30 +94,128 @@ defmodule Blazie.Replication do
     pattern = Keyword.get(opts, :pattern, "*.sqlite")
     sync_interval = Keyword.get(opts, :sync_interval, "1s")
 
-    config_path =
-      Path.join(System.tmp_dir!(), "litestream-#{System.unique_integer([:positive])}.yml")
+    case take_lease(replica_url, opts) do
+      {:ok, lease} ->
+        config_path =
+          Path.join(System.tmp_dir!(), "litestream-#{System.unique_integer([:positive])}.yml")
 
-    File.write!(config_path, """
-    dbs:
-      - dir: #{dir}
-        pattern: "#{pattern}"
-        watch: true
-        replica:
-          url: #{replica_url}
-          sync-interval: #{sync_interval}
-    """)
+        File.write!(config_path, """
+        dbs:
+          - dir: #{dir}
+            pattern: "#{pattern}"
+            watch: true
+            replica:
+              url: #{replica_url}
+              sync-interval: #{sync_interval}
+        """)
 
-    port =
-      Port.open({:spawn_executable, executable!()}, [
-        :binary,
-        :exit_status,
-        args: ["replicate", "-config", config_path],
-        line: 4096
-      ])
+        port =
+          Port.open({:spawn_executable, executable!()}, [
+            :binary,
+            :exit_status,
+            args: ["replicate", "-config", config_path],
+            line: 4096
+          ])
 
-    Process.flag(:trap_exit, true)
-    {:ok, %{port: port, config_path: config_path, draining: nil}}
+        Process.flag(:trap_exit, true)
+        {:ok, %{port: port, config_path: config_path, draining: nil, lease: lease}}
+
+      {:error, refusal} ->
+        {:stop, refusal}
+    end
   end
+
+  # ── the lease fence ──────────────────────────────────────────────────────────
+  #
+  # Two nodes must never both replicate one tenant prefix silently — that is
+  # the netsplit hole (storage plan, landmine 6): node A partitions mid-flush,
+  # node B hydrates from the replica and writes, A returns and flushes stale
+  # WAL over it. This binary was probed for the upstream distributed-leasing
+  # config before this was written and does not expose one (no lease key in
+  # its config schema; the lease symbols in the binary are its Azure SDK's),
+  # so the fence here is the honest minimum: a LEASE object at the replica
+  # root naming the node that replicates this prefix, taken with
+  # write-if-absent semantics where the scheme has them.
+  #
+  # What IS enforced: on `file://` (and any shared filesystem), `:exclusive`
+  # create — a second node's replicator REFUSES to start while another node's
+  # lease stands, with the repair naming the holder. A drain or a clean stop
+  # releases it; a node retaking its own lease (crash, restart) succeeds.
+  #
+  # What is NOT enforced, said plainly: on `s3://` there is no exclusive
+  # create in this module — R2's conditional writes (If-None-Match) are the
+  # production fence, and wiring them through the S3 target is deliberately
+  # not faked here with a read-then-write that would only shrink the race.
+  # An s3 replicator starts unfenced and says so in the log. Sticky routing
+  # (who SHOULD write) remains P4-cluster's open half.
+
+  defp take_lease("file://" <> path, opts) do
+    File.mkdir_p!(path)
+    lease_path = Path.join(path, "LEASE")
+    me = Keyword.get(opts, :node_id, Atom.to_string(node()))
+
+    case :file.open(lease_path, [:write, :exclusive, :binary]) do
+      {:ok, io} ->
+        :ok = :file.write(io, lease_body(me))
+        :ok = :file.close(io)
+        {:ok, lease_path}
+
+      {:error, :eexist} ->
+        case File.read(lease_path) do
+          {:ok, body} ->
+            case holder_of(body) do
+              ^me ->
+                # Our own lease, left by a crash or an unclean stop. Retake it:
+                # the fence is against ANOTHER node, not against our past self.
+                File.write!(lease_path, lease_body(me))
+                {:ok, lease_path}
+
+              other ->
+                {:error,
+                 %{
+                   problem: :lease_held,
+                   repair:
+                     "#{inspect(other)} holds the replication lease for this prefix " <>
+                       "(#{lease_path}). Two nodes must never both replicate one tenant " <>
+                       "prefix — if that node is dead, remove the LEASE object and start " <>
+                       "again; if it is alive, this node must not replicate here."
+                 }}
+            end
+
+          {:error, _} ->
+            {:error,
+             %{
+               problem: :lease_unreadable,
+               repair: "#{lease_path} exists but cannot be read. Resolve it by hand."
+             }}
+        end
+
+      {:error, posix} ->
+        {:error,
+         %{
+           problem: :lease_unwritable,
+           repair: "Could not take the lease at #{lease_path}: #{inspect(posix)}."
+         }}
+    end
+  end
+
+  defp take_lease(_other_scheme, _opts) do
+    require Logger
+
+    Logger.warning(
+      "replication: no lease fence on this replica scheme — R2 conditional writes are " <>
+        "the production fence and are not wired yet; ensure one node per prefix by deployment"
+    )
+
+    {:ok, nil}
+  end
+
+  defp lease_body(me), do: "#{me}\n#{System.system_time(:second)}\n"
+
+  defp holder_of(body), do: body |> String.split("\n") |> List.first()
+
+  defp release_lease(nil), do: :ok
+  defp release_lease(path), do: File.rm(path)
 
   @impl true
   def handle_call(:drain, from, state) do
@@ -88,15 +231,22 @@ defmodule Blazie.Replication do
 
   @impl true
   def handle_info({port, {:exit_status, _status}}, %{port: port} = state) do
-    if state.draining, do: GenServer.reply(state.draining, :ok)
     File.rm(state.config_path)
 
     case state.draining do
-      # A drain is the deliberate end; stop normally.
-      from when from != nil -> {:stop, :normal, %{state | draining: nil}}
+      # A drain is the deliberate end; stop normally. The lease is released
+      # BEFORE the reply — a drained caller must be able to hand the prefix
+      # to another node the moment `drain/1` returns.
+      from when from != nil ->
+        release_lease(state.lease)
+        GenServer.reply(from, :ok)
+        {:stop, :normal, %{state | draining: nil}}
+
       # A crash is not: stop abnormally so the supervisor brings it back and
-      # the WAL catch-up closes the gap.
-      nil -> {:stop, :replicator_died, state}
+      # the WAL catch-up closes the gap. The lease is kept — the restart
+      # retakes its own.
+      nil ->
+        {:stop, :replicator_died, state}
     end
   end
 
@@ -104,12 +254,20 @@ defmodule Blazie.Replication do
   def handle_info(_other, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, state) do
+  def terminate(reason, state) do
     with {:os_pid, os_pid} <- Port.info(state.port, :os_pid) do
       System.cmd("kill", ["-TERM", to_string(os_pid)])
     end
 
     File.rm(state.config_path)
+
+    # The lease is released only by a DELIBERATE end. A crash keeps it on the
+    # replica: the supervisor restarts this process on the same node, and a
+    # node retaking its own lease succeeds — while another node moving in
+    # during the restart window is exactly what the fence exists to refuse.
+    if reason in [:normal, :shutdown] or match?({:shutdown, _}, reason),
+      do: release_lease(state.lease)
+
     :ok
   end
 

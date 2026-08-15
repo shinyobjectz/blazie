@@ -41,7 +41,15 @@ defmodule Blazie.World do
   end
 
   def child_spec(opts) do
-    %{id: {__MODULE__, Keyword.fetch!(opts, :name)}, start: {__MODULE__, :start_link, [opts]}}
+    %{
+      id: {__MODULE__, Keyword.fetch!(opts, :name)},
+      start: {__MODULE__, :start_link, [opts]},
+      # Transient, not permanent: a crash is restarted exactly as before, but
+      # a world that STOPS — closed, or idle-evicted under `evict_after:` —
+      # stays stopped. Permanent would resurrect an evicted world instantly,
+      # which makes eviction a no-op with extra steps.
+      restart: :transient
+    }
   end
 
   @doc """
@@ -395,11 +403,11 @@ defmodule Blazie.World do
         {replayed, resumed, subjects_of(replayed), oldest_of(replayed)}
       end
 
-    {:ok,
-     index(
-       %{
-         name: name,
-         tx: resumed,
+    state =
+      index(
+        %{
+          name: name,
+          tx: resumed,
          facts: Enum.reverse(replayed),
          # Counted rather than measured. `length/1` is O(n), and both the
          # trim check and `resident/1` ran it — the trim check on EVERY
@@ -414,16 +422,24 @@ defmodule Blazie.World do
          # up there meant that once an entity's subject fact was evicted,
          # everything written about it after went down in PLAINTEXT, and
          # destroying the key did not erase it (C4, reproduced).
-         subjects: subjects,
-         oldest: oldest,
-         paged?: paged?,
-         resident: residency,
-         store: store,
-         module: module
-       },
-       replayed
-     )
-     |> trim()}
+          subjects: subjects,
+          oldest: oldest,
+          paged?: paged?,
+          resident: residency,
+          store: store,
+          module: module,
+          # How long a world with nobody talking to it stays open. Idle
+          # eviction closes the process and keeps the file — the same close
+          # `World.close/1` performs, arrived at by silence instead of by
+          # name. `:infinity` when nobody asked, which is every world that
+          # existed before the option did.
+          evict_after: Keyword.get(opts, :evict_after, :infinity)
+        },
+        replayed
+      )
+      |> trim()
+
+    {:ok, state, state.evict_after}
   end
 
   # How many transactions a paged world keeps warm. `resident:` when given —
@@ -441,7 +457,7 @@ defmodule Blazie.World do
   def handle_call({:append, assertions, check}, from, state) do
     case run_check(check, assertions, Enum.reverse(state.facts)) do
       :ok -> handle_call({:append, assertions}, from, state)
-      {:error, refusals} -> {:reply, {:error, refusals}, state}
+      {:error, refusals} -> answer({:error, refusals}, state)
     end
   end
 
@@ -464,18 +480,18 @@ defmodule Blazie.World do
         subjects: remember_subjects(state.subjects, facts)
     }
 
-    {:reply, {:ok, tx}, state |> index(facts) |> trim()}
+    answer({:ok, tx}, state |> index(facts) |> trim())
   end
 
-  def handle_call(:tx, _from, state), do: {:reply, state.tx, state}
-  def handle_call(:resident, _from, state), do: {:reply, state.count, state}
-  def handle_call(:store_module, _from, state), do: {:reply, state.module, state}
+  def handle_call(:tx, _from, state), do: answer(state.tx, state)
+  def handle_call(:resident, _from, state), do: answer(state.count, state)
+  def handle_call(:store_module, _from, state), do: answer(state.module, state)
 
   def handle_call({:raw_at, tx}, _from, state) do
     # Through `matching/3` with the empty pattern, so a paged world's evicted
     # transactions answer too — reading only the resident tail silently
     # shortened history the day the world stopped holding all of it.
-    {:reply, matching(state, tx, []), state}
+    answer(matching(state, tx, []), state)
   end
 
   def handle_call(:store_stats, _from, state) do
@@ -484,11 +500,11 @@ defmodule Blazie.World do
         do: state.module.stats(state.store),
         else: %{}
 
-    {:reply, stats, state}
+    answer(stats, state)
   end
 
   def handle_call({:find_at, tx, pattern}, _from, state) do
-    {:reply, Enum.map(matching(state, tx, pattern), &Erasure.reveal_fact(&1, state.name)), state}
+    answer(Enum.map(matching(state, tx, pattern), &Erasure.reveal_fact(&1, state.name)), state)
   end
 
   # Not revealed: an id is never sealed, and revealing a value here would be
@@ -500,7 +516,7 @@ defmodule Blazie.World do
   # handed the finished answer instead of building it under a cap.
   def handle_call({:ids_at, tx, pattern}, _from, state) do
     ids = state |> matching(tx, pattern) |> Enum.map(& &1.id) |> Enum.uniq() |> Enum.sort()
-    {:reply, ids, state}
+    answer(ids, state)
   end
 
   def handle_call({:facts_at, tx}, _from, state) do
@@ -509,8 +525,21 @@ defmodule Blazie.World do
       |> matching(tx, [])
       |> Enum.map(&Erasure.reveal_fact(&1, state.name))
 
-    {:reply, facts, state}
+    answer(facts, state)
   end
+
+  # Every reply re-arms the idle clock. `:infinity` for a world nobody asked
+  # to evict, which is a plain reply with a longer name.
+  defp answer(reply, state), do: {:reply, reply, state, state.evict_after}
+
+  @impl true
+  # `evict_after:` elapsed with no reads and no writes: close the same way
+  # `World.close/1` closes — terminate runs, the store is released, the file
+  # stays. `{:shutdown, _}` so the transient child is not restarted, and so a
+  # supervisor report is not written for a world that merely fell asleep.
+  def handle_info(:timeout, state), do: {:stop, {:shutdown, :idle}, state}
+
+  def handle_info(_other, state), do: {:noreply, state, state.evict_after}
 
   @impl true
   def terminate(_reason, state), do: state.module.close(state.store)

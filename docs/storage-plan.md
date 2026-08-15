@@ -340,3 +340,30 @@ said out loud: the binary is a pinned v0.5-line dev build but `meta-dir` is
 not set (the daemon defaults it beside the db), and the R2 request-budget
 math waits for a real tenant count. Suite 878 green, and green under
 `LEDGER_SYNC=true`.
+
+**P4-cluster (2026-08-15): PASS, with the fence's limits stated.** Hydrate
+and evict are both lifecycles now. Idle eviction is the World's own:
+`evict_after:` rides the GenServer timeout, a world nobody has talked to
+closes itself exactly the way `World.close/1` closes it — the process ends,
+the file stays, the next open answers everything (worlds became `:transient`
+children for this, which changes nothing about crash-restarts and everything
+about staying evicted). Disk pressure is `Replication.evict/3`: close AND
+delete the local file — REFUSED unless the replica actually holds the
+world's LTX, because "R2 is truth" is a claim this function checks rather
+than assumes, and deleting the only copy would be erasure by accident. The
+round trip is tested: evicted, then hydrated back through
+`restore_if_missing/2` with its facts intact (and probed first: a local
+deletion does NOT delete replica data — the daemon logs an unregister error
+and the LTX stays). The lease: this binary was probed for the upstream
+distributed-leasing config the survey promised and DOES NOT EXPOSE IT (no
+lease key in its config schema; the lease symbols in the binary belong to
+its Azure SDK), so the fence is the honest minimum — a LEASE object at the
+replica prefix, exclusive-create on `file://`, a second node refused with
+the holder named, released on drain before the caller's `drain/1` returns,
+kept across a crash so only the same node retakes it. NOT enforced, said
+plainly: `s3://` starts unfenced with a logged warning — R2's conditional
+writes are the production fence and are not wired; faking them with
+read-then-write would only shrink the race, not close it. Sticky
+tenant→node routing (who SHOULD write; the lease is who MAY) is the
+remaining piece of this phase and is deliberately not started. Suite 884
+green, conformance green under `LEDGER_SYNC=true`.
