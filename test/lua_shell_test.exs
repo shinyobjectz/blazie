@@ -220,7 +220,7 @@ defmodule Blazie.LuaShellTest do
   describe "S2 — substitution and arithmetic" do
     test "$(...) substitutes a command's output" do
       files = %{"n.txt" => "a\nb\nc\n"}
-      {out, _} = Shell.run("echo lines=$(wc -l n.txt)", files)
+      {out, _} = Shell.run("echo lines=$(cat n.txt | wc -l)", files)
       assert out == "lines=3"
     end
 
@@ -237,7 +237,7 @@ defmodule Blazie.LuaShellTest do
       files = %{"n.txt" => "1\n2\n3\n4\n"}
 
       {out, _} =
-        Shell.run("if [ $(wc -l n.txt) -gt 3 ]; then echo big; else echo small; fi", files)
+        Shell.run("if [ $(cat n.txt | wc -l) -gt 3 ]; then echo big; else echo small; fi", files)
 
       assert out == "big"
     end
@@ -301,7 +301,8 @@ defmodule Blazie.LuaShellTest do
 
     test "xargs appends stdin words" do
       {out, _} = Shell.run("echo a.txt | xargs wc -l", @s3_files)
-      assert out == "3"
+      # Real wc names the file beside the count — the differential gate proved it.
+      assert out == "3 a.txt"
     end
 
     test "grep -E and -n" do
@@ -371,7 +372,7 @@ defmodule Blazie.LuaShellTest do
 
     test "** crosses slashes" do
       {out, _} = Shell.run("wc -l **/*.txt", @s4_files)
-      assert out == "1"
+      assert out == "1 proj/src/a.txt"
     end
 
     test "cp, stat, du" do

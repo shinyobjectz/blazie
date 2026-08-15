@@ -62,7 +62,7 @@ defmodule Blazie.Lua.Shell do
     "tail" => "tail [-N | -n N] [KEY...] — last lines",
     "tee" => "tee [-a] KEY... — write stdin to keys and pass it through",
     "test" => "test / [ EXPR ] — -f KEY, -z/-n STR, A = B, A != B, N -eq/-ne/-lt/-le/-gt/-ge M",
-    "tr" => "tr [-d] SET1 [SET2] — translate or delete characters (a-z ranges)",
+    "tr" => "tr [-d|-s] SET1 [SET2] — translate, delete, or squeeze characters (a-z ranges)",
     "true" => "true — succeed",
     "uniq" => "uniq [-c] — collapse repeated adjacent lines",
     "upper" => "upper — stdin uppercased",
@@ -821,7 +821,7 @@ defmodule Blazie.Lua.Shell do
     {stdin |> lines() |> Enum.map_join("", &(String.reverse(&1) <> "\n")), "", 0, state}
   end
 
-  defp builtin("ls", _args, _stdin, state) do
+  defp builtin("ls", [], _stdin, state) do
     keys =
       state.files
       |> Map.keys()
@@ -829,6 +829,19 @@ defmodule Blazie.Lua.Shell do
       |> Enum.sort()
 
     {Enum.map_join(keys, "", &(&1 <> "\n")), "", 0, state}
+  end
+
+  defp builtin("ls", args, _stdin, state) do
+    {out, err} =
+      Enum.reduce(args, {"", ""}, fn key, {o, e} ->
+        if Map.has_key?(state.files, resolve(state.cwd, key)) do
+          {o <> key <> "\n", e}
+        else
+          {o, e <> "ls: #{key}: no such key\n"}
+        end
+      end)
+
+    {out, err, if(err == "", do: 0, else: 1), state}
   end
 
   defp builtin("cat", [], stdin, state), do: {stdin, "", 0, state}
@@ -879,36 +892,70 @@ defmodule Blazie.Lua.Shell do
         if matcher == nil do
           {"", "grep: bad pattern\n", 2, state}
         else
-          hits =
-            text
-            |> lines()
-            |> Enum.with_index(1)
-            |> Enum.filter(fn {line, _n} -> matcher.(line) != invert? end)
+          grep_one = fn text, prefix ->
+            hits =
+              text
+              |> lines()
+              |> Enum.with_index(1)
+              |> Enum.filter(fn {line, _n} -> matcher.(line) != invert? end)
 
-          out =
-            cond do
-              count? -> "#{length(hits)}\n"
-              number? -> Enum.map_join(hits, "", fn {l, n} -> "#{n}:#{l}\n" end)
-              true -> Enum.map_join(hits, "", fn {l, _} -> l <> "\n" end)
-            end
+            out =
+              cond do
+                count? -> "#{prefix}#{length(hits)}\n"
+                number? -> Enum.map_join(hits, "", fn {l, n} -> "#{prefix}#{n}:#{l}\n" end)
+                true -> Enum.map_join(hits, "", fn {l, _} -> "#{prefix}#{l}\n" end)
+              end
 
-          {out, err, if(hits == [], do: 1, else: 0), state}
+            {out, length(hits)}
+          end
+
+          case sources do
+            # Real grep names the file per line (and per count) with >1 file.
+            many when length(many) > 1 ->
+              {out, total} =
+                Enum.reduce(many, {"", 0}, fn key, {o, n} ->
+                  content = Map.get(state.files, resolve(state.cwd, key), "")
+                  {piece, hits} = grep_one.(content, key <> ":")
+                  {o <> piece, n + hits}
+                end)
+
+              {out, err, if(total == 0, do: 1, else: 0), state}
+
+            _ ->
+              {out, hits} = grep_one.(text, "")
+              {out, err, if(hits == 0, do: 1, else: 0), state}
+          end
         end
     end
   end
 
   defp builtin("wc", args, stdin, state) do
     {flags, sources} = Enum.split_with(args, &String.starts_with?(&1, "-"))
-    {text, err} = text_or_stdin(sources, stdin, state)
 
-    out =
+    measure = fn text ->
       cond do
-        "-w" in flags -> "#{length(String.split(text, ~r/\s+/, trim: true))}\n"
-        "-c" in flags -> "#{byte_size(text)}\n"
-        true -> "#{length(lines(text))}\n"
+        "-w" in flags -> length(String.split(text, ~r/\s+/, trim: true))
+        "-c" in flags -> byte_size(text)
+        true -> length(lines(text))
       end
+    end
 
-    {out, err, 0, state}
+    case sources do
+      [] ->
+        {"#{measure.(stdin)}\n", "", 0, state}
+
+      keys ->
+        # Real wc names the file beside the count (padding is the terminal's).
+        {out, err} =
+          Enum.reduce(keys, {"", ""}, fn key, {o, e} ->
+            case Map.fetch(state.files, resolve(state.cwd, key)) do
+              {:ok, content} -> {o <> "#{measure.(content)} #{key}\n", e}
+              :error -> {o, e <> "wc: #{key}: no such key\n"}
+            end
+          end)
+
+        {out, err, if(err == "", do: 0, else: 1), state}
+    end
   end
 
   defp builtin("head", args, stdin, state), do: headtail(args, stdin, state, &Enum.take(&1, &2))
@@ -1068,6 +1115,19 @@ defmodule Blazie.Lua.Shell do
 
   defp builtin("tr", args, stdin, state) do
     case args do
+      ["-s", set] ->
+        chars = tr_set(set) |> MapSet.new()
+
+        out =
+          stdin
+          |> String.graphemes()
+          |> Enum.chunk_by(fn g -> if MapSet.member?(chars, g), do: g, else: :other end)
+          |> Enum.map_join("", fn [g | _] = run ->
+            if MapSet.member?(chars, g), do: g, else: Enum.join(run)
+          end)
+
+        {out, "", 0, state}
+
       ["-d", set] ->
         chars = tr_set(set) |> MapSet.new()
 
@@ -1095,6 +1155,20 @@ defmodule Blazie.Lua.Shell do
   end
 
   defp builtin("cut", args, stdin, state) do
+    {args, stdin} =
+      case args do
+        ["-d", d, "-f", f | sources] when sources != [] ->
+          {text, _e} = text_or_stdin(sources, stdin, state)
+          {["-d", d, "-f", f], text}
+
+        ["-c", r | sources] when sources != [] ->
+          {text, _e} = text_or_stdin(sources, stdin, state)
+          {["-c", r], text}
+
+        other ->
+          {other, stdin}
+      end
+
     case args do
       ["-d", delim, "-f", fields] ->
         wanted =
@@ -1129,9 +1203,12 @@ defmodule Blazie.Lua.Shell do
     end
   end
 
-  defp builtin("nl", _args, stdin, state) do
+  defp builtin("nl", args, stdin, state) do
+    {text, err} = text_or_stdin(args, stdin, state)
+    _ = err
+
     out =
-      stdin
+      text
       |> lines()
       |> Enum.with_index(1)
       |> Enum.map_join("", fn {l, n} ->

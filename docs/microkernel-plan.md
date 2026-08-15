@@ -138,3 +138,19 @@ old contract exactly. Suite 957 green. (A full disk mid-verification
 produced 32 phantom failures — all storage tests writing tmp files; all
 vanished with the space. Noted because a lesser suite would have eaten a
 false regression.)
+
+**S6 (2026-08-15): PASS — the conformance gate is real and it bit.**
+`docs/SHELLSPEC.md` states the contract: the model (flat map, prefix-cwd,
+determinism-by-`at`, capped output), the bash-conformant grammar subset, the
+bash-conformant tool subset, and — equally binding — the "this shell's own"
+list. `test/shell_bash_differential_test.exs` runs 52 corpus scripts under
+`/bin/bash` (files materialized to a tmpdir) and under the shell (files as
+the map), asserting byte-identical stdout. First run found NINE divergences
+and every one resolved the honest way: five real conformance bugs FIXED
+(cut and nl ignored file arguments; grep with multiple files must prefix
+`file:` and count per-file; `ls KEY` must fail on a missing key; `wc FILE`
+prints the filename beside the count — which then corrected three of our
+own newer tests that had encoded the lazier behavior), one missing tool
+implemented (`tr -s`), and three corpus items normalized with the reason
+recorded (BSD wc's column padding, macOS lacking `tac`, `printf` not in
+subset). 52/52 identical; suite green.
