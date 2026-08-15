@@ -575,3 +575,29 @@ guest: `sh("for f in a b c; do echo $f; done | wc -l")` → `"3"` — C
 grammar driving an Elixir program over the shared VFS, inside the guest's
 deadline and heap, with the caller's process state snapshot-restored
 around every run. 17 shell + 4 bridge tests; suite 926 green.
+
+**TL2 (2026-08-15): PASS — the busybox road is open, and the first real
+program is on it.** `sed` — minised (github.com/tar-mirror/minised,
+BSD-3-Clause, license-audited), 1.8k lines of real C — compiled to
+wasm32-wasip1 with the vendored wasi-sdk ON THE FIRST TRY, vendored in
+priv/wasm/programs with provenance, and registered by filename into
+`:tl_programs` (decoded once per node; the dispatch already stepped aside
+for registry names, so the runtime work was TL1's). The exit chain runs as
+one shell line: `for f in alpha beta; do echo $f; done | sed s/a/A/ |
+wc -l` → `"2"` — C grammar (washy) driving a wasm program (minised) into
+an Elixir program (wc), three species over one VFS inside the Lua guest's
+fence. The shelf now names registered programs, so the refusal telemetry
+keeps collecting demand for the next applet; the per-applet recipe is
+proven at four steps (compile · vendor+provenance · drop in programs/ ·
+one pipeline test) with zero code changes per entry. Programs are
+stdin→stdout for now (wasi-libc has no cwd for bare file args) — noted at
+the registry. Suite 929 green.
+
+**soc-rosg (2026-08-15): FIXED upstream (c4aa0fe).** Compiler 10 (OTP 29)
+inserted a module-level Anno map into the beam-asm module tuple;
+tiny-lasers' asm lane now builds the RUNNING compiler's shape, functionally
+probed once (never a version table) and cached — a future re-shape fails at
+the probe, loudly. Wasm lane fully green on OTP 29 (asm suites 96/96,
+washy's interp≡asm byte-exact table intact); the ASM perf tier is
+UN-parked. Remaining OTP 29 reds upstream are the JS lane (porffor/F2) —
+outside blazie's scope.

@@ -113,6 +113,23 @@ defmodule Blazie.LuaShellTest do
     end
   end
 
+  describe "the wasm species — real programs as registry entries (TL2)" do
+    test "real sed runs mid-pipe — minised, compiled C, interpreted as BEAM code" do
+      {out, _} = Shell.run("echo hello world | sed s/hello/goodbye/", %{})
+      assert out == "goodbye world"
+    end
+
+    test "the exit chain: C grammar, wasm program, Elixir program, one line" do
+      {out, _} = Shell.run("for f in alpha beta; do echo $f; done | sed s/a/A/ | wc -l", %{})
+      assert out == "2"
+    end
+
+    test "sed shows up on the shelf" do
+      {out, _} = Shell.run("curl http://evil", %{})
+      assert out =~ "sed"
+    end
+  end
+
   describe "granted to the guest" do
     test "sh() speaks the full grammar inside the Lua guest — the TL1 exit" do
       {:ok, answer} =

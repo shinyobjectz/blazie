@@ -36,6 +36,7 @@ defmodule Blazie.Lua.Shell do
   # Every process-dict key a washy run touches — snapshotted and restored so
   # the caller's state (the Lua guest's own keys included) survives the run.
   @tl_keys [
+    :tl_programs,
     :tl_vfs,
     :tl_backend,
     :tl_argv,
@@ -71,6 +72,7 @@ defmodule Blazie.Lua.Shell do
 
     try do
       Process.put(:tl_backend, :map)
+      Process.put(:tl_programs, programs())
       Process.put(:tl_vfs, files)
       Process.put(:tl_argv, ["sh", expand_globs(line, files)])
       Process.put(:tl_stdin, "")
@@ -91,6 +93,31 @@ defmodule Blazie.Lua.Shell do
       for {key, value} <- saved do
         if value == nil, do: Process.delete(key), else: Process.put(key, value)
       end
+    end
+  end
+
+  # The registered wasm programs — the TL2 road: real compiled tools, vendored
+  # in priv/wasm/programs with provenance, each earning its entry from the
+  # shelf-refusal telemetry. Decoded once per node. Today: sed (minised,
+  # BSD-3-Clause). A program reads stdin and writes stdout; file arguments
+  # are the applet's own affair and unresolved for now (no cwd in wasi-libc)
+  # — pipe into it, which is what a shell line does anyway.
+  defp programs do
+    case :persistent_term.get({__MODULE__, :programs}, nil) do
+      nil ->
+        dir = Path.join(:code.priv_dir(:blazie), "wasm/programs")
+
+        registry =
+          for path <- Path.wildcard(Path.join(dir, "*.wasm")), into: %{} do
+            {:ok, mod} = Wasm.decode(File.read!(path))
+            {Path.basename(path, ".wasm"), mod}
+          end
+
+        :persistent_term.put({__MODULE__, :programs}, registry)
+        registry
+
+      registry ->
+        registry
     end
   end
 
@@ -126,7 +153,9 @@ defmodule Blazie.Lua.Shell do
         :not_host
 
       true ->
-        {"#{verb}: not a builtin. This shell is #{Enum.join(@c_builtins ++ @host_builtins, ", ")} " <>
+        shelf = @c_builtins ++ @host_builtins ++ Map.keys(Process.get(:tl_programs) || %{})
+
+        {"#{verb}: not a builtin. This shell is #{Enum.join(Enum.sort(shelf), ", ")} " <>
            "over the workspace — pipes, for/if/while and > work; processes and the machine " <>
            "do not exist here.\n", 127}
     end
