@@ -84,7 +84,8 @@ defmodule Blazie.MixProject do
       # floats (docs/storage-plan.md, the TL track).
       {:tiny_lasers,
        git: "https://github.com/workbooks-sh/tiny-lasers.git",
-       ref: "4b4bd60f52d609447ab88a3b7f472d44cb4f422c"},
+       # washy v0.1: blocks pipe+redirect onward, bare /work paths, grep -c
+       ref: "9be5072"},
       # The Elixir client, tested here against a real HTTP round trip so the
       # SDK and the surface cannot drift apart unnoticed.
       {:blazie_client, path: "clients/elixir", only: :test}

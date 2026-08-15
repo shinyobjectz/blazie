@@ -76,7 +76,56 @@ defmodule Blazie.LuaShellTest do
     end
   end
 
+  describe "the grammar is C's — washy fronts the line (TL1)" do
+    test "the exit criterion: a for-loop pipes into a host program" do
+      {out, _} = Shell.run("for f in a b c; do echo $f; done | wc -l", %{})
+      assert out == "3"
+    end
+
+    test "variables and if/else run" do
+      {out, _} = Shell.run("X=world; if true; then echo hello $X; else echo bye; fi", %{})
+      assert out == "hello world"
+    end
+
+    test "&& and || short-circuit" do
+      {out, _} = Shell.run("false && echo no; true && echo yes || echo never", %{})
+      assert out == "yes"
+    end
+
+    test "a cross-species pipeline: Elixir cat into C upper" do
+      {out, _} = Shell.run("cat in.txt | upper", %{"in.txt" => "hello\n"})
+      assert out == "HELLO"
+    end
+
+    test "a block's output redirects to a key" do
+      {_, files} = Shell.run("for f in a b; do echo $f; done > out.txt", %{})
+      assert files["out.txt"] == "a\nb\n"
+    end
+
+    test "the caller's process state survives the run" do
+      Process.put(:tl_vfs, :sentinel)
+      Process.put(:blazie_workspace, %{"mine" => "untouched"})
+      {_, _} = Shell.run("echo hi", %{})
+      assert Process.get(:tl_vfs) == :sentinel
+      assert Process.get(:blazie_workspace) == %{"mine" => "untouched"}
+      Process.delete(:tl_vfs)
+      Process.delete(:blazie_workspace)
+    end
+  end
+
   describe "granted to the guest" do
+    test "sh() speaks the full grammar inside the Lua guest — the TL1 exit" do
+      {:ok, answer} =
+        Lua.workspace(
+          """
+          return sh("for f in a b c; do echo $f; done | wc -l")
+          """,
+          %{}
+        )
+
+      assert answer.value == "3"
+    end
+
     test "sh() runs a pipeline and its redirect lands in the workspace" do
       {:ok, answer} =
         Lua.workspace(

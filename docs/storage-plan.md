@@ -556,3 +556,22 @@ ONE table of what a shell line can invoke — blazie's Elixir builtins
 C, wasm modules (eventually busybox applets) beside them, `sh()` in the
 Lua microkernel fronting washy for grammar. One shell, three species of
 program (C-compiled, Elixir, someday busybox), one VFS, one fence.
+
+**TL1 (2026-08-15): PASS — the registry unified; the agent's shell is C
+grammar over host tools.** The topology settled itself once the probes ran:
+washy FRONTS `sh()` (the C owns grammar — pipes, `;`, `&&`/`||`, `$VAR`,
+`for`/`while`/`if`, blocks piping or redirecting onward), the Elixir
+builtins ride tiny-lasers' own `:tl_host_dispatch` seam (designed in
+upstream as "the agent shell's seam" — the planned `{:host, fun}` clause
+was never needed), `:tl_programs` names step aside for wasm modules (the
+TL2 road), and anything else answers the shelf. Globs expand host-side
+before the C sees the line (the host knows the map, the C knows the
+grammar). Three upstream washy fixes came out of the wiring, each pushed
+with tests (370a0e2, 204f644, 9be5072): blocks pipe AND redirect onward,
+bare paths resolve under /work (wasi-libc has no cwd), grep learns -c.
+The ENTIRE pre-existing `sh()` contract passed unchanged on the
+washy-backed shell first run; the exit criterion runs inside the Lua
+guest: `sh("for f in a b c; do echo $f; done | wc -l")` → `"3"` — C
+grammar driving an Elixir program over the shared VFS, inside the guest's
+deadline and heap, with the caller's process state snapshot-restored
+around every run. 17 shell + 4 bridge tests; suite 926 green.
