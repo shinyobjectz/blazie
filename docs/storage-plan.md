@@ -281,3 +281,20 @@ refusing to double: a target already holding transactions refuses with the
 repair; a missing ledger refuses with the repair. The ledger is untouched —
 the read-only legacy record, `Store.Record` alive to read it forever. 5
 tests; suite 868 green.
+
+**P3 (2026-08-15): PASS.** The vendor left the way the moduledoc always said
+one would — the file deleted, no word, no attribute, no space touched — and
+the doc now records it happened. What the delete was hiding, done: the Exact
+holder is SUPERVISED with the supervisor as its only starter (the first fix
+kept the lazy start as a fallback and the two raced — a caller could take
+the name inside the restart window and the supervisor then looped on
+already_started until it took the tree down; single ownership closes both
+that and the original silently-empty-tables failure); the exact provider is
+the configured default (`config :blazie, :index`), so `Index.nearest` works
+with no provider option; and derived-and-disposable is now proven where it
+matters — a dead index comes back from the facts via the maintaining job,
+tested across a holder kill. The parity gate survives the delete: a
+test-local `HttpProvider` over the `Wire` fixture keeps "an HTTP vendor is a
+module, same answers" proven with zero vendor code in the tree — and is the
+template file for the day a whale tenant brings one back. Deferred
+live-tripwire closed as moot. Suite 871 green.

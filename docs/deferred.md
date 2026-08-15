@@ -16,15 +16,6 @@ readings-scale world can also get by sharding on a time window (topology rule
 RAM — measured, not guessed. The seam is ready: it is another `Store`
 behaviour implementation, and `Store.Paged`'s moduledoc names it.
 
-## The Turbopuffer live tripwire
-
-`Index.Turbopuffer` is tested against an in-suite server speaking the exact
-wire shape it speaks, so drift in the module is caught. **Why it waits:** a
-live-tagged test needs a real Turbopuffer namespace and credentials, which
-are a vendor account decision. **What un-defers it:** those credentials —
-then a `@tag :live` test that upserts and queries a real namespace under a
-throwaway prefix, the same shape `model_live_test.exs` has for models.
-
 ## A real UpCloud dispatch vendor module
 
 `Blazie.Dispatch` proves the fire-and-ack protocol and the one-world

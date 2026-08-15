@@ -31,10 +31,13 @@ defmodule Blazie.Index do
 
   ## Vendors are not vocabulary
 
-  A space is `potion_256`, never `turbopuffer_anything`. The vendor appears
-  in exactly one place: the configured provider module and its options
-  (`config :blazie, :index, {Blazie.Index.Turbopuffer, opts}`), and deleting
-  that module touches no word, no attribute, and no space.
+  A space is `potion_256`, never `somevendor_anything`. A vendor appears in
+  exactly one place — the configured provider module and its options
+  (`config :blazie, :index, {SomeVendor, opts}`) — and deleting that module
+  touches no word, no attribute, and no space. This is not hypothetical:
+  the Turbopuffer module left this tree exactly that way (2026-08-15,
+  docs/storage-plan.md P3), and the built-in exact provider became the
+  configured default.
   """
 
   alias Blazie.{Attribute, Job, Snapshot, Symbol}
@@ -275,20 +278,43 @@ defmodule Blazie.Index.Exact do
     end
   end
 
-  # The tables' owner: one unlinked process for the node, alive until the
-  # node is not. Created inside the Agent so the AGENT owns them, whoever
-  # asked first.
-  defp holder do
+  # The tables' owner. SUPERVISED, and the supervisor is the ONLY starter.
+  # The first version was an unlinked Agent started by whoever touched an
+  # index first — when it died, every table died with it and the next search
+  # quietly answered [] over a rebuilt empty one. The second version kept
+  # that lazy start as a fallback beside the supervised child, and the two
+  # raced: a caller could start the name inside the supervisor's restart
+  # window, the restart then looped on already_started until it took the
+  # tree down. One owner, so neither failure can happen; a caller that
+  # arrives inside the restart window waits for the supervisor rather than
+  # competing with it.
+  defp holder, do: holder(200)
+
+  defp holder(0) do
+    raise "Blazie.Index.Exact.Holder is not running. It lives in the blazie " <>
+            "application's supervision tree — start the application (or add " <>
+            "Blazie.Index.Exact.holder_spec() to yours)."
+  end
+
+  defp holder(retries) do
     case Process.whereis(__MODULE__.Holder) do
       nil ->
-        case Agent.start(fn -> :ok end, name: __MODULE__.Holder) do
-          {:ok, pid} -> pid
-          {:error, {:already_started, pid}} -> pid
-        end
+        Process.sleep(5)
+        holder(retries - 1)
 
       pid ->
         pid
     end
+  end
+
+  @doc false
+  # The supervised child: an Agent whose only job is owning ETS tables for
+  # the node's lifetime, restarted by the tree rather than by luck.
+  def holder_spec do
+    %{
+      id: __MODULE__.Holder,
+      start: {Agent, :start_link, [fn -> :ok end, [name: __MODULE__.Holder]]}
+    }
   end
 
   defp name(opts, space) do

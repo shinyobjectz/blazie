@@ -19,6 +19,11 @@ config :logger, level: if(config_env() == :test, do: :warning, else: :info)
 # back from a restore and erasure has to be irreversible.
 config :blazie, key_dir: if(config_env() == :test, do: "tmp/test_keys", else: "priv/keys")
 
+# The vector index's default provider: the built-in exact one — every score it
+# answers is the true score, tenancy rides the space's own scoping, and a
+# vendor is a per-space opt-in through the same seam, not a default.
+config :blazie, :index, {Blazie.Index.Exact, []}
+
 # Vitals take a reading on this cadence. Unset means the job does not run at
 # all, which is right for tests and wrong for anything watching itself.
 config :blazie, vitals_every: if(config_env() == :test, do: 3600, else: 60)

@@ -4,9 +4,10 @@ defmodule Blazie.IndexTest do
 
   The gate runs ONE capability — kind-scoped retrieval over a corpus of
   symbols — through two providers: the exact node-local index (whose every
-  score is the true score, so it is also the baseline), and the Turbopuffer
-  module speaking real HTTP to a server implementing exactly the wire shape
-  the module speaks. Same test body, same corpus, same answers: the vendor
+  score is the true score, so it is also the baseline), and a test-local HTTP
+  module speaking real HTTP to a server implementing the same wire shape —
+  the proof that a remote vendor is a module, kept alive with no vendor in
+  the tree. Same test body, same corpus, same answers: the vendor
   is swappable because nothing above the behaviour can tell them apart.
   """
   use ExUnit.Case, async: false
@@ -16,7 +17,8 @@ defmodule Blazie.IndexTest do
 
   # A tiny wire-accurate vendor: holds upserts in an Agent, answers queries
   # with exact cosine over what it holds, speaks the same paths, bodies and
-  # `dist` dialect the module does. What it pins is the MODULE's wire format.
+  # `dist` dialect an object-storage vector vendor speaks. It is the fixture
+  # the seam's swappable claim is proven against.
   defmodule Wire do
     import Plug.Conn
 
@@ -91,7 +93,64 @@ defmodule Blazie.IndexTest do
     {Index.Exact, prefix: "t#{System.unique_integer([:positive])}_"}
   end
 
-  defp turbopuffer_provider do
+  # A remote vendor, reduced to what it structurally is: an HTTP server that
+  # upserts and queries. `HttpProvider` is a test-local `Blazie.Index`
+  # implementation over the `Wire` shape — it exists so the seam's claim
+  # ("an HTTP vendor is a module, and the same answers come back") stays
+  # PROVEN now that no production vendor module ships. When a real vendor
+  # returns for some whale-tenant space, this is the shape of its file.
+  defmodule HttpProvider do
+    @behaviour Blazie.Index
+
+    @impl true
+    def upsert(opts, space, rows) do
+      body = %{
+        "upserts" =>
+          Enum.map(rows, fn {id, vector, meta} ->
+            %{"id" => to_string(id), "vector" => vector, "attributes" => meta}
+          end)
+      }
+
+      {:ok, _} = post(opts, "/v1/namespaces/#{ns(opts, space)}", body)
+      :ok
+    end
+
+    @impl true
+    def search(opts, space, vector, k, filter) do
+      filters = Map.new(filter, fn {key, value} -> {key, [["Eq", value]]} end)
+      body = %{"vector" => vector, "top_k" => k, "filters" => filters}
+
+      {:ok, %{"results" => results}} =
+        post(opts, "/v1/namespaces/#{ns(opts, space)}/query", body)
+
+      {:ok, Enum.map(results, fn %{"id" => id, "dist" => dist} -> {id, 1.0 - dist} end)}
+    end
+
+    @impl true
+    def drop(opts, space) do
+      url = ~c"#{Keyword.fetch!(opts, :endpoint)}/v1/namespaces/#{ns(opts, space)}"
+      {:ok, _} = :httpc.request(:delete, {url, []}, [], [])
+      :ok
+    end
+
+    defp post(opts, path, body) do
+      url = ~c"#{Keyword.fetch!(opts, :endpoint)}#{path}"
+
+      {:ok, {{_, 200, _}, _, answer}} =
+        :httpc.request(
+          :post,
+          {url, [], ~c"application/json", Jason.encode!(body)},
+          [],
+          []
+        )
+
+      {:ok, Jason.decode!(to_string(answer))}
+    end
+
+    defp ns(opts, space), do: "#{Keyword.get(opts, :prefix, "")}#{space}"
+  end
+
+  defp http_provider do
     {:ok, agent} = Agent.start_link(fn -> %{} end)
 
     server =
@@ -103,10 +162,8 @@ defmodule Blazie.IndexTest do
 
     {:ok, {_addr, port}} = ThousandIsland.listener_info(server)
 
-    {Index.Turbopuffer,
-     endpoint: "http://127.0.0.1:#{port}",
-     key: "test-key",
-     prefix: "t#{System.unique_integer([:positive])}_"}
+    {HttpProvider,
+     endpoint: "http://127.0.0.1:#{port}", prefix: "t#{System.unique_integer([:positive])}_"}
   end
 
   test "a space without a role refuses everything", %{world: world} do
@@ -162,7 +219,7 @@ defmodule Blazie.IndexTest do
       snapshot = Snapshot.open([world])
       query = [:math.cos(0.7), :math.sin(0.7)]
 
-      for provider <- [exact_provider(), turbopuffer_provider()] do
+      for provider <- [exact_provider(), http_provider()] do
         {module, opts} = provider
         :ok = module.upsert(opts, "gate_2", corpus())
 

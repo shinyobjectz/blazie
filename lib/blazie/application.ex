@@ -81,6 +81,11 @@ defmodule Blazie.Application do
         # by definition, so it has to be held somewhere that sees every
         # Studio's traffic — here, before any provider does.
         Blazie.Limit,
+        # Owns the exact index's ETS tables for the node's lifetime. In the
+        # tree because an unlinked owner dying silently emptied every space —
+        # searches answered [] instead of erroring, which is the one failure
+        # an index must not have.
+        Blazie.Index.Exact.holder_spec(),
         {Phoenix.PubSub, name: Blazie.PubSub},
         Blazie.Surface.Endpoint
       ] ++ vitals() ++ storage() ++ agents() ++ backup() ++ drill()
