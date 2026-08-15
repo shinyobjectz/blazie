@@ -383,8 +383,20 @@ head tail sort uniq rm mv`), pipes, `>` writing a key, `*` globbing over
 key names — a pure Elixir function over the workspace map, so there is no
 process, no tty, and no host path anywhere; `cat /etc/passwd` is an absent
 key (tested). The unknown-command answer names the shelf, so every builtin
-an agent asks for and misses is a recorded data point. **LT5b demoted to
-probably-never (owner's call, 2026-08-15):** the point was never real POSIX
+an agent asks for and misses is a recorded data point. **LT5b reframed
+(owner's insight, 2026-08-15): if ever, it is a BUILD-TIME transpile, not a
+runtime.** What LT3 deleted was a foreign RUNTIME executing guest bytecode
+while the system runs. tiny-lasers' Transpile used at build time is a
+COMPILER — busybox→wasm→ordinary .beam modules on the JIT, shipped like any
+compiled code; at runtime there is no wasm anywhere, and "one guest
+runtime" holds. The BEAM is even suited to the classically hard part: a
+shell's fork/exec maps to spawning BEAM processes running the transpiled
+module, pipes to message passing, mediated by tiny-lasers' fd/tty/proc
+layers. The ladder: (1) today, Lua + sh() command lines; (2) if the
+refusal telemetry shows agents reaching for SCRIPT syntax, grow sh() into
+a small ash-subset (vars, if/for, $(), &&) in pure Elixir with documented
+limits; (3) only if real semantics are demanded, the build-time busybox
+transpile. **Prior framing, kept for the record:** the point was never real POSIX
 — it is that the workspace guest is a LUA-ONLY MICROKERNEL: `file.*` the
 filesystem, `sh()` the shell, captured `print` the tty, the capability
 table the syscall table, the Elixir host the kernel on the far side of the
