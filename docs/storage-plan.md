@@ -92,14 +92,24 @@ A 1M-fact world: an 88MB file, page-cache-resident, no wall.
 4. **The serialized check sees resident facts only** — already a hole for
    bounded worlds; going residency-less makes it everyone's. Fix it (lazy
    store handle) before `resident: :none` ships.
-5. **Litestream vs native:** worlds are created at runtime with arbitrary
-   names; Litestream's config is path-listed — whether it globs new files is
-   an open question that decides the P4 vendor. blazie's `Backup.Target.S3`
-   (hand-signed SigV4, already the R2 path) is the native alternative; the
-   drill and `proven_at` alarms must keep meaning something either way.
-6. **Netsplits:** today `:global` *refuses* a second opener; a
-   file-replicator would instead last-writer-win. Sticky tenant→node routing
-   is therefore a correctness requirement in P4-cluster, not an optimization.
+5. **Litestream vs native: RESOLVED — Litestream sidecar.** The
+   dynamic-tenant objection is dead: v0.5.x takes `dir` + `pattern` +
+   `watch` (a new tenant file starts replicating within seconds; a deleted
+   one is cleanly removed), and adds distributed leasing with conditional
+   writes and a tested restore path (integrity validation, follow mode,
+   PITR). Most actively maintained project in the whole survey. The native
+   SigV4 client keeps its backup job (belt and suspenders). Revisit native
+   only if R2 request costs at real tenant counts break the budget — and
+   then copy Verneuil's content-addressed chunks + manifest, not WAL
+   shipping.
+6. **Netsplits: routing is a hint, the lease is the fence.** cr-sqlite /
+   Corrosion / Marmot are one long proof that a second concurrent writer
+   means either full CRDT machinery or silent last-writer-wins loss — both
+   wrong for a provenance fact log. Sticky routing decides who *should*
+   write; an object-store **conditional-write lease** (Litestream v0.5.8's
+   distributed leasing) is what makes a stale node's flush *fail* instead of
+   clobber. The concrete hole it closes: node A partitions mid-flush, node B
+   hydrates from R2 and writes, A returns and flushes stale WAL.
 
 Also noted: symbols are float64 (`<<_::float-64-little>>`) — 3.2KB per
 384-dim symbol, 2× what float32 costs on disk, in RAM, and over replication.
@@ -120,6 +130,15 @@ WAL; `BEGIN IMMEDIATE` per append (atomicity replaces the torn-record
 apparatus); `seek/tail/last_tx` + `stats` + filename; `PRAGMA synchronous`
 mapped to the `sync:`/`LEDGER_SYNC` dual-CI story. Registered in the
 conformance suite. File stays the default. Landmines 1–3 addressed here.
+Schema steals from Mozilla Mentat (EAV-on-SQLite, proven; died of scope,
+not mechanism): consider the **two-table split** (current-state table beside
+the append-only history so reads never fight their own past — measure
+whether our tx-bounded reads need it), a **type tag participating in every
+index** so ordering stays sane across value types, extra access paths as
+**partial indexes gated by per-row flags** (unindexed attributes cost
+nothing), and an **excision flag reserved now** — append-only with no lawful
+deletion path is a liability both Mentat (`allow_excision`) and Datahike
+(purge) engineered for from day one; ours can stay unimplemented but named.
 
 **P2 — the migrator (1–2 days).** `.ledger → .sqlite` through `Record.walk` +
 `Fact.from_stored/1`; proven against `old_shapes_test`'s hand-written byte
@@ -131,14 +150,25 @@ fixture so the swappable claim stays proven). Then the real work: supervise
 the Exact holder, `config :blazie, :index`, wire `Index.job/3` under a
 runner, and a restart-rebuilds-the-index test. The Index seam stays — a whale
 tenant can bring an ANN provider back for one space without a rewrite.
+Later refinement, behind the same seam: `sqlite-vec` (`vec0` tables in the
+tenant file — exact KNN only, which is exactly our bounded-N case, float32
+by default so 2× smaller than today's float64 symbols) — but it is genuinely
+alpha, so BEAM brute-force over symbol facts is the default and vec0 an
+implementation detail, adoptable per space when it stabilizes.
 
-**P4 — replication to R2 (3–5 days; highest risk, decided by measurement).**
-Continuous per-tenant shipping + hydrate-on-open. Vendor decision inside the
-phase: Litestream sidecar vs extending native `Backup.Target.S3` into a
-per-commit replicator — settled by the runtime-tenant/glob question (landmine
-5). Keep Backup's keys half; rework `Backup.run` to report replication lag as
-facts so `proven_at` alarms survive; rework `Drill.pull` to restore-into-
-scratch while `ask_both/3` stays. Exit: kill a node after an append, reopen
+**P4 — replication to R2 (3–5 days; highest risk).** Continuous per-tenant
+shipping + hydrate-on-open. **Vendor decided by the prior-art survey:
+Litestream sidecar** (landmine 5 — the dynamic-tenant objection is dead).
+Conditions on the verdict: pin the version + set `meta-dir`; Litestream owns
+WAL checkpointing (no manual checkpoints host-side); `sync-interval` set
+with Verneuil's cost math in view (per-tenant intervals multiply into the R2
+request bill — budget requests globally, ~30/s/process is the survivor's
+number, with a bounded local spool so an unreachable R2 can never fill the
+disk); shutdown drains the replicator (deploys-reset-in-flight, our own
+ground rule); restore-from-R2 exercised in CI, not just replication. Keep
+Backup's keys half; rework `Backup.run` to report replication lag as facts
+so `proven_at` alarms survive; rework `Drill.pull` to restore-into-scratch
+while `ask_both/3` stays. Exit: kill a node after an append, reopen
 elsewhere, the fact is there; the drill proves it on cadence.
 
 **P4-cluster — hydrate, evict, stick.** Idle eviction (close + drop local
