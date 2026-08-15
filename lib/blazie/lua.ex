@@ -135,6 +135,8 @@ defmodule Blazie.Lua do
 
     sql_path = Keyword.get(opts, :sql_path)
     library = Keyword.get(opts, :library)
+    model = Keyword.get(opts, :model)
+    model_opts = Keyword.take(opts, [:provider, :limit])
 
     with {:ok, prelude} <- preludes(Keyword.get(opts, :prelude, [])) do
       caller = self()
@@ -147,6 +149,14 @@ defmodule Blazie.Lua do
           Process.put(:blazie_at, at)
           if sql_path, do: Process.put(:blazie_sql_path, sql_path)
           if library, do: Process.put(:blazie_library, library)
+
+          if model,
+            do:
+              (
+                Process.put(:blazie_model, model)
+                Process.put(:blazie_model_opts, model_opts)
+              )
+
           send(caller, {self(), evaluate_workspace(source, at, snapshot, prelude)})
         end)
 
@@ -467,6 +477,16 @@ defmodule Blazie.Lua do
         state
       end
 
+    # ask() only exists when the host granted a model — a single model turn,
+    # the primitive an agent LOOP is built from. The guest runs the loop.
+    state =
+      if Process.get(:blazie_model) do
+        {_, state} = :luerl.set_table_keys(["ask"], {:erl_func, &ws_ask/2}, state)
+        state
+      else
+        state
+      end
+
     # require() only exists when the host chose a library (the package plane).
     # The guest names a package; the host resolves it and executes its source
     # in THIS state, cached per run — no filesystem, no package.path.
@@ -520,6 +540,57 @@ defmodule Blazie.Lua do
   end
 
   defp ws_require(_args, state), do: {[nil, "require takes a package name."], state}
+
+  # The ask() grant (the agent framework): one model turn. Decodes the Lua
+  # messages/tools tables, runs Model.turn, and hands back a table the guest's
+  # loop reads — { said = text } or { calls = {...} }, or { error = reason }
+  # for a refused turn so the loop can back off rather than crash.
+  defp ws_ask([messages | rest], state) do
+    tools =
+      case rest do
+        [t | _] -> lua_to_elixir(t, state)
+        _ -> []
+      end
+
+    decoded = lua_to_elixir(messages, state)
+    model = Process.get(:blazie_model)
+    opts = Process.get(:blazie_model_opts, [])
+
+    result =
+      case Blazie.Model.turn(model, normalize_messages(decoded), List.wrap(tools), opts) do
+        {:ok, {:said, text}, _spent} -> %{"said" => text}
+        {:ok, {:calls, calls}, _spent} -> %{"calls" => Enum.map(calls, &stringify_call/1)}
+        {:error, refusal} -> %{"error" => refusal.repair}
+      end
+
+    {encoded, state} = :luerl.encode(result, state)
+    {[encoded], state}
+  end
+
+  defp ws_ask(_args, state), do: {[nil, "ask takes a messages table and a tools table."], state}
+
+  # Luerl decodes a table as a list of {key, value} pairs; turn it into an
+  # Elixir map/list the model layer speaks.
+  defp lua_to_elixir(tref, state) do
+    tref |> :luerl.decode(state) |> jsonish()
+  end
+
+  defp normalize_messages(messages) when is_list(messages) do
+    Enum.map(messages, fn
+      %{} = m -> m
+      other -> %{"role" => "user", "content" => to_string(other)}
+    end)
+  end
+
+  defp normalize_messages(other), do: [%{"role" => "user", "content" => to_string(other)}]
+
+  defp stringify_call(%{} = call) do
+    %{
+      "id" => to_string(Map.get(call, :id, Map.get(call, "id", ""))),
+      "name" => to_string(Map.get(call, :name, Map.get(call, "name", ""))),
+      "arguments" => Map.get(call, :arguments, Map.get(call, "arguments", %{}))
+    }
+  end
 
   # The sql() grant (LT4): relational reach over exactly one file — the
   # world's own, chosen by the host — through a READ-ONLY connection opened

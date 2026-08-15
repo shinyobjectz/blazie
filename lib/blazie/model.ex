@@ -53,6 +53,40 @@ defmodule Blazie.Model do
   end
 
   @doc """
+  A SINGLE model turn — the primitive an agent LOOP is built from.
+
+  Where `converse/5` runs the whole tool loop in Elixir, `turn/4` runs one
+  turn and hands the decision back: `{:ok, {:said, text}, spent}` or
+  `{:ok, {:calls, calls}, spent}`. This is what a Lua agent's `ask()` calls —
+  the guest owns the loop, the host owns the one turn. The account-wide
+  `Limit` is passed first (fairness before the vendor); the provider is the
+  configured one, or an injected `provider:` for tests.
+  """
+  @spec turn(String.t(), [map()], [map()], keyword()) ::
+          {:ok, {:said, String.t()} | {:calls, [map()]}, map()} | {:error, refusal()}
+  def turn(model, messages, tools, opts \\ []) do
+    with {:ok, %Reference{} = reference} <- Reference.from(model),
+         :ok <- limited(reference, opts) do
+      speak =
+        case Keyword.get(opts, :provider) do
+          nil -> fn r, m, t, o -> Provider.for(r).converse(r, m, t, o) end
+          fun when is_function(fun, 4) -> fun
+          module when is_atom(module) -> fn r, m, t, o -> module.converse(r, m, t, o) end
+        end
+
+      speak.(reference, messages, tools, opts)
+    end
+  end
+
+  # The account-wide door, if a Limit was given (a scripted turn skips it).
+  defp limited(reference, opts) do
+    case Keyword.get(opts, :limit) do
+      nil -> :ok
+      limiter when is_function(limiter, 1) -> limiter.(reference.provider)
+    end
+  end
+
+  @doc """
   Ask a model for text.
 
       Blazie.Model.generate("openai:gpt-4o-mini", "Say hello")
