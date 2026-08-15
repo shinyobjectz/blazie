@@ -80,7 +80,8 @@ defmodule Blazie.ShellBashDifferentialTest do
     {"glob", "grep -c total *.txt"},
     {"cd relative", "cd data; grep -c total more.txt"},
     {"cd dotdot", "cd data; cat ../notes.txt | wc -l | tr -d ' '"},
-    {"cp mv rm", "cp notes.txt c.txt; mv c.txt d.txt; rm d.txt; ls d.txt 2> /dev/null; echo rc=$?"}
+    {"cp mv rm",
+     "cp notes.txt c.txt; mv c.txt d.txt; rm d.txt; ls d.txt 2> /dev/null; echo rc=$?"}
   ]
 
   setup_all do

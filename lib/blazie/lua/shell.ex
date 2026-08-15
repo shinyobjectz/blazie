@@ -414,7 +414,7 @@ defmodule Blazie.Lua.Shell do
   end
 
   defp eval_stmt({:while, cond_chain, body, tail}, state, _in) do
-    {captured, state, rc} = while_loop(cond_chain, body, state, [], 0, 1_000_000)
+    {captured, state, rc} = while_loop(cond_chain, body, state, [], 0, 20_000)
     run_tail(tail, captured, state, rc)
   end
 

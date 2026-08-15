@@ -154,3 +154,37 @@ own newer tests that had encoded the lazier behavior), one missing tool
 implemented (`tr -s`), and three corpus items normalized with the reason
 recorded (BSD wc's column padding, macOS lacking `tac`, `printf` not in
 subset). 52/52 identical; suite green.
+
+**S7 (2026-08-15): PASS — the fence, attacked and held.**
+`test/shell_fence_test.exs`, two halves. STRUCTURAL: the shell's source is
+scanned for host-reaching calls (File/System/Port/:os/:httpc/…) and every
+remote call is checked against an allowlist of pure stdlib — a future tool
+that grows a `File.read!` fails the suite before it ships. BEHAVIORAL:
+hostile spellings (`/etc/passwd`, `../../etc/passwd`, `~`, backticks,
+spaces, unicode) all fold INTO the map — the sentinel comes back, root's
+file is never read, and a redirect to `/etc/cron.d/evil` writes a key while
+the real `/etc` stays untouched (asserted). File CONTENT is data, never
+code: `$(...)`/backticks inside a file survive cat literally, and content
+flowing through xargs can only ever name builtins — `curl` answers the
+shelf. There is no environment (`$PATH`/`$HOME`/`$SECRET_TOKEN` expand
+empty), no clock (`date`/`whoami` byte-identical across runs at the same
+`at`), and every resource attack is answered, not suffered: the flood gets
+rc 141 with the repair, the substitution fork-bomb dies at the depth guard
+with rc 2, the infinite while dies at the (now 20k) iteration guard and the
+script honestly continues. The guest boundary holds through it all:
+`sh()`-driven runaways die at the Lua deadline, caps and shelf reach
+through, and a shell run cannot disturb the guest's own state. 15
+adversarial tests; full suite 1024 green.
+
+## THE PLAN IS COMPLETE (2026-08-15)
+
+S1–S7 all landed, each verdict above. The final form stands: a guest is a
+BEAM process whose whole OS is a capability table — Lua for authoring,
+`file.*`/`sh()`/`sql()`/`print` as the syscall surface, a shell with real
+grammar and ~40 native tools that is BYTE-IDENTICAL to /bin/bash across a
+52-script corpus for its documented subset (SHELLSPEC.md), deterministic by
+`at`, capped with repairs instead of kills, and adversarially proven to
+reach nothing: no filesystem, no processes, no network, no environment, no
+clock. 178 shell-surface tests (contract 52 + differential 52 + fence 15 +
+guest suites); full suite 1024 green. Validated, tested, adversarially
+tested.

@@ -35,7 +35,7 @@ the subset is this shell's own, deliberately.*
 - Arithmetic `$((...))`: integers, `+ - * / %`, parens, unary minus, bare
   variable names (unset → 0).
 - Blocks: `for NAME in WORDS; do ...; done`, `while CHAIN; do ...; done`
-  (1M-iteration guard), `if CHAIN; then ... [else ...] fi` — and a block
+  (20k-iteration guard — the output cap usually stops a flood first), `if CHAIN; then ... [else ...] fi` — and a block
   followed by `|` or a redirect feeds its WHOLE output onward (bash needs
   the same shape; this is conformant).
 - `test` / `[ ... ]`: `-f KEY`, `-z S`, `-n S`, `A = B`, `A != B`,
