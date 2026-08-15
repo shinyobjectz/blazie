@@ -239,6 +239,22 @@ file, guests never hold handles. `http.get_many` if a fan-out case demands
 it — async is more guests or a granted concurrent primitive, never an event
 loop inside one.
 
+**The guest library shelf** (surveyed 2026-08-15; every candidate gets a
+Luerl smoke test — the `learn` treatment — before trust). Keep: **lust +
+luassert** (minimal pure-Lua describe/it — likely IS the tenant-test core LT
+planned to hand-write), **json.lua** (guest-side JSON before `blob()`),
+**Moses/Microlight** (functional utility belt for authored code),
+**serpent/inspect** (legible dumps), **LuLPeg** (pure LPeg, shelved until a
+job needs parsing). Rejected with reasons: lua-lockbox (crypto is host-plane
+— `Secret`/Keyring — by design), RxLua (reactivity is the Job model's),
+cron.lua (the clock is the fence's), 30log/middleclass (closures suffice —
+`learn` proved it). kong-lua-sandbox: mechanism NOT adopted — in-language
+env-whitelist + cooperative debug-hook quotas, with its own README candid
+about bytecode escapes; blazie sandboxes below the language (host-stripped
+Luerl state, no bytecode path, preemptive BEAM heap/deadline). Its curated
+BASE_ENV whitelist is kept as an LT1 review checklist against
+`Lua.world/2`'s strip list — every divergence deliberate.
+
 Ordering: LT1–LT2 can start immediately (only LT4 waits on P1); LT3 lands
 when LT2's verdict is green. Each LT phase gets a verdict below like every
 storage phase.
