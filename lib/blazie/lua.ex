@@ -409,7 +409,27 @@ defmodule Blazie.Lua do
     kind_, reason -> {:error, raised("#{kind_}: #{inspect(reason)}")}
   end
 
+  # Luerl 1.5's string.gmatch raises badarg (found by the LT2 tests). Every
+  # workspace guest gets this find-based shim so authored code and vendored
+  # libraries speak ordinary Lua. Whole match, or the first capture when the
+  # pattern has one — the shapes real code uses; a multi-capture iteration is
+  # rare enough to write with string.find directly.
+  @gmatch_shim """
+  string.gmatch = function(s, pat)
+    local pos = 1
+    return function()
+      if pos > #s + 1 then return nil end
+      local a, b, cap = string.find(s, pat, pos)
+      if a == nil then return nil end
+      if b >= a then pos = b + 1 else pos = a + 1 end
+      if cap ~= nil then return cap end
+      return string.sub(s, a, b)
+    end
+  end
+  """
+
   defp grant_workspace(state) do
+    {:ok, _, state} = :luerl.do(@gmatch_shim, state)
     {:ok, _, state} = :luerl.do("file = {}", state)
     {_, state} = :luerl.set_table_keys(["file", "read"], {:erl_func, &ws_read/2}, state)
     {_, state} = :luerl.set_table_keys(["file", "write"], {:erl_func, &ws_write/2}, state)

@@ -107,4 +107,43 @@ defmodule Blazie.LuaWorkspaceTest do
     {:ok, answer} = Lua.workspace("return file.read(\"absent.txt\") == nil", %{})
     assert answer.value == true
   end
+
+  describe "the stdlib repair" do
+    test "string.gmatch works — the Luerl gap, shimmed in the grant" do
+      # Luerl 1.5's own gmatch raises badarg (recorded in the LT2 verdict);
+      # every workspace guest gets a find-based shim so authored code and
+      # vendored libraries can speak ordinary Lua.
+      {:ok, answer} =
+        Lua.workspace(
+          """
+          local words = {}
+          for w in string.gmatch("alpha beta gamma", "%a+") do
+            table.insert(words, w)
+          end
+          local total = 0
+          for n in string.gmatch("3 4 5", "%d+") do total = total + tonumber(n) end
+          return { count = #words, last = words[3], total = total }
+          """,
+          %{}
+        )
+
+      assert answer.value == %{"count" => 3, "last" => "gamma", "total" => 12}
+    end
+
+    test "gmatch with a single capture yields the capture" do
+      {:ok, answer} =
+        Lua.workspace(
+          """
+          local keys = {}
+          for k in string.gmatch("a=1, b=2", "(%a+)=%d") do
+            table.insert(keys, k)
+          end
+          return table.concat(keys, ",")
+          """,
+          %{}
+        )
+
+      assert answer.value == "a,b"
+    end
+  end
 end
