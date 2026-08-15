@@ -134,6 +134,7 @@ defmodule Blazie.Lua do
     snapshot = Keyword.get(opts, :snapshot)
 
     sql_path = Keyword.get(opts, :sql_path)
+    library = Keyword.get(opts, :library)
 
     with {:ok, prelude} <- preludes(Keyword.get(opts, :prelude, [])) do
       caller = self()
@@ -145,6 +146,7 @@ defmodule Blazie.Lua do
           Process.put(:blazie_printed, [])
           Process.put(:blazie_at, at)
           if sql_path, do: Process.put(:blazie_sql_path, sql_path)
+          if library, do: Process.put(:blazie_library, library)
           send(caller, {self(), evaluate_workspace(source, at, snapshot, prelude)})
         end)
 
@@ -461,8 +463,59 @@ defmodule Blazie.Lua do
         state
       end
 
+    # require() only exists when the host chose a library (the package plane).
+    # The guest names a package; the host resolves it and executes its source
+    # in THIS state, cached per run — no filesystem, no package.path.
+    state =
+      if Process.get(:blazie_library) do
+        Process.put(:blazie_required, %{})
+        {_, state} = :luerl.set_table_keys(["require"], {:erl_func, &ws_require/2}, state)
+        state
+      else
+        state
+      end
+
     state
   end
+
+  # The require() grant (the package plane): resolve a package name against the
+  # library world, execute its source once, cache the result. An unknown name
+  # returns nil plus the catalog as data — never a stack unwind, so authored
+  # code can handle a missing dependency.
+  defp ws_require([name | _], state) when is_binary(name) do
+    cache = Process.get(:blazie_required, %{})
+
+    case Map.fetch(cache, name) do
+      {:ok, cached} ->
+        {[cached], state}
+
+      :error ->
+        library = Process.get(:blazie_library)
+
+        case Blazie.Package.resolve(name, library: library) do
+          {:ok, _id, source} ->
+            # The package's source runs in the guest's OWN state — same fence,
+            # same absences. Its raw `return` value (which may be a function,
+            # a table, anything) is handed straight back and cached AS the
+            # Luerl value, never round-tripped through Elixir — a decode would
+            # flatten a function to nothing.
+            case :luerl.do(source, state) do
+              {:ok, returned, after_state} ->
+                value = List.first(returned)
+                Process.put(:blazie_required, Map.put(cache, name, value))
+                {[value], after_state}
+
+              {:error, why, _} ->
+                {[nil, "require #{inspect(name)}: #{inspect(not_lua(why))}"], state}
+            end
+
+          {:error, refusal} ->
+            {[nil, refusal.repair], state}
+        end
+    end
+  end
+
+  defp ws_require(_args, state), do: {[nil, "require takes a package name."], state}
 
   # The sql() grant (LT4): relational reach over exactly one file — the
   # world's own, chosen by the host — through a READ-ONLY connection opened

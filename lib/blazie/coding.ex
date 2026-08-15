@@ -498,7 +498,12 @@ defmodule Blazie.Coding do
         # never names one.
         sql_path = World.store_path(world)
 
-        case Blazie.Lua.workspace(source, files, sql_path: sql_path) do
+        # The library is shared and read-only — every coding run can require
+        # from it (the package plane).
+        case Blazie.Lua.workspace(source, files,
+               sql_path: sql_path,
+               library: Blazie.Package.world()
+             ) do
           {:ok, answer} ->
             written =
               answer.files

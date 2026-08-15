@@ -188,3 +188,50 @@ reach nothing: no filesystem, no processes, no network, no environment, no
 clock. 178 shell-surface tests (contract 52 + differential 52 + fence 15 +
 guest suites); full suite 1024 green. Validated, tested, adversarially
 tested.
+
+## MK-P — the package plane (2026-08-15): COMPLETE
+
+The answer to "an agent must be able to install packages — that's why we
+sandbox it." Three components, all landed, the sandbox making it safe.
+
+**C1 — a package is a fact** (`Blazie.Package`, `test/package_test.exs`, 6
+tests). Vendored/approved Lua libraries live as facts in ONE shared library
+world (`:"$library"` — like the Graph, nobody's to pollute, everyone's to
+read): `{name@version, source/hash/license}`, the `by` on the fact carrying
+who vetted it. Resolve by name (newest, semver-ordered) or name@version
+(exact); an unknown name refuses with the catalog. A version is immutable —
+identical bytes idempotent, different bytes refused — so `require
+"json@1.0.0"` means one thing forever.
+
+**C2 — require() is a capability** (`test/lua_require_test.exs`, 7 tests).
+The guest names a package; the host resolves it against the library world
+and executes its source in the guest's OWN state, cached per run (real
+require semantics, the raw Luerl value kept — a function survives, where a
+decode would flatten it). No filesystem, no network, no package.path; an
+unknown name returns nil + the catalog as DATA, so authored code handles a
+missing dependency instead of crashing. Absent unless a library is granted,
+exactly like sql(). A required package runs under the same fence and still
+cannot reach the host (tested: `io`/`os.execute` nil inside it). The Coding
+loop grants it from the shared library, so authored `.lua` gets require for
+free. This is the prelude shelf generalized from a fixed list to a queryable
+registry.
+
+**C3 — install is a judged job** (`test/package_install_test.exs`, 7
+tests). A guest cannot install — there is no `install()` in the guest, only
+`require()` (tested). Installation is Elixir/`:job` work: `install/3` takes
+a `fetch:` boundary (production: `http.get` through the Secret-plane
+credential proxy; injected for testability) and `vet/4` gates what comes
+back — license on an approved list, no C-extension markers (a pure-Lua
+library never requires ffi/lpeg/lfs/…, and Luerl cannot load a .so anyway),
+and a SMOKE TEST under Luerl (loads and returns without raising — the
+discipline the vendored shelf uses). Only a clean package lands; a fetch
+failure or a failed check is surfaced, never swallowed. The sandbox is the
+enabling condition: an unvetted package, once landed, runs in the same fence
+as everything else and STILL cannot reach the host — so "run arbitrary
+discovered code" is safe by construction, which is the whole reason to
+sandbox.
+
+Design reference: lde (lde-org/lde) — the shape (project-local,
+version-locked, isolated deps) adopted; its mechanism (LuaJIT runtime, git
+fetching) rejected as fence-breaking. 20 package tests; full suite 1044
+green.
