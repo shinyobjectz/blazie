@@ -270,3 +270,14 @@ guards); full suite 863 green and green under `LEDGER_SYNC=true`
 keys): **97k facts/s append · 88 bytes/fact on disk (vs 241 live-RAM today)
 · 777µs indexed seek across 100k facts · 2ms reopen** (a File-store reopen
 replays everything). Default store unchanged — additive, as planned.
+
+**P2-migrator (2026-08-15): PASS.** `Blazie.Store.Migrate.ledger_to_sqlite/2`
+— parses no bytes itself: reads through `Store.File`'s replay (which already
+normalizes every shape ever written; `old_shapes_test`'s own fixture writers
+are the test's fixtures here) and appends into `Store.SQLite` in one SQL
+transaction, original tx numbers kept, replay order = insertion order = seq,
+so within-tx position survives the migration boundary (tested). One-way and
+refusing to double: a target already holding transactions refuses with the
+repair; a missing ledger refuses with the repair. The ledger is untouched —
+the read-only legacy record, `Store.Record` alive to read it forever. 5
+tests; suite 868 green.
