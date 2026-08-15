@@ -667,3 +667,27 @@ liblua-on-wasi recipe (any C using sjlj now has a proven path into the
 registry), and an upstream tiny-lasers finding — the ASM tier's
 run-over-run degradation on large modules — worth its own investigation
 the day the tier matters. Gate 4 (coroutines) moot.
+
+### The engine, measured against itself (2026-08-15)
+
+Same task shapes, C compiled to wasm32-wasi, run under tiny-lasers on
+defaults — beside the Luerl numbers above:
+
+| task | PUC 5.4 | Luerl | C-wasm interp | C-wasm ASM ×3 |
+|---|---|---|---|---|
+| heavy (fib 24 + 500k loop) | 4.8ms | 91.8ms | 270ms | 271 / 271 / 273ms |
+| light (100k snprintf+strstr) | 21.6ms | 144.7ms | 9,064ms | 9.5s / 10.3s / 11.6s |
+
+Two corrections this forces, written into the doctrine: **(1) Luerl is
+currently the FASTEST fenced compute lane, not the slow one** — it beats
+the wasm path 3× on call-heavy numerics and ~60× on libc-string work, so
+"compiled programs do the heavy lifting" is wrong on today's engine;
+programs buy SEMANTICS (a real sed, a real applet), not speed, and their
+real work should stay small-per-invocation. **(2) The ASM tier bought
+nothing on defaults** — identical timings on heavy (nothing tiered), and
+on light it reproduced the run-over-run degradation (9.5→11.6s) first
+seen in the TL4 spike, now on a plain -O2 C module: two upstream findings
+(tiering never engaging on defaults; degradation under repetition) that
+gate any future claim about the perf tier. The fence still holds
+everywhere — wasm executes inside the calling BEAM process, so the Lua
+guest's deadline kill covers washy and every program it invokes.
