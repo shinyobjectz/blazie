@@ -75,6 +75,16 @@ defmodule Blazie.MixProject do
       # The storage engine under Store.SQLite (docs/storage-plan.md). A NIF —
       # the seam above it is the decision that counts.
       {:exqlite, "~> 0.27"},
+      # wasm on the BEAM — OUR substrate (workbooks-sh), zero deps, pure
+      # Elixir: an interpreter lane (correctness, green everywhere) and an
+      # ASM/JIT lane (perf tier; parked on OTP 29 pending an upstream fix).
+      # This is not the wasm runtime LT3 deleted: guests are ordinary BEAM
+      # code in ordinary processes — Luerl's species, not wasmex's. Pinned
+      # by SHA because the substrate under a fence is not a thing that
+      # floats (docs/storage-plan.md, the TL track).
+      {:tiny_lasers,
+       git: "https://github.com/workbooks-sh/tiny-lasers.git",
+       ref: "4b4bd60f52d609447ab88a3b7f472d44cb4f422c"},
       # The Elixir client, tested here against a real HTTP round trip so the
       # SDK and the surface cannot drift apart unnoticed.
       {:blazie_client, path: "clients/elixir", only: :test}

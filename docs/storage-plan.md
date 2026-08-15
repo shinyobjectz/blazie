@@ -520,3 +520,39 @@ the guest already has. With this, the Lua-only microkernel's syscall table
 is: file.* · sh() · sql() · print · (jobs: http.get, blob) — every one
 host-mediated, every one granted deliberately. 6 tests; merged suite 915
 green and 915 under LEDGER_SYNC=true.
+
+## The TL track — tiny-lasers as the wasm-on-BEAM substrate
+
+*Adopted 2026-08-15 (owner's call: "we built tiny-lasers and it feels wrong
+not to use it"). tiny-lasers (github.com/workbooks-sh/tiny-lasers, PUBLIC,
+zero third-party deps, pure Elixir) is wasm on the BEAM: an interpreter lane
+in pure Elixir and an ASM lane compiling wasm functions to real BEAM
+functions on the JIT. Guests are ordinary BEAM processes — Luerl's species,
+not wasmex's — so adopting it does not reopen LT3.*
+
+**TL0 (2026-08-15): PASS — the dependency, proven at the seam.** Pinned git
+dep (SHA 4b4bd60); its supervision tree boots beside blazie's; and `washy`
+— its no-fork shell, C compiled to wasm32-wasip1, REAL shell grammar
+(pipes, `for`, `if/else`, `;`), fixture vendored in priv/wasm — runs
+pipelines over BLAZIE'S workspace: both sides keep files as a process-dict
+map, so the VFS bridge is a rename (`:blazie_workspace` ↔ `:tl_vfs`).
+Writes flow back; a traversal-shaped path is a funny key; no filesystem
+anywhere. 4 tests; suite 919 green.
+
+**The OTP 29 finding, recorded honestly:** tiny-lasers' own suite is red on
+this machine's OTP 29 — the ASM lane's `:compile.forms` crashes in `beam_a`
+on some synthetic edge-instruction shapes (i64 extend ops et al.), while
+the interpreter lane is green AND the ASM lane works for the real washy
+module (its interp≡asm assertions pass). So: interpreter = the correctness
+lane, green everywhere; ASM = the perf tier, working for real modules,
+with an upstream OTP-29 fix owed in tiny-lasers itself. blazie's Docker
+pins OTP 27 where both lanes are healthy.
+
+**TL1 (next): the programs registry unification.** washy's non-builtins
+delegate to `host_exec`, which resolves argv[0] through the `:tl_programs`
+registry — the fork/exec emulation. The design: the registry becomes the
+ONE table of what a shell line can invoke — blazie's Elixir builtins
+(ls/cat/wc/head/sort/uniq/rm/mv) registered as host programs callable FROM
+C, wasm modules (eventually busybox applets) beside them, `sh()` in the
+Lua microkernel fronting washy for grammar. One shell, three species of
+program (C-compiled, Elixir, someday busybox), one VFS, one fence.
