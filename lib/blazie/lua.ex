@@ -109,6 +109,48 @@ defmodule Blazie.Lua do
     end
   end
 
+  @doc """
+  Run a chunk over a WORKSPACE — files for a guest, with no filesystem anywhere.
+
+  The workspace is a key→bytes map: seeded by the caller (the coding loop
+  builds it from facts), mutated inside the guest's own process, and handed
+  back whole. A guest path is never a host path — `../etc` is a funny key in
+  the same map — so there is no filesystem to traverse out of, which is the
+  tiny-lasers VFS lesson reduced to its blazie minimum (docs/storage-plan.md,
+  LT1).
+
+  The posture is the python sandbox's, kept exactly: `file.read/write/list`
+  and a captured `print`, on the `:formula` base — no http, no blob, frozen
+  clock. The fence stays the absence of everything else.
+
+  Returns `{:ok, %{value:, printed:, files:}}` or a refusal.
+  """
+  @spec workspace(binary(), %{optional(String.t()) => binary()}, [option()]) ::
+          {:ok, %{value: term(), printed: String.t(), files: map()}} | {:error, refusal()}
+  def workspace(source, files, opts \\ []) when is_map(files) do
+    deadline = Keyword.get(opts, :deadline, @deadline)
+    heap = Keyword.get(opts, :heap, @heap)
+    at = Keyword.get(opts, :at, 0)
+    snapshot = Keyword.get(opts, :snapshot)
+    caller = self()
+
+    {pid, ref} =
+      spawn_monitor(fn ->
+        Process.flag(:max_heap_size, %{size: heap, kill: true, error_logger: false})
+        Process.put(:blazie_workspace, files)
+        Process.put(:blazie_printed, [])
+        send(caller, {self(), evaluate_workspace(source, at, snapshot)})
+      end)
+
+    case await(pid, ref, deadline, heap) do
+      {:ok, value, printed, files_after} ->
+        {:ok, %{value: value, printed: printed, files: files_after}}
+
+      other ->
+        other
+    end
+  end
+
   @doc false
   # The same run, with what the guest wrote. `Blazie.Lua.Binding.run/3` is the way
   # to reach this; it is here because only this module knows how to spawn a
@@ -306,6 +348,81 @@ defmodule Blazie.Lua do
 
   defp wrote(nil), do: []
   defp wrote(_snapshot), do: Blazie.Lua.Binding.staged()
+
+  # The workspace guest: the :formula base (frozen clock, nothing that
+  # reaches) plus the file table and a captured print. Runs in the guest's
+  # process, so the process dictionary IS the workspace for the duration.
+  defp evaluate_workspace(source, at, snapshot) do
+    state = world(:formula, at)
+    state = if snapshot, do: Blazie.Lua.Binding.bind(state, snapshot), else: state
+    state = grant_workspace(state)
+
+    case :luerl.do(source, state) do
+      {:ok, returned, after_state} ->
+        printed = Process.get(:blazie_printed, []) |> Enum.reverse() |> Enum.join("\n")
+        {:ok, decode(returned, after_state), printed, Process.get(:blazie_workspace, %{})}
+
+      {:error, why, _} ->
+        {:error, not_lua(why)}
+    end
+  rescue
+    error -> {:error, raised(Exception.message(error))}
+  catch
+    kind_, reason -> {:error, raised("#{kind_}: #{inspect(reason)}")}
+  end
+
+  defp grant_workspace(state) do
+    {:ok, _, state} = :luerl.do("file = {}", state)
+    {_, state} = :luerl.set_table_keys(["file", "read"], {:erl_func, &ws_read/2}, state)
+    {_, state} = :luerl.set_table_keys(["file", "write"], {:erl_func, &ws_write/2}, state)
+    {_, state} = :luerl.set_table_keys(["file", "list"], {:erl_func, &ws_list/2}, state)
+    {_, state} = :luerl.set_table_keys(["print"], {:erl_func, &ws_print/2}, state)
+    state
+  end
+
+  defp ws_read([path | _], state) when is_binary(path) do
+    {[Map.get(Process.get(:blazie_workspace, %{}), path)], state}
+  end
+
+  defp ws_read(_args, state), do: {[nil, "file.read takes the path to read."], state}
+
+  defp ws_write([path, content | _], state) when is_binary(path) do
+    case text(content) do
+      nil ->
+        {[nil, "file.write takes a path and the content to write."], state}
+
+      bytes ->
+        Process.put(:blazie_workspace, Map.put(Process.get(:blazie_workspace, %{}), path, bytes))
+        {[true], state}
+    end
+  end
+
+  defp ws_write(_args, state),
+    do: {[nil, "file.write takes a path and the content to write."], state}
+
+  defp ws_list(_args, state) do
+    paths = Process.get(:blazie_workspace, %{}) |> Map.keys() |> Enum.sort()
+    {encoded, state} = :luerl.encode(paths, state)
+    {[encoded], state}
+  end
+
+  defp ws_print(args, state) do
+    line = args |> Enum.map(&(text(&1) || inspect(&1))) |> Enum.join("\t")
+    Process.put(:blazie_printed, [line | Process.get(:blazie_printed, [])])
+    {[], state}
+  end
+
+  # A Lua value as printable text — what both print and file.write accept.
+  defp text(value) when is_binary(value), do: value
+  defp text(value) when is_integer(value), do: Integer.to_string(value)
+  defp text(true), do: "true"
+  defp text(false), do: "false"
+
+  defp text(value) when is_float(value) do
+    if value == trunc(value), do: Integer.to_string(trunc(value)), else: Float.to_string(value)
+  end
+
+  defp text(_other), do: nil
 
   defp evaluate(source, kind, at, snapshot) do
     state = world(kind, at)

@@ -314,3 +314,27 @@ test-local `HttpProvider` over the `Wire` fixture keeps "an HTTP vendor is a
 module, same answers" proven with zero vendor code in the tree — and is the
 template file for the day a whale tenant brings one back. Deferred
 live-tripwire closed as moot. Suite 871 green.
+
+**LT1 (2026-08-15): PASS.** `Lua.workspace/3` — the tiny-lasers VFS reduced
+to its blazie minimum: the workspace is a key→bytes map seeded by the
+caller, mutated in the guest's own process, harvested back whole. No fd
+table (that half was WASI emulation), no directory, no second store — and
+better than the steal, because blazie's workspace was ALREADY facts, so the
+durable backend existed before the feature did. A traversal-shaped path is
+just a funny key (tested); the posture is the python sandbox's exactly —
+`file.read/write/list` + captured `print` on the `:formula` base, no http,
+no blob, frozen clock, deadline/heap kills intact (tested). 7 tests.
+
+**LT2 (2026-08-15): PASS (the execute path).** `Coding.execute` dispatches:
+a `.lua` file runs over the workspace grant — no directory, no wasm — and
+what it wrote comes back as facts with the run's provenance (tested,
+including the missing-path and broken-script refusals answering rather than
+raising). The python/WASI lane stays as the legacy branch until LT3; the
+run tool's self-description now steers to `.lua`. Two Luerl gaps found and
+recorded by the tests themselves: **`string.gmatch` raises `badarg`**
+(match/find/gsub-with-function-replacement/format all work — a ~10-line
+pure-Lua gmatch shim is now a prelude candidate), and **number `tostring`
+renders `43.0`** (authored code wants `string.format("%d")`). Suite 884
+green. Remaining for LT2's full verdict: the coding LOOP driven end-to-end
+with a scripted model choosing the run tool, and a wall-clock number on a
+representative dossier computation.

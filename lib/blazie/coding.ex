@@ -109,8 +109,9 @@ defmodule Blazie.Coding do
       ) ++
       Tool.declare("run",
         describe:
-          "Run a python file from the workspace and see what it printed. Takes `path`. " <>
-            "The whole workspace is there beside it, and anything it writes comes back.",
+          "Run a file from the workspace and see what it printed. Takes `path`. Write it " <>
+            "as .lua — the whole workspace is there through file.read/write/list, and " <>
+            "anything it writes comes back.",
         takes: %{"path" => %{"answers" => "name"}},
         source: """
         answer["do"] = "run"
@@ -452,11 +453,14 @@ defmodule Blazie.Coding do
   end
 
   @doc """
-  Run one of the workspace's files as python, in the sandbox.
+  Run one of the workspace.s files, fenced.
 
-  The world's files are written into a directory, the directory is handed to the
-  guest as its only filesystem, and whatever it leaves behind comes back as
-  facts. So the agent works in python the way anybody works in python — a file,
+  A `.lua` file needs no directory and no wasm: the workspace facts become the
+  guest.s map (`Lua.workspace/3`), and what it wrote comes back as facts — the
+  LT2 path (docs/storage-plan.md). Anything else takes the legacy python/WASI
+  lane below, kept until LT3 retires wasmex: the files are written into a
+  directory, the directory is preopened as the guest.s only filesystem, and
+  whatever it leaves behind comes back as facts. So the agent works in python the way anybody works in python — a file,
   an import, a thing it wrote next to it — and none of that reaches anything the
   caller did not hand over.
 
@@ -471,6 +475,50 @@ defmodule Blazie.Coding do
   """
   @spec execute(World.ref(), term(), String.t(), Snapshot.t()) :: {:ok, map()} | {:error, map()}
   def execute(world, run, path, %Snapshot{} = snapshot) do
+    if String.ends_with?(path, ".lua") do
+      execute_lua(world, run, path, snapshot)
+    else
+      execute_python(world, run, path, snapshot)
+    end
+  end
+
+  # The Lua path (LT2, docs/storage-plan.md): no directory and no wasm — the
+  # workspace facts become the guest's map (`Lua.workspace/3`), the guest
+  # computes, and what changed comes back as facts with the run's provenance.
+  # Same fence posture the python sandbox had: files and print, nothing that
+  # reaches, frozen clock.
+  defp execute_lua(world, run, path, snapshot) do
+    files = Map.new(files(snapshot), fn p -> {p, to_string(read(snapshot, p) || "")} end)
+
+    case Map.fetch(files, path) do
+      :error ->
+        {:ok, %{"failed" => "There is no #{path} in the workspace.", "problem" => "no_such_file"}}
+
+      {:ok, source} ->
+        case Blazie.Lua.workspace(source, files) do
+          {:ok, answer} ->
+            written =
+              answer.files
+              |> Enum.reject(fn {p, content} -> Map.get(files, p) == content end)
+              |> Enum.map(&elem(&1, 0))
+              |> Enum.sort()
+
+            for p <- written do
+              id = "file:" <> p
+              World.append(world, [{id, "path", p, run}, {id, "content", answer.files[p], run}])
+            end
+
+            answered = %{"printed" => answer.printed}
+            {:ok, if(written == [], do: answered, else: Map.put(answered, "changed", written))}
+
+          {:error, refusal} ->
+            {:ok, %{"failed" => refusal.repair, "problem" => to_string(refusal.problem)}}
+        end
+    end
+  end
+
+  # The python path — the WASI lane, kept until LT3 retires wasmex.
+  defp execute_python(world, run, path, snapshot) do
     case python() do
       nil ->
         {:error,
@@ -478,7 +526,8 @@ defmodule Blazie.Coding do
            problem: :no_python,
            repair:
              "This node has no python module, so nothing can be run. Set `:python_wasm` (or " <>
-               "PYTHON_WASM) to a wasi build of cpython."
+               "PYTHON_WASM) to a wasi build of cpython — or write the file as .lua, which " <>
+               "runs everywhere."
          }}
 
       bytes ->
