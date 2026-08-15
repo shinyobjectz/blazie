@@ -382,7 +382,16 @@ wc -l")` inside a workspace guest: eleven builtins (`ls cat grep echo wc
 head tail sort uniq rm mv`), pipes, `>` writing a key, `*` globbing over
 key names — a pure Elixir function over the workspace map, so there is no
 process, no tty, and no host path anywhere; `cat /etc/passwd` is an absent
-key (tested). The unknown-command answer names the shelf, making every
-builtin an agent asks for and misses a recorded data point toward the LT5b
-(real busybox-bash via the tiny-lasers transpiler) decision, which stays
-gated on this proving insufficient. 10 tests; suite 880 green.
+key (tested). The unknown-command answer names the shelf, so every builtin
+an agent asks for and misses is a recorded data point. **LT5b demoted to
+probably-never (owner's call, 2026-08-15):** the point was never real POSIX
+— it is that the workspace guest is a LUA-ONLY MICROKERNEL: `file.*` the
+filesystem, `sh()` the shell, captured `print` the tty, the capability
+table the syscall table, the Elixir host the kernel on the far side of the
+process wall. The grant grows builtins on demand; busybox-through-the-
+transpiler would only ever return if the demand signal proves the small
+size wrong. tyn-os stays a watch item for one niche: packaging a dedicated-
+VM tenant partition as a bare-metal BEAM with no OS under it — an isolation
+rung blazie already has via ordinary VMs, made smaller; blocked today by
+tyn's lack of persistent storage and sidecars, hedged by the native in-BEAM
+replicator fallback already named in P4. 10 tests; suite 880 green.
