@@ -14,8 +14,9 @@ defmodule Blazie.Coding do
   what it can do is appending a fact, not shipping a release, and a tool added
   by somebody else runs under exactly the same fence as the ones here.
 
-  A tool that arrives as a wasm module runs in the sandbox instead. That is the
-  same `Tool.run/3`, and it is how an agent runs code nobody in this tree wrote.
+  There is one guest runtime — Lua on the BEAM — and everything an agent runs,
+  authored tool or workspace script, runs under the same fence (LT3 retired the
+  wasm lane; `Tool.run/3` refuses an image with the road back).
 
   ## Nothing it writes lands unchecked
 
@@ -453,32 +454,29 @@ defmodule Blazie.Coding do
   end
 
   @doc """
-  Run one of the workspace.s files, fenced.
+  Run one of the workspace's files, fenced.
 
   A `.lua` file needs no directory and no wasm: the workspace facts become the
-  guest.s map (`Lua.workspace/3`), and what it wrote comes back as facts — the
-  LT2 path (docs/storage-plan.md). Anything else takes the legacy python/WASI
-  lane below, kept until LT3 retires wasmex: the files are written into a
-  directory, the directory is preopened as the guest.s only filesystem, and
-  whatever it leaves behind comes back as facts. So the agent works in python the way anybody works in python — a file,
-  an import, a thing it wrote next to it — and none of that reaches anything the
-  caller did not hand over.
+  guest's map (`Lua.workspace/3`), the guest computes behind the same fence a
+  formula lives behind — no reach, frozen clock — and what it wrote comes back
+  as facts with the run's provenance. Anything else refuses with the road
+  back: one guest runtime (docs/storage-plan.md, LT3).
 
-  `preopen` is what makes this ordinary rather than clever. A guest with no
-  preopened directory has no filesystem at all; with one it has exactly that
-  one. The fence is not a policy about paths, it is the absence of everything
-  else.
-
-  The directory is temporary and goes afterwards. The durable copy is the facts
-  it was built from and the facts it produced, which is the only account that
-  survives a restart.
+  The durable copy is the facts it was built from and the facts it produced,
+  which is the only account that survives a restart.
   """
   @spec execute(World.ref(), term(), String.t(), Snapshot.t()) :: {:ok, map()} | {:error, map()}
   def execute(world, run, path, %Snapshot{} = snapshot) do
     if String.ends_with?(path, ".lua") do
       execute_lua(world, run, path, snapshot)
     else
-      execute_python(world, run, path, snapshot)
+      {:ok,
+       %{
+         "failed" =>
+           "Only .lua runs here — the wasm/python lane was retired (one guest runtime). " <>
+             "Write #{path} as a .lua file; the workspace is there through file.read/write/list.",
+         "problem" => "no_such_runtime"
+       }}
     end
   end
 
@@ -515,89 +513,5 @@ defmodule Blazie.Coding do
             {:ok, %{"failed" => refusal.repair, "problem" => to_string(refusal.problem)}}
         end
     end
-  end
-
-  # The python path — the WASI lane, kept until LT3 retires wasmex.
-  defp execute_python(world, run, path, snapshot) do
-    case python() do
-      nil ->
-        {:error,
-         %{
-           problem: :no_python,
-           repair:
-             "This node has no python module, so nothing can be run. Set `:python_wasm` (or " <>
-               "PYTHON_WASM) to a wasi build of cpython — or write the file as .lua, which " <>
-               "runs everywhere."
-         }}
-
-      bytes ->
-        in_a_directory(snapshot, fn dir ->
-          answered = away(bytes, dir, path)
-          {:ok, Map.merge(answered, changed(world, run, snapshot, dir))}
-        end)
-    end
-  end
-
-  defp python do
-    case Application.get_env(:blazie, :python_wasm) || System.get_env("PYTHON_WASM") do
-      nil -> nil
-      where -> if File.exists?(where), do: File.read!(where), else: nil
-    end
-  end
-
-  # The workspace, on a disk, for exactly as long as the call takes.
-  defp in_a_directory(snapshot, doing) do
-    dir = Path.join(System.tmp_dir!(), "blazie-work-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(dir)
-
-    for path <- files(snapshot) do
-      full = Path.join(dir, path)
-      File.mkdir_p!(Path.dirname(full))
-      File.write!(full, to_string(read(snapshot, path) || ""))
-    end
-
-    try do
-      doing.(dir)
-    after
-      File.rm_rf(dir)
-    end
-  end
-
-  defp away(bytes, dir, path) do
-    opts = [
-      fuel: Application.get_env(:blazie, :python_fuel, 20_000_000_000),
-      memory_bytes: Application.get_env(:blazie, :python_memory, 512 * 1024 * 1024),
-      args: ["python", Path.join("/work", path)],
-      preopen: [%Wasmex.Wasi.PreopenOptions{path: dir, alias: "/work"}]
-    ]
-
-    case Blazie.Sandbox.run_wasi(bytes, "", opts) do
-      {:ok, said, spent} -> %{"printed" => said, "fuel" => spent.fuel}
-      {:error, refusal} -> %{"failed" => refusal.repair, "problem" => to_string(refusal.problem)}
-    end
-  end
-
-  # Whatever the guest left behind, back as facts. A run that wrote a file and
-  # told nobody would be a run whose work vanished with the directory.
-  defp changed(world, run, snapshot, dir) do
-    before = MapSet.new(files(snapshot))
-
-    written =
-      dir
-      |> Path.join("**/*")
-      |> Path.wildcard()
-      |> Enum.filter(&File.regular?/1)
-      |> Enum.map(&Path.relative_to(&1, dir))
-      |> Enum.reject(fn path ->
-        MapSet.member?(before, path) and read(snapshot, path) == File.read!(Path.join(dir, path))
-      end)
-
-    for path <- written do
-      id = "file:" <> path
-      content = File.read!(Path.join(dir, path))
-      World.append(world, [{id, "path", path, run}, {id, "content", content, run}])
-    end
-
-    if written == [], do: %{}, else: %{"changed" => written}
   end
 end

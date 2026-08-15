@@ -54,9 +54,11 @@ defmodule Blazie.MixProject do
 
   # Two of these are here for what is next rather than for what runs.
   #
-  # `wasmex` is the sandbox a JOB will spawn — Lua is the authoring surface for
-  # formulas, jobs and queries, and WebAssembly is what an agent image runs in.
-  # Nothing calls it yet. That is a plan, and it is written here as one.
+  # Lua on the BEAM (luerl) is the one guest runtime — authoring surface and
+  # sandbox both. `wasmex` used to sit beside it as the lane for agent images
+  # and WASI python; it was retired 2026-08-15 (docs/storage-plan.md, LT3):
+  # one fence, one function answering "may this reach", and nothing
+  # memory-unsafe in a guest's path.
   #
   # SlateDB used to be named here as "the destination" for storage, which read
   # like a decision and was never one. What actually ships is `Store.File` on
@@ -69,10 +71,9 @@ defmodule Blazie.MixProject do
       {:phoenix, "~> 1.8"},
       {:bandit, "~> 1.0"},
       {:jason, "~> 1.4"},
-      {:wasmex, "~> 0.15"},
       {:luerl, "~> 1.5"},
-      # The storage engine under Store.SQLite (docs/storage-plan.md). A NIF,
-      # like wasmex already is; the seam above it is the decision that counts.
+      # The storage engine under Store.SQLite (docs/storage-plan.md). A NIF —
+      # the seam above it is the decision that counts.
       {:exqlite, "~> 0.27"},
       # The Elixir client, tested here against a real HTTP round trip so the
       # SDK and the surface cannot drift apart unnoticed.

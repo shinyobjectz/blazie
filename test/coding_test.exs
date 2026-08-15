@@ -141,81 +141,12 @@ defmodule Blazie.CodingTest do
     assert Coding.files(snapshot(world)) == []
   end
 
-  @tag :python
-  test "it runs a file in the sandbox and gets what it printed", %{world: world} do
-    {:ok, _} =
-      World.append(world, [
-        {"file:go.py", "path", "go.py"},
-        {"file:go.py", "content", "print(6*7)"}
-      ])
-
-    assert {:ok, %{"printed" => printed}} =
-             Coding.execute(world, "run-1", "go.py", snapshot(world))
-
-    assert String.trim(printed) == "42"
-  end
-
-  @tag :python
-  test "the whole workspace is beside it, so an import works", %{world: world} do
-    {:ok, _} =
-      World.append(world, [
-        {"file:lib.py", "path", "lib.py"},
-        {"file:lib.py", "content", "def double(n):\n    return n * 2\n"},
-        {"file:go.py", "path", "go.py"},
-        {"file:go.py", "content",
-         "import sys\nsys.path.insert(0, '/work')\nimport lib\nprint(lib.double(21))\n"}
-      ])
-
-    assert {:ok, %{"printed" => printed}} =
-             Coding.execute(world, "run-1", "go.py", snapshot(world))
-
-    assert String.trim(printed) == "42"
-  end
-
-  @tag :python
-  test "what it writes comes back as facts", %{world: world} do
-    {:ok, _} =
-      World.append(world, [
-        {"file:go.py", "path", "go.py"},
-        {"file:go.py", "content", "open('/work/out.txt','w').write('made by the guest')"}
-      ])
-
-    assert {:ok, %{"changed" => changed}} =
-             Coding.execute(world, "run-1", "go.py", snapshot(world))
-
-    # A run that wrote a file and told nobody would be a run whose work vanished
-    # with the directory it happened in.
-    assert "out.txt" in changed
-    assert Coding.read(snapshot(world), "out.txt") == "made by the guest"
-  end
-
-  @tag :python
-  test "a file that fails comes back with the traceback, not a crash", %{world: world} do
-    {:ok, _} =
-      World.append(world, [
-        {"file:bad.py", "path", "bad.py"},
-        {"file:bad.py", "content", "raise ValueError('deliberate')"}
-      ])
-
-    assert {:ok, answered} = Coding.execute(world, "run-1", "bad.py", snapshot(world))
-
-    # The model has to be able to read what went wrong; a refusal it never sees
-    # is a loop that repeats.
-    assert answered["failed"] =~ "ValueError" or answered["failed"] =~ "deliberate"
-  end
-
-  test "without a python module it says what to set", %{world: world} do
-    held = Application.get_env(:blazie, :python_wasm)
-    Application.delete_env(:blazie, :python_wasm)
-    on_exit(fn -> if held, do: Application.put_env(:blazie, :python_wasm, held) end)
-
-    if System.get_env("PYTHON_WASM") do
-      assert true
-    else
-      assert {:error, refusal} = Coding.execute(world, "run-1", "go.py", snapshot(world))
-      assert refusal.problem == :no_python
-      assert refusal.repair =~ "PYTHON_WASM"
-    end
+  test "a non-lua file refuses with the road back", %{world: world} do
+    # One guest runtime (LT3): anything that is not .lua answers the refusal
+    # as data — the loop hands it to the model, whose repair is to write .lua.
+    assert {:ok, answered} = Coding.execute(world, "run-1", "go.py", snapshot(world))
+    assert answered["problem"] == "no_such_runtime"
+    assert answered["failed"] =~ ".lua"
   end
 
   test "the prompt is built from what is declared", %{world: world} do

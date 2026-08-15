@@ -222,8 +222,14 @@ defmodule Blazie.Lua do
 
   # Everything that reaches outside or loads more code. `load` and its family go
   # too: a guest that can compile a string could rebuild anything removed here
-  # if it ever got a reference back.
-  @removed ~w(io package require load loadstring dofile loadfile)
+  # if it ever got a reference back. `debug`, `collectgarbage` and
+  # `string.dump` joined the list when the kong-lua-sandbox checklist was
+  # diffed against this one (LT3, docs/storage-plan.md): no guest has a use
+  # for any of them, and every widening is a hole. `rawget`/`rawset` stay
+  # DELIBERATELY — kong strips them to protect its metatable walls, but this
+  # fence is absence, not metatables, they are pure table ops, and the shelf's
+  # own lust uses them.
+  @removed ~w(io package require load loadstring dofile loadfile debug collectgarbage)
 
   @doc """
   The globals this host removes, so the world can keep them removed.
@@ -248,10 +254,15 @@ defmodule Blazie.Lua do
         acc
       end)
 
-    Enum.reduce(@removed_from_os, state, fn name, acc ->
-      {_, acc} = :luerl.set_table_keys(["os", name], nil, acc)
-      acc
-    end)
+    state =
+      Enum.reduce(@removed_from_os, state, fn name, acc ->
+        {_, acc} = :luerl.set_table_keys(["os", name], nil, acc)
+        acc
+      end)
+
+    # Bytecode is not a thing a guest may hold in any direction.
+    {_, state} = :luerl.set_table_keys(["string", "dump"], nil, state)
+    state
   end
 
   # Doctrine 19. What a formula may not have is a value that differs run to run
@@ -269,10 +280,9 @@ defmodule Blazie.Lua do
   A formula and a job run in the same sandbox and differ in exactly this: a
   job is handed the network (and the real clock its network answers travel
   with), a formula is not. `grant/3` reads this and hands back only what it
-  names; `Blazie.Sandbox` honors the same map for a wasm guest, where WASI
-  preview 1 makes `network` a promise the platform keeps for free (there are
-  no sockets to grant). So "may this reach out" is answered by one function
-  rather than inferred from two fences that have to agree.
+  names. Lua on the BEAM is the one guest runtime (the wasm lane was retired
+  — docs/storage-plan.md, LT3), so "may this reach out" is answered by one
+  function, full stop.
   """
   @spec capabilities(:formula | :job) :: %{network: boolean(), clock: :frozen | :real}
   def capabilities(:formula), do: %{network: false, clock: :frozen}
@@ -382,7 +392,7 @@ defmodule Blazie.Lua do
   # The workspace guest: the :formula base (frozen clock, nothing that
   # reaches) plus the file table and a captured print. Runs in the guest's
   # process, so the process dictionary IS the workspace for the duration.
-  defp evaluate_workspace(source, at, snapshot, prelude \\ []) do
+  defp evaluate_workspace(source, at, snapshot, prelude) do
     state = world(:formula, at)
     state = if snapshot, do: Blazie.Lua.Binding.bind(state, snapshot), else: state
     state = grant_workspace(state)

@@ -344,3 +344,17 @@ shelf opened with both survey keepers passing their Luerl smoke tests first
 run — json.lua (round trip + structured state through the workspace) and
 lust (describe/it/expect with counters, report through the captured print:
 the tenant-test core, existing instead of written). LT2 verdict complete.
+
+**LT3 (2026-08-15): PASS — wasmex out.** One guest runtime. `Sandbox` and
+its six test files deleted; `Tool.run` refuses an image with the road back
+(author it in Lua, same fence); `Job.sandboxed` and Coding's python/WASI
+lane removed (`execute` refuses non-`.lua` as data the model can act on);
+the wasmex dep gone from mix.exs. The retired lane's CLAIMS survived it —
+they were properties of the fence, not the engine — and live on in
+`lua_fence_test`: capabilities as the whole map, frozen-vs-real clock,
+deadline and heap kills. The kong-lua-sandbox checklist paid for itself on
+first run: guests could see `debug`, `collectgarbage`, and `string.dump` —
+now stripped — while `rawget`/`rawset` are kept DELIBERATELY (kong protects
+metatable walls; this fence is absence, they are pure table ops, and the
+shelf's own lust uses them). Every divergence from kong's list is now a
+recorded decision with a tripwire. Suite 870 green.
