@@ -167,6 +167,7 @@ defmodule Blazie.Drill do
   """
   @spec run(Snapshot.t(), keyword()) :: {:ok, report()} | {:error, map()}
   def run(%Snapshot{} = history, opts \\ []) do
+    opts = with_replication(opts)
     started = System.monotonic_time(:millisecond)
     target = target(opts)
     ceiling = ceiling(opts)
@@ -507,6 +508,18 @@ defmodule Blazie.Drill do
   defp since(started), do: System.monotonic_time(:millisecond) - started
 
   # ── configuration ──────────────────────────────────────────────────────────
+
+  # The drill reads the replicator's own config when nobody passed a replica
+  # URL — the same door `application.ex` wires. Without this, a deployment
+  # that configured `:replication` and a drill cadence would have every
+  # SQLite world silently skipped: written, tested, configured, and never
+  # drilled, which is the exact shape of failure this module exists to end.
+  defp with_replication(opts) do
+    case (Application.get_env(:blazie, :replication) || [])[:replica_url] do
+      nil -> opts
+      url -> Keyword.put_new(opts, :replica_url, url)
+    end
+  end
 
   defp target(opts) do
     case Keyword.get(opts, :target) || Application.get_env(:blazie, :backup_target) do
