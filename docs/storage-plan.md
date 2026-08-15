@@ -255,6 +255,24 @@ Luerl state, no bytecode path, preemptive BEAM heap/deadline). Its curated
 BASE_ENV whitelist is kept as an LT1 review checklist against
 `Lua.world/2`'s strip list — every divergence deliberate.
 
+**LT5 — the shell (surveyed 2026-08-15, spike-gated, not yet scheduled).**
+"Each BEAM process functions like a filesystem with bash." The prior art is
+tiny-lasers (~/Apps/workbooks/tiny-lasers): a wasm→BEAM TRANSPILER (guests
+become real BEAM functions on the JIT — ordinary processes, preemptible,
+heap-capped) plus a POSIX layer in Elixir (VFS/fd/tty/proc), proven byte-
+identical to Node on real toolchains with 60+ red-team escapes blocked.
+Crucially this does not reopen LT3: wasmex died for being a FOREIGN runtime;
+transpiled guests are BEAM code, so "everything on the BEAM" extends rather
+than breaks. Two sizes, small first: **(a) the shell grant** — ~10 builtins
+(ls/cat/grep/wc/pipes) host-side over the workspace VFS, granted as
+`sh(...)`; days, no wasm, and likely covers what an agent actually needs
+from a terminal. **(b) real bash** — busybox-wasm through the transpiler +
+fd/tty; the real thing, a genuinely large integration, gated on (a) proving
+insufficient. Related but different: tyn-os/kernel is the INVERSE bet (a
+Rust microkernel running the BEAM on bare metal — no Linux, no POSIX, no
+shell, no persistent storage yet); a deployment story to watch, not a
+sandbox story, and today incompatible with the Litestream sidecar.
+
 Ordering: LT1–LT2 can start immediately (only LT4 waits on P1); LT3 lands
 when LT2's verdict is green. Each LT phase gets a verdict below like every
 storage phase.
