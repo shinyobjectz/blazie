@@ -493,7 +493,12 @@ defmodule Blazie.Coding do
         {:ok, %{"failed" => "There is no #{path} in the workspace.", "problem" => "no_such_file"}}
 
       {:ok, source} ->
-        case Blazie.Lua.workspace(source, files) do
+        # The sql() grant (LT4): relational reach over exactly this world's
+        # file, when its store has one. The host chooses the path; the guest
+        # never names one.
+        sql_path = World.store_path(world)
+
+        case Blazie.Lua.workspace(source, files, sql_path: sql_path) do
           {:ok, answer} ->
             written =
               answer.files

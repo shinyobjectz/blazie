@@ -133,6 +133,8 @@ defmodule Blazie.Lua do
     at = Keyword.get(opts, :at, 0)
     snapshot = Keyword.get(opts, :snapshot)
 
+    sql_path = Keyword.get(opts, :sql_path)
+
     with {:ok, prelude} <- preludes(Keyword.get(opts, :prelude, [])) do
       caller = self()
 
@@ -141,6 +143,7 @@ defmodule Blazie.Lua do
           Process.flag(:max_heap_size, %{size: heap, kill: true, error_logger: false})
           Process.put(:blazie_workspace, files)
           Process.put(:blazie_printed, [])
+          if sql_path, do: Process.put(:blazie_sql_path, sql_path)
           send(caller, {self(), evaluate_workspace(source, at, snapshot, prelude)})
         end)
 
@@ -446,8 +449,73 @@ defmodule Blazie.Lua do
     {_, state} = :luerl.set_table_keys(["file", "list"], {:erl_func, &ws_list/2}, state)
     {_, state} = :luerl.set_table_keys(["print"], {:erl_func, &ws_print/2}, state)
     {_, state} = :luerl.set_table_keys(["sh"], {:erl_func, &ws_sh/2}, state)
+
+    # sql() only exists when the host chose a file (LT4). Absence, not error:
+    # a guest without the grant has no name to find, same as every capability.
+    state =
+      if Process.get(:blazie_sql_path) do
+        {_, state} = :luerl.set_table_keys(["sql"], {:erl_func, &ws_sql/2}, state)
+        state
+      else
+        state
+      end
+
     state
   end
+
+  # The sql() grant (LT4): relational reach over exactly one file — the
+  # world's own, chosen by the host — through a READ-ONLY connection opened
+  # per query. The guest never holds a handle or names a path; a write is
+  # refused by the engine itself and comes back as data. Blob columns (id,
+  # value, by — erlang terms) decode through the same [:safe] gate every
+  # stored byte passes.
+  defp ws_sql([query | _], state) when is_binary(query) do
+    path = Process.get(:blazie_sql_path)
+
+    case sql_readonly(path, query) do
+      {:ok, rows} ->
+        {encoded, state} = :luerl.encode(rows, state)
+        {[encoded], state}
+
+      {:error, why} ->
+        {[nil, "sql: #{why} (the connection is read-only, over this world's file alone)"], state}
+    end
+  end
+
+  defp ws_sql(_args, state), do: {[nil, "sql takes one SELECT statement."], state}
+
+  defp sql_readonly(path, query) do
+    alias Exqlite.Sqlite3
+
+    with {:ok, db} <- Sqlite3.open(path, mode: :readonly),
+         {:ok, stmt} <- Sqlite3.prepare(db, query),
+         {:ok, columns} <- Sqlite3.columns(db, stmt),
+         {:ok, raw} <- Sqlite3.fetch_all(db, stmt) do
+      Sqlite3.release(db, stmt)
+      Sqlite3.close(db)
+
+      rows =
+        Enum.map(raw, fn row ->
+          columns |> Enum.zip(Enum.map(row, &sql_value/1)) |> Map.new()
+        end)
+
+      {:ok, rows}
+    else
+      {:error, why} -> {:error, inspect(why)}
+    end
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  # A blob that is an erlang term decodes (the [:safe] gate); anything else —
+  # ordinary text, numbers — passes through as itself.
+  defp sql_value(<<131, _::binary>> = blob) do
+    :erlang.binary_to_term(blob, [:safe])
+  rescue
+    _ -> blob
+  end
+
+  defp sql_value(other), do: other
 
   # The shell grant (LT5a): builtins over the workspace map, pipes and all —
   # terminal ergonomics with no terminal, no process, no host path anywhere.

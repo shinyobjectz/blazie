@@ -375,6 +375,16 @@ defmodule Blazie.World do
   @spec store_module(ref()) :: module()
   def store_module(world), do: GenServer.call(world, :store_module)
 
+  @doc """
+  Where this world's store keeps its bytes, or nil for a store with no file.
+
+  The sql() grant reads through this: a guest's relational reach is exactly
+  the file the world's own store holds, chosen here — never a path a guest
+  names.
+  """
+  @spec store_path(ref()) :: String.t() | nil
+  def store_path(world), do: GenServer.call(world, :store_path)
+
   # ── server ─────────────────────────────────────────────────────────────────
 
   @impl true
@@ -538,6 +548,13 @@ defmodule Blazie.World do
   def handle_call(:tx, _from, state), do: answer(state.tx, state)
   def handle_call(:resident, _from, state), do: answer(state.count, state)
   def handle_call(:store_module, _from, state), do: answer(state.module, state)
+
+  def handle_call(:store_path, _from, state) do
+    path =
+      if function_exported?(state.module, :path, 1), do: state.module.path(state.store)
+
+    answer(path, state)
+  end
 
   def handle_call({:raw_at, tx}, _from, state) do
     # Through `matching/3` with the empty pattern, so a paged world's evicted

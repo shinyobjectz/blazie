@@ -494,3 +494,17 @@ read is the store's. The conformance suite gained a fourth consumer
 erasure-reaches-everything; `storage_events_test` unchanged and green — no
 storage event became a fact on the way through. Suite 903 green, and the
 WHOLE suite green under `LEDGER_SYNC=true`, both layouts fsyncing.
+
+**LT4 (2026-08-15): PASS — the sql() grant.** Relational reach over exactly
+one file: the coding run's guest gets `sql("SELECT ...")` against ITS OWN
+world's SQLite file — the path chosen by the host through
+`World.store_path/1` (a store with no file grants nothing: absence, not
+error). The connection is read-only and opened per query; a write is
+refused by the ENGINE and comes back as data; blob columns decode through
+the same [:safe] gate every stored byte passes. The division of labor is
+documented at the grant: sql() answers the SHAPE of the world (counts,
+attributes, tx ranges); value-level questions stay with the facts binding
+the guest already has. With this, the Lua-only microkernel's syscall table
+is: file.* · sh() · sql() · print · (jobs: http.get, blob) — every one
+host-mediated, every one granted deliberately. 6 tests; merged suite 915
+green and 915 under LEDGER_SYNC=true.

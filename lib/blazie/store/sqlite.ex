@@ -146,6 +146,9 @@ defmodule Blazie.Store.SQLite do
     %{bytes: bytes, transactions: state.last_tx, checkpoint_bytes: 0}
   end
 
+  @doc "Where this store's file lives — the seam the sql() grant reads through."
+  def path(state), do: state.path
+
   @doc "One name, one file — deterministic, so an upgrade cannot rename a tenant."
   def filename(name) do
     encoded = name |> :erlang.term_to_binary([:deterministic]) |> Base.url_encode64()
