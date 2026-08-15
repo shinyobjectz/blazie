@@ -376,3 +376,13 @@ now stripped — while `rawget`/`rawset` are kept DELIBERATELY (kong protects
 metatable walls; this fence is absence, they are pure table ops, and the
 shelf's own lust uses them). Every divergence from kong's list is now a
 recorded decision with a tripwire. Suite 870 green.
+
+**LT5a (2026-08-15): PASS — the shell grant.** `sh("grep total *.txt |
+wc -l")` inside a workspace guest: eleven builtins (`ls cat grep echo wc
+head tail sort uniq rm mv`), pipes, `>` writing a key, `*` globbing over
+key names — a pure Elixir function over the workspace map, so there is no
+process, no tty, and no host path anywhere; `cat /etc/passwd` is an absent
+key (tested). The unknown-command answer names the shelf, making every
+builtin an agent asks for and misses a recorded data point toward the LT5b
+(real busybox-bash via the tiny-lasers transpiler) decision, which stays
+gated on this proving insufficient. 10 tests; suite 880 green.

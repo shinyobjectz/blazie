@@ -445,8 +445,19 @@ defmodule Blazie.Lua do
     {_, state} = :luerl.set_table_keys(["file", "write"], {:erl_func, &ws_write/2}, state)
     {_, state} = :luerl.set_table_keys(["file", "list"], {:erl_func, &ws_list/2}, state)
     {_, state} = :luerl.set_table_keys(["print"], {:erl_func, &ws_print/2}, state)
+    {_, state} = :luerl.set_table_keys(["sh"], {:erl_func, &ws_sh/2}, state)
     state
   end
+
+  # The shell grant (LT5a): builtins over the workspace map, pipes and all —
+  # terminal ergonomics with no terminal, no process, no host path anywhere.
+  defp ws_sh([line | _], state) when is_binary(line) do
+    {out, files} = Blazie.Lua.Shell.run(line, Process.get(:blazie_workspace, %{}))
+    Process.put(:blazie_workspace, files)
+    {[out], state}
+  end
+
+  defp ws_sh(_args, state), do: {[nil, "sh takes one command line."], state}
 
   defp ws_read([path | _], state) when is_binary(path) do
     {[Map.get(Process.get(:blazie_workspace, %{}), path)], state}
