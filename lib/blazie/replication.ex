@@ -27,9 +27,12 @@ defmodule Blazie.Replication do
 
   use GenServer
 
-  alias Blazie.Store
+  alias Blazie.{Attribute, Job, Store}
+  alias Exqlite.Sqlite3
 
   @type refusal :: %{problem: atom(), repair: String.t()}
+
+  @job_id "replication"
 
   # ── lifecycle ────────────────────────────────────────────────────────────────
 
@@ -130,23 +133,180 @@ defmodule Blazie.Replication do
     if File.exists?(path) do
       {:ok, :present}
     else
-      case System.cmd(
-             executable!(),
-             ["restore", "-if-replica-exists", "-o", path, "#{replica_url}/#{filename}"],
-             stderr_to_stdout: true
-           ) do
-        {_out, 0} ->
-          if File.exists?(path), do: {:ok, :restored}, else: nothing_to_restore(name)
-
-        {out, _} ->
-          {:error,
-           %{
-             problem: :restore_failed,
-             repair: "litestream could not restore #{inspect(name)}: #{String.slice(out, 0, 300)}"
-           }}
+      case restore("#{replica_url}/#{filename}", path) do
+        :ok -> if File.exists?(path), do: {:ok, :restored}, else: nothing_to_restore(name)
+        {:error, refusal} -> {:error, %{refusal | repair: "#{inspect(name)}: #{refusal.repair}"}}
       end
     end
   end
+
+  @doc """
+  Pull one database from a replica URL to an explicit output path.
+
+  The one restore path — `restore_if_missing/2` and the drill's SQLite pull
+  both go through here, so there is no second restore that could be correct
+  while the real one is not. `:ok` with no file at `output` afterwards means
+  the replica holds nothing under that URL (`-if-replica-exists`).
+  """
+  @spec restore(String.t(), Path.t()) :: :ok | {:error, refusal()}
+  def restore(url, output) do
+    case System.cmd(
+           executable!(),
+           ["restore", "-if-replica-exists", "-o", output, url],
+           stderr_to_stdout: true
+         ) do
+      {_out, 0} ->
+        :ok
+
+      {out, _} ->
+        {:error,
+         %{
+           problem: :restore_failed,
+           repair: "litestream could not restore #{url}: #{String.slice(out, 0, 300)}"
+         }}
+    end
+  end
+
+  @doc """
+  Does the replica hold anything for this world?
+
+  Asked of `litestream ltx`, which answers uniformly for `file://` and `s3://`
+  — a listing with rows means shipped LTX exists. Used by the drill to decide
+  whether a SQLite world can be proven, without pulling anything.
+  """
+  @spec replicated?(term(), String.t()) :: boolean()
+  def replicated?(name, replica_url) do
+    ltx_rows("#{replica_url}/#{Store.SQLite.filename(name)}") != []
+  end
+
+  # ── replication state as facts ───────────────────────────────────────────────
+
+  @doc "The attributes a replication reading describes itself with."
+  @spec seed() :: [{String.t(), String.t(), term()}]
+  def seed do
+    Attribute.define("replicated_ltx", answers: "integer", cardinality: "many") ++
+      Attribute.define("replicated_at", answers: "integer", cardinality: "many") ++
+      Attribute.define("local_tx", answers: "integer", cardinality: "many")
+  end
+
+  @doc "Declare the reading as a job, with how often to run."
+  @spec declare(keyword()) :: [tuple()]
+  def declare(opts \\ []), do: Job.declare(@job_id, opts)
+
+  @doc """
+  A job reporting per-database replication state as facts, honestly minimal.
+
+  For every `.sqlite` file in the watched dir, three facts into whatever world
+  the runner writes (the `$backup` world, in the tree): `local_tx` — the
+  highest blazie transaction in the local file; `replicated_ltx` — the highest
+  LTX transaction the replica holds (litestream's own counter, advanced per
+  commit — NOT a blazie tx, so the two are never compared as equals); and
+  `replicated_at` — when the newest LTX at the replica was created. The alarm
+  shape this preserves: `local_tx` advancing while `replicated_at` stands
+  still is a replicator that has stopped shipping. A replica holding nothing
+  reads `replicated_ltx` 0 and no `replicated_at`, which is the honest claim.
+  """
+  @spec reading(keyword()) :: Job.t()
+  def reading(opts) do
+    dir = Keyword.fetch!(opts, :dir)
+    replica_url = Keyword.fetch!(opts, :replica_url)
+
+    Job.new(@job_id, fn _snapshot ->
+      Enum.flat_map(sqlite_files(dir), &db_reading(dir, &1, replica_url))
+    end)
+  end
+
+  defp db_reading(dir, file, replica_url) do
+    # The fact's id is the world's NAME where the filename decodes to one —
+    # the same id `$storage` readings use — and the raw filename when it does
+    # not, so a stray file is still reported rather than skipped silently.
+    id = name_of(file)
+
+    case local_tx(Path.join(dir, file)) do
+      nil ->
+        []
+
+      tx ->
+        rows = ltx_rows("#{replica_url}/#{file}")
+
+        [{id, "local_tx", tx}, {id, "replicated_ltx", max_txid(rows)}] ++
+          case newest_created(rows) do
+            nil -> []
+            at -> [{id, "replicated_at", at}]
+          end
+    end
+  end
+
+  defp sqlite_files(dir) do
+    case File.ls(dir) do
+      {:ok, entries} -> entries |> Enum.filter(&String.ends_with?(&1, ".sqlite")) |> Enum.sort()
+      {:error, _} -> []
+    end
+  end
+
+  defp name_of(file) do
+    with basename <- Path.basename(file, ".sqlite"),
+         {:ok, bytes} <- Base.url_decode64(basename) do
+      :erlang.binary_to_term(bytes, [:safe])
+    else
+      _ -> file
+    end
+  rescue
+    _ -> file
+  end
+
+  # The highest blazie tx in a local file, read through a second connection —
+  # WAL means readers never block the world that is writing. A file that is
+  # not a blazie world (no facts table) answers nil and is not reported.
+  defp local_tx(path) do
+    {:ok, db} = Sqlite3.open(path)
+
+    try do
+      {:ok, stmt} = Sqlite3.prepare(db, "SELECT COALESCE(MAX(tx), 0) FROM facts")
+      {:row, [tx]} = Sqlite3.step(db, stmt)
+      :ok = Sqlite3.release(db, stmt)
+      tx
+    rescue
+      _ -> nil
+    after
+      Sqlite3.close(db)
+    end
+  end
+
+  # `litestream ltx <url>` — a header line, then one row per LTX file:
+  # `level  min_txid  max_txid  size  created`. Parsed minimally: the txids
+  # (hex) and the created stamp are what freshness needs; anything that does
+  # not parse is dropped rather than guessed at.
+  defp ltx_rows(url) do
+    case System.cmd(executable!(), ["ltx", url], stderr_to_stdout: true) do
+      {out, 0} ->
+        out
+        |> String.split("\n", trim: true)
+        |> Enum.drop(1)
+        |> Enum.flat_map(fn line ->
+          case String.split(line, ~r/\s+/, trim: true) do
+            [_level, _min, max, _size, created] -> parse_row(max, created)
+            _ -> []
+          end
+        end)
+
+      {_out, _} ->
+        []
+    end
+  end
+
+  defp parse_row(max, created) do
+    with {txid, ""} <- Integer.parse(max, 16),
+         {:ok, at, _} <- DateTime.from_iso8601(created) do
+      [{txid, DateTime.to_unix(at)}]
+    else
+      _ -> []
+    end
+  end
+
+  defp max_txid(rows), do: rows |> Enum.map(&elem(&1, 0)) |> Enum.max(fn -> 0 end)
+
+  defp newest_created(rows), do: rows |> Enum.map(&elem(&1, 1)) |> Enum.max(fn -> nil end)
 
   defp nothing_to_restore(name) do
     {:error,

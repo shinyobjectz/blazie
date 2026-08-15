@@ -314,3 +314,29 @@ test-local `HttpProvider` over the `Wire` fixture keeps "an HTTP vendor is a
 module, same answers" proven with zero vendor code in the tree — and is the
 template file for the day a whale tenant brings one back. Deferred
 live-tripwire closed as moot. Suite 871 green.
+
+**P4 (2026-08-15): PASS.** The walking skeleton first (its own commit):
+`Blazie.Replication`, litestream in dir mode as a supervised Port — a tenant
+file created at RUNTIME starts replicating within seconds with no per-tenant
+config, `restore_if_missing/2` is the cold-open path with an honest refusal
+when neither disk nor replica knows the name, `drain/1` is
+deploys-reset-in-flight wired in rather than remembered. Then the three
+halves that make it a phase. The R2 test (`replication_s3_test`,
+`:object_storage`, the backup S3 test's env-var discipline, prefix-per-run)
+runs the SAME lifecycle the `file://` test proves — shipped, wiped, hydrated
+— against a real bucket; never required for the suite. Replication state is
+facts now: `Replication.reading/1` is a Job riding the backup's own runner
+into `$backup`, per database — `local_tx` (the blazie transaction), beside
+`replicated_ltx` and `replicated_at` parsed from `litestream ltx`. Stated
+plainly: the LTX txid is litestream's counter, NOT a blazie tx, so the two
+are never compared as equals — the alarm shape is `local_tx` advancing while
+`replicated_at` stands still, and a replica holding nothing reads zero
+rather than nothing. And the drill drills SQLite worlds the way they are
+kept: the pull is `litestream restore` into the same scratch dir (through
+`Replication.restore/2`, the one restore path), the reopen is
+`Store.SQLite`, and `ask_both/4` is the same comparison the ledger drill
+runs — parameterized on the store, never forked. Conditions still open,
+said out loud: the binary is a pinned v0.5-line dev build but `meta-dir` is
+not set (the daemon defaults it beside the db), and the R2 request-budget
+math waits for a real tenant count. Suite 878 green, and green under
+`LEDGER_SYNC=true`.

@@ -232,13 +232,30 @@ defmodule Blazie.Backup do
     every = Keyword.get(opts, :every, 900)
     {:ok, world} = World.open(@world)
 
+    # The replication reading rides this runner: same world, same cadence,
+    # same alarm surface — replication state is backup observability, not a
+    # second account of it. Only when a daemon is configured; a reading of
+    # nothing every cadence would be noise wearing a job's clothes.
+    replication = Keyword.get(opts, :replication) || Application.get_env(:blazie, :replication)
+
     if World.tx(world) == 0 do
-      World.append(world, Attribute.seed() ++ Job.seed() ++ seed() ++ declare(every: every))
+      World.append(
+        world,
+        Attribute.seed() ++
+          Job.seed() ++
+          seed() ++
+          declare(every: every) ++
+          if(replication,
+            do: Blazie.Replication.seed() ++ Blazie.Replication.declare(every: every),
+            else: []
+          )
+      )
     end
 
     Job.Runner.start_link(
       world: world,
-      jobs: [job(opts)],
+      jobs:
+        [job(opts)] ++ if(replication, do: [Blazie.Replication.reading(replication)], else: []),
       every: :timer.seconds(every),
       name: __MODULE__.Runner
     )

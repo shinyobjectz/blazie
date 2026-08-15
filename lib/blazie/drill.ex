@@ -171,7 +171,7 @@ defmodule Blazie.Drill do
     target = target(opts)
     ceiling = ceiling(opts)
 
-    case choose(history, target, ceiling) do
+    case choose(history, target, ceiling, opts) do
       {nil, too_big} ->
         {:ok,
          %{
@@ -224,7 +224,7 @@ defmodule Blazie.Drill do
   # Least recently drilled first, and never drilled before that. The rotation
   # lives in the drill's own past facts rather than in this process, so a
   # redeploy picks up where the last one left off.
-  defp choose(history, target, ceiling) do
+  defp choose(history, target, ceiling, opts) do
     order =
       history
       |> Snapshot.find(id: @id, attribute: "drilled")
@@ -237,7 +237,7 @@ defmodule Blazie.Drill do
     World.open_worlds()
     |> Enum.sort_by(&Map.get(order, &1, -1))
     |> Enum.reduce_while({nil, []}, fn name, {nil, too_big} ->
-      case held(target, name) do
+      case held_for(name, target, opts) do
         # Nothing held under this name: a world kept in memory, or one opened
         # since the last backup run. Neither is a finding.
         0 -> {:cont, {nil, too_big}}
@@ -245,6 +245,53 @@ defmodule Blazie.Drill do
         _held -> {:halt, {name, too_big}}
       end
     end)
+  end
+
+  # How much of this world the backup holds — which depends on how the world
+  # is shipped. A SQLite world rides the replicator, so "held" is whether the
+  # replica has its LTX, sized by the local file (the restore is the same
+  # bytes give or take WAL framing); everything else is the segment count the
+  # backup target answers. A SQLite world with no replica configured is
+  # honestly not drillable and skips, exactly like a memory world.
+  defp held_for(name, target, opts) do
+    if store_of(name) == Store.SQLite do
+      case Keyword.get(opts, :replica_url) do
+        nil ->
+          0
+
+        replica_url ->
+          if Blazie.Replication.replicated?(name, replica_url),
+            do: local_size(name, opts),
+            else: 0
+      end
+    else
+      if target, do: held(target, name), else: 0
+    end
+  end
+
+  # Asked of the live world, which can close between `open_worlds/0` listing
+  # it and this call landing — an ordinary race, not a finding. A world that
+  # is gone holds nothing to drill this cadence; the next one sees it open.
+  defp store_of(name) do
+    World.store_module(World.via(name))
+  catch
+    :exit, _ -> nil
+  end
+
+  defp local_size(name, opts) do
+    with dir when dir != nil <-
+           Keyword.get(opts, :ledger_dir) || Application.get_env(:blazie, :ledger_dir),
+         {:ok, %{size: size}} <- File.stat(Path.join(dir, Store.SQLite.filename(name))) do
+      # Never zero for a real file, so a replicated world is never mistaken
+      # for an unheld one by its size.
+      max(size, 1)
+    else
+      # Replicated but not on this disk (evicted): drillable, size unknown.
+      # The ceiling exists to protect the scratch disk, and an unknown size
+      # is not a licence to skip proving the world — count it small and let
+      # the restore be what it is.
+      _ -> 1
+    end
   end
 
   # `Backup.held/2` insists the target answered, and a target that cannot be
@@ -267,12 +314,13 @@ defmodule Blazie.Drill do
     scratch = Path.join(scratch_dir(opts), "drill-#{System.unique_integer([:positive])}")
     dir = Path.join(scratch, "ledgers")
     copy = copy_name()
+    store = World.store_module(World.via(name))
 
     try do
       with :ok <- free?(copy),
-           {:ok, restored} <- pull(name, target, scratch, dir),
+           {:ok, restored} <- pull(name, store, target, opts, scratch, dir),
            :ok <- whole?(restored, name),
-           {:ok, compared, at} <- ask_both(name, copy, dir) do
+           {:ok, compared, at} <- ask_both(name, copy, dir, store) do
         {:ok,
          %{
            ledgers: restored.ledgers,
@@ -292,7 +340,22 @@ defmodule Blazie.Drill do
     end
   end
 
-  defp pull(name, target, scratch, dir) do
+  # The pull is the half that differs by store; the comparison never does.
+  # A SQLite world comes back the way it left — through litestream — into the
+  # same scratch dir, under the same refusal shapes `whole?/2` judges.
+  defp pull(name, Store.SQLite, _target, opts, _scratch, dir) do
+    replica_url = Keyword.fetch!(opts, :replica_url)
+    File.mkdir_p!(dir)
+    out = Path.join(dir, Store.SQLite.filename(name))
+
+    with :ok <- Blazie.Replication.restore("#{replica_url}/#{Store.SQLite.filename(name)}", out) do
+      if File.exists?(out),
+        do: {:ok, %{ledgers: 1, incomplete: []}},
+        else: {:ok, %{ledgers: 0, incomplete: []}}
+    end
+  end
+
+  defp pull(name, _store, target, _opts, scratch, dir) do
     Backup.restore(
       ledger_dir: dir,
       # Never the real key store, and in fact never touched at all: with
@@ -338,13 +401,18 @@ defmodule Blazie.Drill do
   # back the world already open under a name, so opening the copy under its
   # original name would silently return the *live* world — and the drill would
   # compare it against itself and pass forever.
-  defp ask_both(name, copy, dir) do
+  #
+  # The store is a parameter and the comparison is not: whichever engine holds
+  # the copy, both sides answer `find_at/3` at the restored world's tx and the
+  # answers are equal or the drill fails. One comparison, or the SQLite path
+  # could be correct while the ledger path was not — or the reverse.
+  defp ask_both(name, copy, dir, store) do
     File.rename!(
-      Path.join(dir, Store.File.filename(name)),
-      Path.join(dir, Store.File.filename(copy))
+      Path.join(dir, store.filename(name)),
+      Path.join(dir, store.filename(copy))
     )
 
-    {:ok, restored} = World.open(copy, store: {Store.File, dir: dir})
+    {:ok, restored} = World.open(copy, store: {store, dir: dir})
     live = World.via(name)
     at = World.tx(restored)
 
@@ -446,7 +514,13 @@ defmodule Blazie.Drill do
         {module, topts}
 
       nil ->
-        raise "No backup target configured. A drill with nothing to restore from is not a drill."
+        # A replica URL is somewhere to restore from too — a deployment whose
+        # every world is SQLite drills against the replicator alone.
+        if Keyword.get(opts, :replica_url) do
+          nil
+        else
+          raise "No backup target configured. A drill with nothing to restore from is not a drill."
+        end
     end
   end
 

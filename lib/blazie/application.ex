@@ -60,6 +60,16 @@ defmodule Blazie.Application do
     end
   end
 
+  # The replicator sidecar, only when somewhere to ship to is configured:
+  # `config :blazie, :replication, dir: ..., replica_url: ...`. Off in test —
+  # tests that want one start it themselves with their own scratch replica.
+  defp replication do
+    case Application.get_env(:blazie, :replication) do
+      nil -> []
+      opts -> [{Blazie.Replication, opts}]
+    end
+  end
+
   @impl true
   def start(_type, _args) do
     children =
@@ -88,7 +98,7 @@ defmodule Blazie.Application do
         Blazie.Index.Exact.holder_spec(),
         {Phoenix.PubSub, name: Blazie.PubSub},
         Blazie.Surface.Endpoint
-      ] ++ vitals() ++ storage() ++ agents() ++ backup() ++ drill()
+      ] ++ vitals() ++ storage() ++ agents() ++ backup() ++ drill() ++ replication()
 
     # Three restarts in five seconds is too tight for a system where restarting
     # a component is a legitimate operation rather than only a symptom. Ten

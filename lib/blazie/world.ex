@@ -347,6 +347,14 @@ defmodule Blazie.World do
   @spec store_stats(ref()) :: map()
   def store_stats(world), do: GenServer.call(world, :store_stats)
 
+  @doc """
+  Which store module keeps this world's facts. Observability, not vocabulary —
+  the drill needs it to pull a copy the way the store was shipped, and nothing
+  else should ever branch on it.
+  """
+  @spec store_module(ref()) :: module()
+  def store_module(world), do: GenServer.call(world, :store_module)
+
   # ── server ─────────────────────────────────────────────────────────────────
 
   @impl true
@@ -461,6 +469,7 @@ defmodule Blazie.World do
 
   def handle_call(:tx, _from, state), do: {:reply, state.tx, state}
   def handle_call(:resident, _from, state), do: {:reply, state.count, state}
+  def handle_call(:store_module, _from, state), do: {:reply, state.module, state}
 
   def handle_call({:raw_at, tx}, _from, state) do
     # Through `matching/3` with the empty pattern, so a paged world's evicted
