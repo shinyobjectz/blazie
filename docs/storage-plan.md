@@ -646,3 +646,24 @@ self-recursion** — the sugar does not pre-bind the name in stock Luerl 1.5
 (`{undefined_function, nil}`); the explicit form `local f; f = function()
 ... end` works. Not shimmable at the grant (it is a parser behavior);
 documented here and worked around in authored code.
+
+**TL4 (2026-08-15): SPIKE RUN — REJECTED on the numbers, recipe kept.**
+lua-aot (hugomg/lua-aot-5.4, MIT) → C → wasm32-wasip1 WORKS end to end:
+the modified Lua 5.4.3 runtime + an AOT-compiled chunk link into one 594KB
+module (recipe: `-mllvm -wasm-enable-sjlj` + `-lsetjmp` for Lua's
+setjmp/longjmp error handling — tiny-lasers' EH support carries it — plus
+three honest stubs: tmpfile/system → fail-at-call, clock → monotonic), and
+it runs under tiny-lasers with the EXACT checksum (671371). Native luaot:
+4.3ms — barely ahead of PUC's 4.8ms on our heavy mix, so the headline 2×
+is numerics-only to begin with. But on the engine the bet inverts:
+**interp lane 6,972ms (~76× slower than Luerl's 92ms), ASM lane 10.2s →
+26.7s → 39.0s across three runs** — the tier degrades run-over-run on a
+module this size (an interpreter runtime is all giant functions and sjlj
+shapes; boundary-crossing and recompilation dominate). Verdict: NOT the
+perf rung — Luerl stays the answer for authored Lua, small compiled
+programs stay the compute path, and the rung is un-needed until a real
+workload measures slow. Two artifacts survive the rejection: the
+liblua-on-wasi recipe (any C using sjlj now has a proven path into the
+registry), and an upstream tiny-lasers finding — the ASM tier's
+run-over-run degradation on large modules — worth its own investigation
+the day the tier matters. Gate 4 (coroutines) moot.
