@@ -691,3 +691,27 @@ seen in the TL4 spike, now on a plain -O2 C module: two upstream findings
 gate any future claim about the perf tier. The fence still holds
 everywhere — wasm executes inside the calling BEAM process, so the Lua
 guest's deadline kill covers washy and every program it invokes.
+
+**THE REVERSAL (2026-08-15): tiny-lasers removed; the shell is native.**
+The engine measurements made the call (owner's decision, same day): C→wasm
+ran 60× slower than BEAM-native on string work, the ASM tier bought nothing
+on defaults and degraded under repetition — so the wasm engine was removed
+and Luerl's lesson was applied at shell scale: implement the semantics as
+ordinary Elixir and let the BEAM provide the speed and the fence.
+`Blazie.Lua.Shell` is now a pure function — a small recursive-descent
+parser (pipes, `;`, `&&`/`||`, `>`/`>>`, `$VAR`, for/while/if, block tails
+piping or redirecting onward) over Elixir tools, `sed` (the s/// subset,
+BRE-lite) and `seq` implemented natively beside the rest. **The entire
+21-test behavior contract passed unchanged on the first run of the native
+engine** — the same file that was green over wasm, which is what made the
+swap safe, and the strongest argument the contract-not-engine discipline
+has produced yet. The TL registry road (washy, minised, the language
+matrix's compiled rows) is CLOSED, its artifacts deleted, its findings
+kept: the liblua-wasi/sjlj recipe, the tier findings, and the lunatik
+cross-check (Lua-in-the-Linux-kernel — unusable here, kernel-space C, but
+its thesis IS our microkernel: give Lua a kernel API, not a POSIX
+userland). What remains of the language story: **Lua authors, Elixir
+hosts** — one implementation language for the whole sandbox, at the speed
+that was the fastest fenced lane all along. If a real compiled tool is
+ever demanded, the tiny-lasers repo and every recipe stay a `git clone`
+away. Suite 926 green, wasm-free.

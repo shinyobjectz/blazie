@@ -76,7 +76,7 @@ defmodule Blazie.LuaShellTest do
     end
   end
 
-  describe "the grammar is C's — washy fronts the line (TL1)" do
+  describe "the grammar, native (for/while/if, $VAR, &&/||, block tails)" do
     test "the exit criterion: a for-loop pipes into a host program" do
       {out, _} = Shell.run("for f in a b c; do echo $f; done | wc -l", %{})
       assert out == "3"
@@ -92,7 +92,7 @@ defmodule Blazie.LuaShellTest do
       assert out == "yes"
     end
 
-    test "a cross-species pipeline: Elixir cat into C upper" do
+    test "cat pipes into upper" do
       {out, _} = Shell.run("cat in.txt | upper", %{"in.txt" => "hello\n"})
       assert out == "HELLO"
     end
@@ -113,18 +113,18 @@ defmodule Blazie.LuaShellTest do
     end
   end
 
-  describe "the wasm species — real programs as registry entries (TL2)" do
-    test "real sed runs mid-pipe — minised, compiled C, interpreted as BEAM code" do
+  describe "sed and seq — the tools that came home (native)" do
+    test "sed runs mid-pipe" do
       {out, _} = Shell.run("echo hello world | sed s/hello/goodbye/", %{})
       assert out == "goodbye world"
     end
 
-    test "the exit chain: C grammar, wasm program, Elixir program, one line" do
+    test "the exit chain: grammar, sed, wc, one line" do
       {out, _} = Shell.run("for f in alpha beta; do echo $f; done | sed s/a/A/ | wc -l", %{})
       assert out == "2"
     end
 
-    test "the Zig row: seq, 2.9KB of raw-WASI zig, chains into C sed" do
+    test "seq chains into sed" do
       {out, _} = Shell.run("seq 3", %{})
       assert out == "1\n2\n3"
 
