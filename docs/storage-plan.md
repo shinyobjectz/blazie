@@ -395,3 +395,102 @@ VM tenant partition as a bare-metal BEAM with no OS under it — an isolation
 rung blazie already has via ordinary VMs, made smaller; blocked today by
 tyn's lack of persistent storage and sidecars, hedged by the native in-BEAM
 replicator fallback already named in P4. 10 tests; suite 880 green.
+
+**P4 (2026-08-15): PASS.** The walking skeleton first (its own commit):
+`Blazie.Replication`, litestream in dir mode as a supervised Port — a tenant
+file created at RUNTIME starts replicating within seconds with no per-tenant
+config, `restore_if_missing/2` is the cold-open path with an honest refusal
+when neither disk nor replica knows the name, `drain/1` is
+deploys-reset-in-flight wired in rather than remembered. Then the three
+halves that make it a phase. The R2 test (`replication_s3_test`,
+`:object_storage`, the backup S3 test's env-var discipline, prefix-per-run)
+runs the SAME lifecycle the `file://` test proves — shipped, wiped, hydrated
+— against a real bucket; never required for the suite. Replication state is
+facts now: `Replication.reading/1` is a Job riding the backup's own runner
+into `$backup`, per database — `local_tx` (the blazie transaction), beside
+`replicated_ltx` and `replicated_at` parsed from `litestream ltx`. Stated
+plainly: the LTX txid is litestream's counter, NOT a blazie tx, so the two
+are never compared as equals — the alarm shape is `local_tx` advancing while
+`replicated_at` stands still, and a replica holding nothing reads zero
+rather than nothing. And the drill drills SQLite worlds the way they are
+kept: the pull is `litestream restore` into the same scratch dir (through
+`Replication.restore/2`, the one restore path), the reopen is
+`Store.SQLite`, and `ask_both/4` is the same comparison the ledger drill
+runs — parameterized on the store, never forked. Conditions still open,
+said out loud: the binary is a pinned v0.5-line dev build but `meta-dir` is
+not set (the daemon defaults it beside the db), and the R2 request-budget
+math waits for a real tenant count. Suite 878 green, and green under
+`LEDGER_SYNC=true`.
+
+**P4-cluster (2026-08-15): PASS, with the fence's limits stated.** Hydrate
+and evict are both lifecycles now. Idle eviction is the World's own:
+`evict_after:` rides the GenServer timeout, a world nobody has talked to
+closes itself exactly the way `World.close/1` closes it — the process ends,
+the file stays, the next open answers everything (worlds became `:transient`
+children for this, which changes nothing about crash-restarts and everything
+about staying evicted). Disk pressure is `Replication.evict/3`: close AND
+delete the local file — REFUSED unless the replica actually holds the
+world's LTX, because "R2 is truth" is a claim this function checks rather
+than assumes, and deleting the only copy would be erasure by accident. The
+round trip is tested: evicted, then hydrated back through
+`restore_if_missing/2` with its facts intact (and probed first: a local
+deletion does NOT delete replica data — the daemon logs an unregister error
+and the LTX stays). The lease: this binary was probed for the upstream
+distributed-leasing config the survey promised and DOES NOT EXPOSE IT (no
+lease key in its config schema; the lease symbols in the binary belong to
+its Azure SDK), so the fence is the honest minimum — a LEASE object at the
+replica prefix, exclusive-create on `file://`, a second node refused with
+the holder named, released on drain before the caller's `drain/1` returns,
+kept across a crash so only the same node retakes it. NOT enforced, said
+plainly: `s3://` starts unfenced with a logged warning — R2's conditional
+writes are the production fence and are not wired; faking them with
+read-then-write would only shrink the race, not close it. Sticky
+tenant→node routing (who SHOULD write; the lease is who MAY) is the
+remaining piece of this phase and is deliberately not started. Suite 884
+green, conformance green under `LEDGER_SYNC=true`.
+
+**P5 (2026-08-15): PASS — the default flipped.** `World.default_store/0`
+with `:ledger_dir` set now answers `{Store.SQLite, dir:, sync:}`;
+`checkpoint_every` is gone from the default because a checkpoint was the
+file store's cure for replaying everything at open and SQLite opens by
+reading nothing. The one-way door sits at the seam the World already owns:
+`World.init`, before the store opens — a world whose `.sqlite` is absent
+while a `.ledger` exists is migrated first (through `Store.Migrate`, so
+through `Store.File`'s replay and every old shape it normalizes), logged,
+serialised by construction since only one init ever runs per name. Proven
+with hand-written old-shape ledger bytes: the migrated world answers
+identically, resumes its tx counter, and never migrates twice — the
+`.sqlite`'s presence is the door closing. `World.exists?/1` answers true
+for either file, because a name is taken by its facts, not by which engine
+holds them. `store_default_test` updated deliberately; and
+`storage_layout_test` — the file that exists because a silent layout change
+once left a node green beside 791KB of invisible facts — now pins BOTH
+suffixes: `.ledger` forever (the migration door finds pre-flip disks by
+that exact name) and `.sqlite` as the layout the replicator's pattern
+watches. Memory default unchanged. Suite 888 green, and the conformance +
+default files green under `LEDGER_SYNC=true`.
+
+**P6 (2026-08-15): PASS.** Compaction first, because it is the safe half:
+`Compact.erased/2` now compacts whichever layout is on disk — the `.sqlite`
+as the plan's promised UPDATE-then-VACUUM (the erased set found by decoding
+value blobs in Elixir, `[:safe]` and shape-gated, never by searching values
+in SQL — sealed values stay value-unsearchable even here; the UPDATE lives
+in Compact, not the store, so INSERT stays the only statement `Store.SQLite`
+ever issues), the `.ledger` as the walk-and-rewrite it always was, and a
+migrated world as both, outcomes summed, because the legacy record's erased
+ciphertext is still bytes somebody pays for. Same four properties asserted
+in the new engine: live answers unchanged, erased answers `:erased`, old
+snapshot names resolve, file smaller by the ciphertext. Then residency,
+with landmine 4 dealt with FIRST as the plan ordered: the serialized check
+is now handed `matching/3`'s answer — the whole history through the store —
+not the resident cache, and the tripwire that proves it is a uniqueness
+check refusing an id whose claim was twenty transactions past the resident
+tail. The honest cost, stated: a checked append on a bounded world now
+reads through the store; a wrong admission cost the vocabulary. On top of
+that fix, `resident: :none` is one `tail_of` clause and one `trim` clause —
+the world holds no tail, `oldest` sits just past the current tx, and every
+read is the store's. The conformance suite gained a fourth consumer
+(`SQLite, resident: :none`) answering all the same questions, including
+erasure-reaches-everything; `storage_events_test` unchanged and green — no
+storage event became a fact on the way through. Suite 903 green, and the
+WHOLE suite green under `LEDGER_SYNC=true`, both layouts fsyncing.

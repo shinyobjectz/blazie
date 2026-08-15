@@ -31,22 +31,105 @@ defmodule Blazie.Compact do
 
   alias Blazie.{Erasure, Fact, Store}
   alias Blazie.Store.Record
+  alias Exqlite.Sqlite3
 
   @type outcome :: %{tombstoned: non_neg_integer(), reclaimed: non_neg_integer()}
 
   @doc """
-  Rewrite a world's file, tombstoning every sealed answer whose subject has
-  been erased.
+  Rewrite a world's storage, tombstoning every sealed answer whose subject
+  has been erased.
 
   `erased:` is the set of erased subjects (defaults to `Erasure.erased/0`, so
   a caller usually just names the store). The world at `name` must be closed.
+
+  Both layouts are compacted by what is on disk: a `.sqlite` as
+  UPDATE-then-VACUUM, a `.ledger` as the walk-and-rewrite it always was, and
+  a migrated world (both files present) as both — the ledger is the legacy
+  record and its erased ciphertext is still bytes on a disk somebody pays
+  for. The outcome sums.
   """
   @spec erased(term(), keyword()) :: {:ok, outcome()} | {:error, term()}
   def erased(name, opts) do
     dir = Keyword.fetch!(opts, :dir)
     erased = Keyword.get(opts, :erased) || erased_set()
-    path = Path.join(dir, Store.File.filename(name))
+    sqlite = Path.join(dir, Store.SQLite.filename(name))
+    ledger = Path.join(dir, Store.File.filename(name))
 
+    case {File.exists?(sqlite), File.exists?(ledger)} do
+      {true, true} ->
+        with {:ok, a} <- erased_sqlite(sqlite, erased),
+             {:ok, b} <- erased_ledger(ledger, erased) do
+          {:ok, %{tombstoned: a.tombstoned + b.tombstoned, reclaimed: a.reclaimed + b.reclaimed}}
+        end
+
+      {true, false} ->
+        erased_sqlite(sqlite, erased)
+
+      {false, _} ->
+        erased_ledger(ledger, erased)
+    end
+  end
+
+  # ── the SQLite half: UPDATE, then VACUUM ────────────────────────────────────
+  #
+  # `Store.SQLite`'s discipline is that INSERT is the only statement it ever
+  # issues; this UPDATE lives here, outside the store, the same place the
+  # file rewriter always lived — compaction is the one sanctioned rewrite,
+  # and it touches only what was already destroyed. Values are opaque blobs,
+  # so the erased set is found by decoding in Elixir ([:safe], shape-gated,
+  # anything undecodable left alone), never by searching values in SQL —
+  # sealed values stay value-unsearchable, even here.
+  defp erased_sqlite(path, erased) do
+    before = File.stat!(path).size
+    {:ok, db} = Sqlite3.open(path)
+
+    try do
+      {:ok, stmt} = Sqlite3.prepare(db, "SELECT seq, value FROM facts")
+      {:ok, rows} = Sqlite3.fetch_all(db, stmt)
+      :ok = Sqlite3.release(db, stmt)
+
+      hits = for [seq, blob] <- rows, erased_sealed?(blob, erased), do: seq
+
+      tombstone = :erlang.term_to_binary(:erased)
+      :ok = Sqlite3.execute(db, "BEGIN IMMEDIATE")
+
+      {:ok, update} = Sqlite3.prepare(db, "UPDATE facts SET value = ?1 WHERE seq = ?2")
+
+      for seq <- hits do
+        :ok = Sqlite3.bind(update, [{:blob, tombstone}, seq])
+        :done = Sqlite3.step(db, update)
+        :ok = Sqlite3.reset(update)
+      end
+
+      :ok = Sqlite3.release(db, update)
+      :ok = Sqlite3.execute(db, "COMMIT")
+
+      # VACUUM rewrites the file without the reclaimed pages; the checkpoint
+      # folds the WAL back in so the size measured is the size on disk.
+      :ok = Sqlite3.execute(db, "VACUUM")
+      :ok = Sqlite3.execute(db, "PRAGMA wal_checkpoint(TRUNCATE)")
+
+      {:ok, %{tombstoned: length(hits), reclaimed: max(before - File.stat!(path).size, 0)}}
+    after
+      Sqlite3.close(db)
+    end
+  end
+
+  defp erased_sealed?(blob, erased) do
+    case :erlang.binary_to_term(blob, [:safe]) do
+      {:sealed, subject, _wrapped, _iv, _tag, _cipher} -> is_map_key(erased, subject)
+      {:sealed, subject, _wrapped, _iv, _tag, _cipher, :bound} -> is_map_key(erased, subject)
+      _ -> false
+    end
+  rescue
+    # Bytes that do not decode are not this function's to judge — the store's
+    # own read gate refuses them at open; compaction leaves them untouched.
+    _ -> false
+  end
+
+  # ── the ledger half: the walk-and-rewrite it always was ─────────────────────
+
+  defp erased_ledger(path, erased) do
     with {:ok, binary} <- File.read(path) do
       mode = Record.mode_of(binary)
       base = Record.base_of(mode)

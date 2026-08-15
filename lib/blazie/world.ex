@@ -41,7 +41,15 @@ defmodule Blazie.World do
   end
 
   def child_spec(opts) do
-    %{id: {__MODULE__, Keyword.fetch!(opts, :name)}, start: {__MODULE__, :start_link, [opts]}}
+    %{
+      id: {__MODULE__, Keyword.fetch!(opts, :name)},
+      start: {__MODULE__, :start_link, [opts]},
+      # Transient, not permanent: a crash is restarted exactly as before, but
+      # a world that STOPS — closed, or idle-evicted under `evict_after:` —
+      # stays stopped. Permanent would resurrect an evicted world instantly,
+      # which makes eviction a no-op with extra steps.
+      restart: :transient
+    }
   end
 
   @doc """
@@ -169,8 +177,16 @@ defmodule Blazie.World do
   def exists?(name) do
     name in open_worlds() or
       case Application.get_env(:blazie, :ledger_dir) do
-        nil -> false
-        dir -> File.exists?(Path.join(dir, Store.File.filename(name)))
+        nil ->
+          false
+
+        dir ->
+          # Either layout answers: a `.sqlite` written since the default
+          # flipped, or a `.ledger` written before it and not yet opened
+          # (opening is what migrates). A name is taken by its facts, not by
+          # which engine happens to hold them.
+          File.exists?(Path.join(dir, Store.SQLite.filename(name))) or
+            File.exists?(Path.join(dir, Store.File.filename(name)))
       end
   end
 
@@ -178,10 +194,17 @@ defmodule Blazie.World do
   Where a world keeps its facts when nobody said.
 
   Memory when nothing is configured, which is right for a test and wrong for
-  everything else — so a deployment that sets `:ledger_dir` gets the file store
-  without anyone having to remember to ask. A deployment found this the hard
-  way: the config existed, nothing read it, and every world in production was
-  in memory.
+  everything else — so a deployment that sets `:ledger_dir` gets a durable
+  store without anyone having to remember to ask. A deployment found this the
+  hard way: the config existed, nothing read it, and every world in
+  production was in memory.
+
+  The durable default is `Store.SQLite` (the P5 flip): one file per world,
+  the store the replicator ships. There is no `checkpoint_every:` — a
+  checkpoint was the file store's cure for replaying everything at open, and
+  SQLite opens by reading nothing. A `.ledger` already on disk is migrated
+  the first time its world opens; `Store.File` remains, explicitly asked
+  for, as the read-only legacy path.
   """
   @spec default_store() :: {module(), keyword()}
   def default_store do
@@ -190,10 +213,7 @@ defmodule Blazie.World do
         {Store.Memory, []}
 
       dir ->
-        {Store.File,
-         dir: dir,
-         sync: Application.get_env(:blazie, :ledger_sync, false),
-         checkpoint_every: Application.get_env(:blazie, :ledger_checkpoint_every, 1_000)}
+        {Store.SQLite, dir: dir, sync: Application.get_env(:blazie, :ledger_sync, false)}
     end
   end
 
@@ -347,6 +367,14 @@ defmodule Blazie.World do
   @spec store_stats(ref()) :: map()
   def store_stats(world), do: GenServer.call(world, :store_stats)
 
+  @doc """
+  Which store module keeps this world's facts. Observability, not vocabulary —
+  the drill needs it to pull a copy the way the store was shipped, and nothing
+  else should ever branch on it.
+  """
+  @spec store_module(ref()) :: module()
+  def store_module(world), do: GenServer.call(world, :store_module)
+
   # ── server ─────────────────────────────────────────────────────────────────
 
   @impl true
@@ -357,6 +385,7 @@ defmodule Blazie.World do
 
     name = Keyword.fetch!(opts, :name)
     {module, store_opts} = Keyword.get(opts, :store, default_store())
+    :ok = migrate_if_ledger(name, module, store_opts)
     {:ok, store} = module.open(name, store_opts)
 
     # A store that can seek changes what the world holds: the resident tail
@@ -387,41 +416,80 @@ defmodule Blazie.World do
         {replayed, resumed, subjects_of(replayed), oldest_of(replayed)}
       end
 
-    {:ok,
-     index(
-       %{
-         name: name,
-         tx: resumed,
-         facts: Enum.reverse(replayed),
-         # Counted rather than measured. `length/1` is O(n), and both the
-         # trim check and `resident/1` ran it — the trim check on EVERY
-         # append, which is the shape of cost the store was just cured of.
-         count: length(replayed),
-         by_id: %{},
-         by_attribute: %{},
-         by_value: %{},
-         # Who each entity belongs to, for ALL time. Deliberately not the
-         # fact index: subject ownership decides whether a write is sealed,
-         # and the index holds only what is resident — so looking ownership
-         # up there meant that once an entity's subject fact was evicted,
-         # everything written about it after went down in PLAINTEXT, and
-         # destroying the key did not erase it (C4, reproduced).
-         subjects: subjects,
-         oldest: oldest,
-         paged?: paged?,
-         resident: residency,
-         store: store,
-         module: module
-       },
-       replayed
-     )
-     |> trim()}
+    state =
+      index(
+        %{
+          name: name,
+          tx: resumed,
+          facts: Enum.reverse(replayed),
+          # Counted rather than measured. `length/1` is O(n), and both the
+          # trim check and `resident/1` ran it — the trim check on EVERY
+          # append, which is the shape of cost the store was just cured of.
+          count: length(replayed),
+          by_id: %{},
+          by_attribute: %{},
+          by_value: %{},
+          # Who each entity belongs to, for ALL time. Deliberately not the
+          # fact index: subject ownership decides whether a write is sealed,
+          # and the index holds only what is resident — so looking ownership
+          # up there meant that once an entity's subject fact was evicted,
+          # everything written about it after went down in PLAINTEXT, and
+          # destroying the key did not erase it (C4, reproduced).
+          subjects: subjects,
+          oldest: oldest,
+          paged?: paged?,
+          resident: residency,
+          store: store,
+          module: module,
+          # How long a world with nobody talking to it stays open. Idle
+          # eviction closes the process and keeps the file — the same close
+          # `World.close/1` performs, arrived at by silence instead of by
+          # name. `:infinity` when nobody asked, which is every world that
+          # existed before the option did.
+          evict_after: Keyword.get(opts, :evict_after, :infinity)
+        },
+        replayed
+      )
+      |> trim()
+
+    {:ok, state, state.evict_after}
   end
+
+  # The one-way door, crossed exactly at the seam the World owns: a world
+  # opening under SQLite whose `.sqlite` is absent while a `.ledger` exists
+  # is a world written before the default flipped — migrate first, then open
+  # what the migration wrote. Serialised by construction: only one init ever
+  # runs per name (the via-Registry start), so two racing opens cannot both
+  # migrate. The ledger is left untouched, the read-only legacy record.
+  # Explicit and logged, because a silent migration is a layout change nobody
+  # can account for later.
+  defp migrate_if_ledger(name, Store.SQLite, store_opts) do
+    dir = Keyword.get(store_opts, :dir, "priv/ledgers")
+
+    if not File.exists?(Path.join(dir, Store.SQLite.filename(name))) and
+         File.exists?(Path.join(dir, Store.File.filename(name))) do
+      {:ok, %{facts: facts, transactions: transactions}} =
+        Store.Migrate.ledger_to_sqlite(name, dir: dir)
+
+      require Logger
+
+      Logger.info(
+        "world #{inspect(name)}: migrated .ledger to .sqlite " <>
+          "(#{facts} facts, #{transactions} transactions); the ledger stays as the legacy record"
+      )
+    end
+
+    :ok
+  end
+
+  defp migrate_if_ledger(_name, _module, _store_opts), do: :ok
 
   # How many transactions a paged world keeps warm. `resident:` when given —
   # the same knob it always was — and a bound rather than everything when
   # not, because holding everything is the exact behaviour a seeking store
-  # exists to end.
+  # exists to end. `:none` is the far end of the knob: the store owns ALL
+  # reads, the world holds no tail at all.
+  defp tail_of(:none), do: 0
   defp tail_of(:unbounded), do: 1_000
   defp tail_of(count) when is_integer(count), do: count
 
@@ -430,10 +498,18 @@ defmodule Blazie.World do
   # on, in the one process that appends. A check that raises becomes a refusal
   # rather than a crash — this runs where everybody's facts live, and a write
   # that cannot be judged must not be able to destroy the thing it was judging.
+  #
+  # The facts it is handed come through `matching/3`, NOT off the resident
+  # list — the landmine the plan numbered 4: the resident tail is a cache,
+  # and a check that saw only the cache admitted what the evicted history
+  # forbade (a uniqueness check re-admitting an id whose fact had aged out).
+  # Reading the whole history through the store costs a seek per checked
+  # append on a bounded world; a wrong admission costs the vocabulary. Under
+  # `resident: :none` this is the only reading there could be.
   def handle_call({:append, assertions, check}, from, state) do
-    case run_check(check, assertions, Enum.reverse(state.facts)) do
+    case run_check(check, assertions, matching(state, state.tx, [])) do
       :ok -> handle_call({:append, assertions}, from, state)
-      {:error, refusals} -> {:reply, {:error, refusals}, state}
+      {:error, refusals} -> answer({:error, refusals}, state)
     end
   end
 
@@ -456,17 +532,18 @@ defmodule Blazie.World do
         subjects: remember_subjects(state.subjects, facts)
     }
 
-    {:reply, {:ok, tx}, state |> index(facts) |> trim()}
+    answer({:ok, tx}, state |> index(facts) |> trim())
   end
 
-  def handle_call(:tx, _from, state), do: {:reply, state.tx, state}
-  def handle_call(:resident, _from, state), do: {:reply, state.count, state}
+  def handle_call(:tx, _from, state), do: answer(state.tx, state)
+  def handle_call(:resident, _from, state), do: answer(state.count, state)
+  def handle_call(:store_module, _from, state), do: answer(state.module, state)
 
   def handle_call({:raw_at, tx}, _from, state) do
     # Through `matching/3` with the empty pattern, so a paged world's evicted
     # transactions answer too — reading only the resident tail silently
     # shortened history the day the world stopped holding all of it.
-    {:reply, matching(state, tx, []), state}
+    answer(matching(state, tx, []), state)
   end
 
   def handle_call(:store_stats, _from, state) do
@@ -475,11 +552,11 @@ defmodule Blazie.World do
         do: state.module.stats(state.store),
         else: %{}
 
-    {:reply, stats, state}
+    answer(stats, state)
   end
 
   def handle_call({:find_at, tx, pattern}, _from, state) do
-    {:reply, Enum.map(matching(state, tx, pattern), &Erasure.reveal_fact(&1, state.name)), state}
+    answer(Enum.map(matching(state, tx, pattern), &Erasure.reveal_fact(&1, state.name)), state)
   end
 
   # Not revealed: an id is never sealed, and revealing a value here would be
@@ -491,7 +568,7 @@ defmodule Blazie.World do
   # handed the finished answer instead of building it under a cap.
   def handle_call({:ids_at, tx, pattern}, _from, state) do
     ids = state |> matching(tx, pattern) |> Enum.map(& &1.id) |> Enum.uniq() |> Enum.sort()
-    {:reply, ids, state}
+    answer(ids, state)
   end
 
   def handle_call({:facts_at, tx}, _from, state) do
@@ -500,8 +577,21 @@ defmodule Blazie.World do
       |> matching(tx, [])
       |> Enum.map(&Erasure.reveal_fact(&1, state.name))
 
-    {:reply, facts, state}
+    answer(facts, state)
   end
+
+  # Every reply re-arms the idle clock. `:infinity` for a world nobody asked
+  # to evict, which is a plain reply with a longer name.
+  defp answer(reply, state), do: {:reply, reply, state, state.evict_after}
+
+  @impl true
+  # `evict_after:` elapsed with no reads and no writes: close the same way
+  # `World.close/1` closes — terminate runs, the store is released, the file
+  # stays. `{:shutdown, _}` so the transient child is not restarted, and so a
+  # supervisor report is not written for a world that merely fell asleep.
+  def handle_info(:timeout, state), do: {:stop, {:shutdown, :idle}, state}
+
+  def handle_info(_other, state), do: {:noreply, state, state.evict_after}
 
   @impl true
   def terminate(_reason, state), do: state.module.close(state.store)
@@ -583,6 +673,22 @@ defmodule Blazie.World do
   # Trimming rebuilds the sort orders, so it runs on a high-water mark rather
   # than on every append once the limit is reached — otherwise the cost would
   # land on every write forever.
+
+  # `:none` keeps nothing at all: the store answers every read, so the facts
+  # a write just indexed are dropped the moment the write is done. `oldest`
+  # moves to just past the current transaction — everything at or before it
+  # is "evicted", which is to say, the store's.
+  defp trim(%{resident: :none} = state) do
+    %{
+      state
+      | facts: [],
+        count: 0,
+        by_id: %{},
+        by_attribute: %{},
+        by_value: %{},
+        oldest: if(state.tx == 0, do: nil, else: state.tx + 1)
+    }
+  end
 
   defp trim(%{resident: :unbounded} = state), do: state
 

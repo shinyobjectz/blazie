@@ -17,7 +17,7 @@ defmodule Blazie.ReplicationTest do
   """
   use ExUnit.Case, async: false
 
-  alias Blazie.{Replication, Snapshot, Store, World}
+  alias Blazie.{Job, Replication, Snapshot, Store, World}
 
   @moduletag :litestream
 
@@ -93,6 +93,67 @@ defmodule Blazie.ReplicationTest do
 
     assert {:ok, :present} =
              Replication.restore_if_missing(ctx.name, dir: ctx.dbs, replica_url: ctx.replica_url)
+  end
+
+  test "the reading job reports replication state as facts", ctx do
+    replicator =
+      start_supervised!(
+        {Replication, dir: ctx.dbs, pattern: "*.sqlite", replica_url: ctx.replica_url}
+      )
+
+    {:ok, world} = World.open(ctx.name, store: {Store.SQLite, dir: ctx.dbs})
+    {:ok, local_tx} = World.append(world, [{42, "height", 180}, {42, "height", 181}])
+
+    # Wait until the replica holds LTX for the world, then drain.
+    assert Enum.reduce_while(1..600, false, fn _, _ ->
+             if Replication.replicated?(ctx.name, ctx.replica_url),
+               do: {:halt, true},
+               else: {:cont, Process.sleep(50) && false}
+           end),
+           "the replicator never shipped the world"
+
+    :ok = Replication.drain(replicator)
+    :ok = World.close(ctx.name)
+
+    # The job writes into whatever world its runner holds — the $backup world
+    # in the tree, a scratch one here. Same shape either way.
+    report = {:repl_report, System.unique_integer([:positive])}
+    {:ok, reports} = World.open(report)
+    on_exit(fn -> World.close(report) end)
+
+    job = Replication.reading(dir: ctx.dbs, replica_url: ctx.replica_url)
+    {:ok, _tx} = Job.run(job, reports, Snapshot.open([reports]), System.system_time(:second))
+
+    snapshot = Snapshot.open([reports])
+
+    # The fact's id is the world's NAME, decoded from the filename; local_tx
+    # is the blazie transaction; replicated_ltx is litestream's own counter —
+    # nonzero means shipped, and only replicated_at says how fresh.
+    assert Snapshot.value(snapshot, ctx.name, "local_tx") == local_tx
+    assert Snapshot.value(snapshot, ctx.name, "replicated_ltx") > 0
+
+    assert_in_delta Snapshot.value(snapshot, ctx.name, "replicated_at"),
+                    System.system_time(:second),
+                    120
+  end
+
+  test "the reading is honest about a world the replica has never seen", ctx do
+    # No replicator running at all: the local file exists, nothing shipped.
+    {:ok, world} = World.open(ctx.name, store: {Store.SQLite, dir: ctx.dbs})
+    {:ok, _} = World.append(world, [{1, "x", 1}])
+    :ok = World.close(ctx.name)
+
+    report = {:repl_report, System.unique_integer([:positive])}
+    {:ok, reports} = World.open(report)
+    on_exit(fn -> World.close(report) end)
+
+    job = Replication.reading(dir: ctx.dbs, replica_url: ctx.replica_url)
+    {:ok, _tx} = Job.run(job, reports, Snapshot.open([reports]), System.system_time(:second))
+
+    snapshot = Snapshot.open([reports])
+    assert Snapshot.value(snapshot, ctx.name, "local_tx") == 1
+    assert Snapshot.value(snapshot, ctx.name, "replicated_ltx") == 0
+    assert Snapshot.value(snapshot, ctx.name, "replicated_at") == nil
   end
 
   test "a name with neither file nor replica refuses with the repair", ctx do

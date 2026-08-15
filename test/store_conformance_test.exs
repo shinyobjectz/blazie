@@ -16,6 +16,8 @@ defmodule Blazie.StoreConformance do
   Use: `use Blazie.StoreConformance, store_module: module | nil, durable?: bool`.
   `nil` means the default (memory) store; `durable?: false`
   skips the close-and-reopen family a memory store honestly cannot pass.
+  `world_opts:` rides along on every open — how the `resident: :none`
+  consumer asks the same questions of a world that keeps nothing warm.
   """
 
   defmacro __using__(opts) do
@@ -26,6 +28,7 @@ defmodule Blazie.StoreConformance do
 
       @store_module conf[:store_module]
       @durable conf[:durable?]
+      @world_opts conf[:world_opts] || []
 
       setup do
         dir = Path.join(System.tmp_dir!(), "conform-#{System.unique_integer([:positive])}")
@@ -41,8 +44,10 @@ defmodule Blazie.StoreConformance do
         end
       end
 
+      # `extra` first: a test that names its own residency wins over the
+      # consumer's default (Keyword.get takes the first occurrence).
       defp opened(name, dir, extra \\ []) do
-        {:ok, world} = World.open(name, store_opts(dir) ++ extra)
+        {:ok, world} = World.open(name, store_opts(dir) ++ extra ++ @world_opts)
         world
       end
 
@@ -217,4 +222,13 @@ end
 
 defmodule Blazie.StoreConformance.SQLiteTest do
   use Blazie.StoreConformance, store_module: Blazie.Store.SQLite, durable?: true
+end
+
+defmodule Blazie.StoreConformance.SQLiteResidentNoneTest do
+  # The far end of the residency knob: the world holds NO tail, the store
+  # owns every read. Same questions, same answers — which is the whole claim.
+  use Blazie.StoreConformance,
+    store_module: Blazie.Store.SQLite,
+    durable?: true,
+    world_opts: [resident: :none]
 end
