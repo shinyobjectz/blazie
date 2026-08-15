@@ -130,7 +130,9 @@ defmodule Blazie.ReplicationClusterTest do
       on_exit(fn -> World.close(ctx.name) end)
       {:ok, _} = World.append(world, [{1, "x", 1}])
 
-      assert {:error, refusal} = Replication.evict(ctx.name, ctx.dbs, replica_url: ctx.replica_url)
+      assert {:error, refusal} =
+               Replication.evict(ctx.name, ctx.dbs, replica_url: ctx.replica_url)
+
       assert refusal.problem == :replica_does_not_hold
 
       # Nothing closed, nothing deleted: the refusal protected the only copy.

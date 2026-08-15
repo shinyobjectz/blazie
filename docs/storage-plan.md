@@ -367,3 +367,24 @@ read-then-write would only shrink the race, not close it. Sticky
 tenant→node routing (who SHOULD write; the lease is who MAY) is the
 remaining piece of this phase and is deliberately not started. Suite 884
 green, conformance green under `LEDGER_SYNC=true`.
+
+**P5 (2026-08-15): PASS — the default flipped.** `World.default_store/0`
+with `:ledger_dir` set now answers `{Store.SQLite, dir:, sync:}`;
+`checkpoint_every` is gone from the default because a checkpoint was the
+file store's cure for replaying everything at open and SQLite opens by
+reading nothing. The one-way door sits at the seam the World already owns:
+`World.init`, before the store opens — a world whose `.sqlite` is absent
+while a `.ledger` exists is migrated first (through `Store.Migrate`, so
+through `Store.File`'s replay and every old shape it normalizes), logged,
+serialised by construction since only one init ever runs per name. Proven
+with hand-written old-shape ledger bytes: the migrated world answers
+identically, resumes its tx counter, and never migrates twice — the
+`.sqlite`'s presence is the door closing. `World.exists?/1` answers true
+for either file, because a name is taken by its facts, not by which engine
+holds them. `store_default_test` updated deliberately; and
+`storage_layout_test` — the file that exists because a silent layout change
+once left a node green beside 791KB of invisible facts — now pins BOTH
+suffixes: `.ledger` forever (the migration door finds pre-flip disks by
+that exact name) and `.sqlite` as the layout the replicator's pattern
+watches. Memory default unchanged. Suite 888 green, and the conformance +
+default files green under `LEDGER_SYNC=true`.

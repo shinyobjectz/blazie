@@ -177,8 +177,16 @@ defmodule Blazie.World do
   def exists?(name) do
     name in open_worlds() or
       case Application.get_env(:blazie, :ledger_dir) do
-        nil -> false
-        dir -> File.exists?(Path.join(dir, Store.File.filename(name)))
+        nil ->
+          false
+
+        dir ->
+          # Either layout answers: a `.sqlite` written since the default
+          # flipped, or a `.ledger` written before it and not yet opened
+          # (opening is what migrates). A name is taken by its facts, not by
+          # which engine happens to hold them.
+          File.exists?(Path.join(dir, Store.SQLite.filename(name))) or
+            File.exists?(Path.join(dir, Store.File.filename(name)))
       end
   end
 
@@ -186,10 +194,17 @@ defmodule Blazie.World do
   Where a world keeps its facts when nobody said.
 
   Memory when nothing is configured, which is right for a test and wrong for
-  everything else — so a deployment that sets `:ledger_dir` gets the file store
-  without anyone having to remember to ask. A deployment found this the hard
-  way: the config existed, nothing read it, and every world in production was
-  in memory.
+  everything else — so a deployment that sets `:ledger_dir` gets a durable
+  store without anyone having to remember to ask. A deployment found this the
+  hard way: the config existed, nothing read it, and every world in
+  production was in memory.
+
+  The durable default is `Store.SQLite` (the P5 flip): one file per world,
+  the store the replicator ships. There is no `checkpoint_every:` — a
+  checkpoint was the file store's cure for replaying everything at open, and
+  SQLite opens by reading nothing. A `.ledger` already on disk is migrated
+  the first time its world opens; `Store.File` remains, explicitly asked
+  for, as the read-only legacy path.
   """
   @spec default_store() :: {module(), keyword()}
   def default_store do
@@ -198,10 +213,7 @@ defmodule Blazie.World do
         {Store.Memory, []}
 
       dir ->
-        {Store.File,
-         dir: dir,
-         sync: Application.get_env(:blazie, :ledger_sync, false),
-         checkpoint_every: Application.get_env(:blazie, :ledger_checkpoint_every, 1_000)}
+        {Store.SQLite, dir: dir, sync: Application.get_env(:blazie, :ledger_sync, false)}
     end
   end
 
@@ -373,6 +385,7 @@ defmodule Blazie.World do
 
     name = Keyword.fetch!(opts, :name)
     {module, store_opts} = Keyword.get(opts, :store, default_store())
+    :ok = migrate_if_ledger(name, module, store_opts)
     {:ok, store} = module.open(name, store_opts)
 
     # A store that can seek changes what the world holds: the resident tail
@@ -408,20 +421,20 @@ defmodule Blazie.World do
         %{
           name: name,
           tx: resumed,
-         facts: Enum.reverse(replayed),
-         # Counted rather than measured. `length/1` is O(n), and both the
-         # trim check and `resident/1` ran it — the trim check on EVERY
-         # append, which is the shape of cost the store was just cured of.
-         count: length(replayed),
-         by_id: %{},
-         by_attribute: %{},
-         by_value: %{},
-         # Who each entity belongs to, for ALL time. Deliberately not the
-         # fact index: subject ownership decides whether a write is sealed,
-         # and the index holds only what is resident — so looking ownership
-         # up there meant that once an entity's subject fact was evicted,
-         # everything written about it after went down in PLAINTEXT, and
-         # destroying the key did not erase it (C4, reproduced).
+          facts: Enum.reverse(replayed),
+          # Counted rather than measured. `length/1` is O(n), and both the
+          # trim check and `resident/1` ran it — the trim check on EVERY
+          # append, which is the shape of cost the store was just cured of.
+          count: length(replayed),
+          by_id: %{},
+          by_attribute: %{},
+          by_value: %{},
+          # Who each entity belongs to, for ALL time. Deliberately not the
+          # fact index: subject ownership decides whether a write is sealed,
+          # and the index holds only what is resident — so looking ownership
+          # up there meant that once an entity's subject fact was evicted,
+          # everything written about it after went down in PLAINTEXT, and
+          # destroying the key did not erase it (C4, reproduced).
           subjects: subjects,
           oldest: oldest,
           paged?: paged?,
@@ -441,6 +454,35 @@ defmodule Blazie.World do
 
     {:ok, state, state.evict_after}
   end
+
+  # The one-way door, crossed exactly at the seam the World owns: a world
+  # opening under SQLite whose `.sqlite` is absent while a `.ledger` exists
+  # is a world written before the default flipped — migrate first, then open
+  # what the migration wrote. Serialised by construction: only one init ever
+  # runs per name (the via-Registry start), so two racing opens cannot both
+  # migrate. The ledger is left untouched, the read-only legacy record.
+  # Explicit and logged, because a silent migration is a layout change nobody
+  # can account for later.
+  defp migrate_if_ledger(name, Store.SQLite, store_opts) do
+    dir = Keyword.get(store_opts, :dir, "priv/ledgers")
+
+    if not File.exists?(Path.join(dir, Store.SQLite.filename(name))) and
+         File.exists?(Path.join(dir, Store.File.filename(name))) do
+      {:ok, %{facts: facts, transactions: transactions}} =
+        Store.Migrate.ledger_to_sqlite(name, dir: dir)
+
+      require Logger
+
+      Logger.info(
+        "world #{inspect(name)}: migrated .ledger to .sqlite " <>
+          "(#{facts} facts, #{transactions} transactions); the ledger stays as the legacy record"
+      )
+    end
+
+    :ok
+  end
+
+  defp migrate_if_ledger(_name, _module, _store_opts), do: :ok
 
   # How many transactions a paged world keeps warm. `resident:` when given —
   # the same knob it always was — and a bound rather than everything when

@@ -131,6 +131,7 @@ defmodule Blazie.ReplicationTest do
     # nonzero means shipped, and only replicated_at says how fresh.
     assert Snapshot.value(snapshot, ctx.name, "local_tx") == local_tx
     assert Snapshot.value(snapshot, ctx.name, "replicated_ltx") > 0
+
     assert_in_delta Snapshot.value(snapshot, ctx.name, "replicated_at"),
                     System.system_time(:second),
                     120

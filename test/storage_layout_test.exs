@@ -19,14 +19,28 @@ defmodule Blazie.StorageLayoutTest do
 
   alias Blazie.{Backup, Store}
 
-  test "a world's facts live in a `.ledger` file" do
+  test "a legacy world's facts live in a `.ledger` file" do
+    # Legacy since P5, and pinned FOREVER: every disk that predates the flip
+    # holds files under this suffix, and the migration door
+    # (`World.open` → `Store.Migrate`) finds them by this exact name.
     assert String.ends_with?(Store.File.filename("anything"), ".ledger")
   end
 
-  test "the suffix does not depend on what a world is called" do
+  test "a SQLite world's facts live in a `.sqlite` file" do
+    # The default layout since P5 — what the replicator's `pattern:` watches
+    # and what `World.exists?` looks for first. Renaming it would not rename
+    # anything; it would make every node look past its tenants at an empty
+    # pattern and call itself healthy.
+    assert String.ends_with?(Store.SQLite.filename("anything"), ".sqlite")
+  end
+
+  test "neither suffix depends on what a world is called" do
     for name <- ["main", "$vitals", {:tenant, 7}, 42] do
       assert String.ends_with?(Store.File.filename(name), ".ledger"),
              "#{inspect(name)} -> #{Store.File.filename(name)}"
+
+      assert String.ends_with?(Store.SQLite.filename(name), ".sqlite"),
+             "#{inspect(name)} -> #{Store.SQLite.filename(name)}"
     end
   end
 
