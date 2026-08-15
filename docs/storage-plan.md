@@ -601,3 +601,20 @@ the probe, loudly. Wasm lane fully green on OTP 29 (asm suites 96/96,
 washy's interp≡asm byte-exact table intact); the ASM perf tier is
 UN-parked. Remaining OTP 29 reds upstream are the JS lane (porffor/F2) —
 outside blazie's scope.
+
+## The language doctrine (decided 2026-08-15)
+
+**Lua (primary) + Zig + Rust + C/C++. Nothing else.** Agents author in Lua —
+the microkernel is the surface — and shell out to real compiled tools, every
+one an AOT wasm32-wasi build registered as a program. One guest runtime
+holds for every row because everything is BEAM code: Luerl natively, wasm
+through tiny-lasers (interpreted, or JIT'd through the un-parked ASM tier).
+Each row is PROVEN in tree, not claimed: C twice (washy, minised-sed), Zig
+by `seq` (2.9KB of raw-WASI zig — the syscall ABI is the stable seam while
+zig's std churns; `seq 1 2 9 | sed s/5/five/ | wc -l` chains Zig into C
+into Elixir in one line), Rust by tiny-lasers' own red-team corpus (a
+blazie-tree applet will prove it here the day one is demanded). **Python
+REJECTED, not deferred** (soc-760d holds the scoped plan if it ever
+returns): 25MB module + stdlib-into-VFS + interpreter-on-interpreter buys
+little an agent can't do with Lua plus real tools. JS (porffor) stays out
+until demanded.

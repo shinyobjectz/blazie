@@ -124,9 +124,17 @@ defmodule Blazie.LuaShellTest do
       assert out == "2"
     end
 
+    test "the Zig row: seq, 2.9KB of raw-WASI zig, chains into C sed" do
+      {out, _} = Shell.run("seq 3", %{})
+      assert out == "1\n2\n3"
+
+      {out2, _} = Shell.run("seq 1 2 9 | sed s/5/five/ | wc -l", %{})
+      assert out2 == "5"
+    end
+
     test "sed shows up on the shelf" do
       {out, _} = Shell.run("curl http://evil", %{})
-      assert out =~ "sed"
+      assert out =~ "sed" and out =~ "seq"
     end
   end
 
