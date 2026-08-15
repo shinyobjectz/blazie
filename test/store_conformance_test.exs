@@ -214,3 +214,7 @@ end
 defmodule Blazie.StoreConformance.PagedTest do
   use Blazie.StoreConformance, store_module: Blazie.Store.Paged, durable?: true
 end
+
+defmodule Blazie.StoreConformance.SQLiteTest do
+  use Blazie.StoreConformance, store_module: Blazie.Store.SQLite, durable?: true
+end

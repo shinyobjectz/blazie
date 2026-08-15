@@ -255,3 +255,18 @@ untouched — format-level claims (tears, checkpoints, same-file-either-store)
 stay where they belong. Full suite 852 green, and green again under
 `LEDGER_SYNC=true`. `Store.SQLite` now has a definition of done before it
 has a line of code.
+
+**P1 (2026-08-15): PASS.** `Blazie.Store.SQLite` — one file per world, the
+whole `Store` behaviour plus `seek/tail/last_tx` (so `World` takes the paged
+path), `stats`, deterministic `filename`. Landmines 1–3 addressed as
+designed: every read is `ORDER BY tx, seq`; every key is
+`term_to_binary(term, [:deterministic])`; every decoded value passes the
+same C7 gate (`Record.stored_fact?` + `harmless?`) the file stores enforce.
+INSERT is the only statement ever issued — append-only stays the module's
+discipline, not the engine's. Passed the ENTIRE conformance suite on the
+first run (40/40 incl. erasure-reaches-evicted and both within-tx ordering
+guards); full suite 863 green and green under `LEDGER_SYNC=true`
+(`synchronous=FULL`). Measured through the real store (Fact structs, gate,
+keys): **97k facts/s append · 88 bytes/fact on disk (vs 241 live-RAM today)
+· 777µs indexed seek across 100k facts · 2ms reopen** (a File-store reopen
+replays everything). Default store unchanged — additive, as planned.
