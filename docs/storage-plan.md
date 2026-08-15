@@ -1,37 +1,37 @@
 # The storage plan — per-tenant SQLite over R2, and the end of Turbopuffer
 
-*Drafted 2026-08-15. Status: plan. The seam audit's findings are folded in below;
-each phase is test-first and every commit stays green.*
+*Drafted 2026-08-15; revised same day after the seam audit. Status: plan,
+audit-grounded. Each phase is test-first, every commit stays green, and a
+phase's verdict is written at the bottom before the next begins.*
 
 ## Why (the decision, kept)
 
 blazie's model — append-only facts, provenance, snapshots, read-set reactivity,
 the fence — is the product. Its homegrown storage engine is not. `Store.File`
 is honest about being "a memory store that also persists": 241 bytes per fact
-held live, ~1M facts per world before stalls, ~6M before a 4GB box dies, and
-durability that is ours to operate. Both of the operator's real anxieties —
-the RAM ceiling and being the DBA of a bespoke engine — live in that one
-module, behind a seam (`Blazie.Store`) that was built to be swapped.
+held live (87% of it the three sort orders), ~1M facts per world before stalls,
+~6M before a 4GB box dies, and durability that is ours to operate. Both of the
+operator's real anxieties — the RAM ceiling and being the DBA of a bespoke
+engine — live in that one module, behind a seam (`Blazie.Store`) built to be
+swapped and already proven swappable by `Store.Paged`.
 
 The swap: **a tenant is a SQLite file.** Facts are rows; the three in-RAM sort
 orders become on-disk B-trees; symbols (vectors) are rows in the same file;
-durability is the WAL streamed to R2; the cache is SQLite's own page cache
-plus the OS. The World layer — a GenServer per world in a Registry with
-open/close — is already the cache-lifecycle manager: open = hydrate from R2 if
-cold, close = evict. Tenancy stays absence: another tenant's world is another
-file.
+durability is the WAL shipped to R2; the cache is SQLite's page cache plus the
+OS. The World layer — a GenServer per world in a Registry with open/close — is
+already the cache-lifecycle manager: open = hydrate from R2 if cold, close =
+evict. Tenancy stays absence: another tenant's world is another file.
 
 Turbopuffer is eliminated in the process. A symbol is a fact and the record;
-the vector index is derived and disposable. Per-tenant N is bounded (hundreds
-of thousands, not hundreds of millions), so exact search over the tenant's own
-vectors — the built-in provider — is correct, fast enough, and tenant-isolated
-by construction, which the shared Turbopuffer namespace never was
+the vector index is derived and disposable. Per-tenant N is bounded, so exact
+search over a tenant's own vectors is correct, fast enough, and tenant-isolated
+by construction — which the shared Turbopuffer namespace never was
 (`namespace = prefix <> space` carries no tenant). The vendor leaves the way
-the module's own doc says vendors leave: delete the file.
+its own doc says vendors leave: delete the file.
 
-## Measured before planning (the spike numbers)
+## Measured before planning
 
-exqlite on this machine's OTP, fact-log shape, WAL mode:
+exqlite on the pinned OTP (27), fact-log shape, WAL mode:
 
 | measure | result |
 |---|---|
@@ -40,83 +40,125 @@ exqlite on this machine's OTP, fact-log shape, WAL mode:
 | as-of read | `WHERE tx <= N` — native |
 | on-disk size | **88 bytes/fact** (vs 241 B/fact live RAM today) |
 
-A 1M-fact world: 88MB file, page-cache resident memory, no wall.
+A 1M-fact world: an 88MB file, page-cache-resident, no wall.
 
-## What does NOT change
+## What the audit established (the load-bearing facts)
 
-- The `Store` behaviour (`open/append/replay/close` + optional
-  `seek/tail/last_tx`) and everything above it: `World`, `Snapshot`, jobs,
-  subscriptions, the fence, `Keyring`, `Secret`, `Authority`.
-- Reactivity: watchers are a Registry notified by `World.append`, decoupled
-  from storage.
-- Blobs: bytes to R2 via `Backup.Target.S3`, references as facts. Unchanged.
-- Backups and drills keep existing until the new store's own R2 stream is
-  proven — then they cover it too (a drill restores a tenant file and replays
-  it; a backup nobody restored is still a rumour).
+- **The seam is real.** The behaviour is 4 required callbacks
+  (`open/append/replay/close`); `seek/tail/last_tx` are optional but travel
+  together — `World.init` checks only `seek` and then calls all three, so a
+  store implementing one must implement all. There is also an undeclared
+  `stats/1` (Storage/Metrics read it) and a `filename/1` `World.exists?` leans
+  on. The paged path (`world.ex` `paged?` branch) already does everything
+  `Store.SQLite` needs World to do.
+- **Reactivity is untouched by a store swap.** Watchers are a Registry
+  dispatched by `World.append` *after* the store records; the store holds no
+  reference to it. `storage_events_test.exs` pins this (doctrine 20).
+- **Erasure is orthogonal.** Values are envelope-encrypted in the World
+  (`seal/2`) before any store sees them; the store only ever holds ciphertext
+  tuples; keys live in a separate dir with a separate backup. Sealed values
+  must stay value-unsearchable (scalar column NULL).
+- **The store is the easy part; the durability apparatus is the cost.**
+  `Backup` + `Drill` + `Compact` are ~1,200 lines that assume append-only
+  bytes (byte-range segments, restore-by-concatenation, walk-and-rewrite).
+  Replication is more than half the total work. `Drill`'s restore-and-compare
+  (`ask_both/3`) is store-agnostic and survives; the pull/reopen halves do not.
+- **Compaction gets *better*:** erased-ciphertext reclamation becomes
+  `UPDATE ... SET value = :erased WHERE subject IN (...)` + `VACUUM` — ~10
+  lines replacing a 110-line file rewriter, with the same assertable
+  properties.
+- **Migration is first-class, not a footnote.** Real disks hold old-shape
+  bytes (`LazyRiver.Fact`, `answer` slots — `old_shapes_test.exs`). So
+  `Store.Record` + `Fact.from_stored/1` survive as the importer even after
+  `Store.File` retires, and `.ledger → .sqlite` runs through them.
+- **Deleting Turbopuffer is ~1 hour; the real task it hides is making
+  `Index.Exact` production-worthy (~2–3 days):** nothing configures
+  `:blazie, :index` today, the Exact holder Agent is unsupervised (a crash
+  silently empties every index), and `Index.job/3` is wired to a runner only
+  inside a test — nothing rebuilds an index after a node restart in
+  production.
 
-## The phases
+### The six landmines (named so they cannot bite silently)
 
-Gate rule (house rule: spike before commitment): each phase lands behind the
-seam with the existing suite green, and the next phase does not start until
-the previous phase's verdict is written at the bottom of this file.
+1. **Within-tx ordering:** `Snapshot.value/3` is last-write-wins *by list
+   position* inside a transaction. `ORDER BY tx` alone is wrong; every SQL
+   read is `ORDER BY tx, seq` (seq = rowid). No existing test catches this.
+2. **Deterministic keys:** ids and world names can be maps; keying rows on
+   `term_to_binary/1` breaks across OTP releases (EEP-18). Use
+   `term_to_binary(term, [:deterministic])` (OTP 27 is pinned). The same
+   hazard already exists in `Store.File.filename/1`.
+3. **Decode is a trust boundary (C7):** bytes can come back from a bucket.
+   Keep `[:safe]` + shape-gating on every value decode, per-value.
+4. **The serialized check sees resident facts only** — already a hole for
+   bounded worlds; going residency-less makes it everyone's. Fix it (lazy
+   store handle) before `resident: :none` ships.
+5. **Litestream vs native:** worlds are created at runtime with arbitrary
+   names; Litestream's config is path-listed — whether it globs new files is
+   an open question that decides the P4 vendor. blazie's `Backup.Target.S3`
+   (hand-signed SigV4, already the R2 path) is the native alternative; the
+   drill and `proven_at` alarms must keep meaning something either way.
+6. **Netsplits:** today `:global` *refuses* a second opener; a
+   file-replicator would instead last-writer-win. Sticky tenant→node routing
+   is therefore a correctness requirement in P4-cluster, not an optimization.
 
-### P1 — `Store.SQLite`: the engine swap, single node, no R2 yet
-A third `Store` implementation (beside Memory/File): one SQLite file per
-world, `facts` table, EAVT/AEVT indexes, WAL mode, INSERT-only (the
-append-only discipline stays the seam's, not the engine's). Implements
-`seek/tail/last_tx` so `World` takes the paged path — the resident tail stays
-small and indexed reads go to the store. Store selection stays a config line.
-**Test-first:** the existing store/durability suites parameterized over the
-new module, plus a store-parity property test (File and SQLite answer every
-seek/replay identically over generated histories).
-**Exit:** full blazie suite green on `Store.SQLite`; measured bytes/fact and
-open-time recorded here.
+Also noted: symbols are float64 (`<<_::float-64-little>>`) — 3.2KB per
+384-dim symbol, 2× what float32 costs on disk, in RAM, and over replication.
+Orthogonal to the swap; worth its own measured decision.
 
-### P2 — durability to R2: stream out, hydrate in
-Continuous shipping of the WAL/file to R2 (per tenant), and `open` on a node
-without the file restores it from R2 first. Decision inside this phase,
-measured not guessed: extend blazie's native S3 target (it already signs
-SigV4 to R2, and backup/drill know it) to per-commit shipping, vs. run
-Litestream as a sidecar per node. Native keeps one wire and the drill
-covers it; Litestream is battle-tested but a second moving part per node.
-**Exit:** kill a node after an append; reopen elsewhere; the fact is there.
-Drill extended to the new path.
+## The phases (audit-sized; ~3–4 weeks focused, P4 more than half)
 
-### P3 — the index comes home: Turbopuffer deleted
-Vectors live where facts live. The exact provider becomes the default and
-only in-tree provider; its hot structure is rebuilt per world from symbol
-facts on open (or lazily on first search) — derived and disposable, now with
-tenancy by absence because a world's symbols are in the world's file.
-`Index.Turbopuffer` and its wire test are deleted; the deferred live-tripwire
-item is closed as moot. The `Index` behaviour seam STAYS (a future whale
-tenant can bring an ANN provider back for one space without a rewrite).
-**Exit:** grep for the vendor answers nothing but history; index tests green
-against rebuilt-from-facts; the sweep epic's C3/C4 wire the built-in provider.
+**P0 — the conformance suite (1 day).** Extract the store-agnostic assertions
+from `store_test` / `memory_test` / `store_paged_test` / `compaction_test`
+(non-checkpoint half) into one suite parameterized on `{module, opts}`; run it
+against Memory, File, Paged. Green = nothing changed, three stores share one
+suite. This is the highest-leverage day in the plan.
 
-### P4 — the cluster cache policy: hydrate, evict, stick
-World lifecycle grows the two policies the file model needs: idle eviction
-(close world + drop local file; R2 remains truth) and disk-pressure LRU.
-Sticky tenant→node routing (consistent hash at the surface/router) so a
-tenant's writers and watchers land where the file is warm — which also keeps
-read-set reactivity in-process, where it already works. Single-writer per
-tenant is the invariant that makes this a router, not a consensus problem.
-**Exit:** two-node test — tenant sticks, evicted tenant rehydrates on next
-touch, no cross-node write ever happens.
+**P1 — `Store.SQLite`, additive (2–3 days).** `{:exqlite, ...}` (NIF precedent:
+wasmex already ships rustler). One file per world; `facts(seq, tx, id_blob,
+attribute, value_s, value, by_blob)` with EAVT/AEVT/value partial indexes;
+WAL; `BEGIN IMMEDIATE` per append (atomicity replaces the torn-record
+apparatus); `seek/tail/last_tx` + `stats` + filename; `PRAGMA synchronous`
+mapped to the `sync:`/`LEDGER_SYNC` dual-CI story. Registered in the
+conformance suite. File stays the default. Landmines 1–3 addressed here.
 
-### P5 — retirement
-`Store.File`/`Store.Paged` demoted to test/reference (or deleted if nothing
-pins them), migration tool ships (open old store, replay into new — replay IS
-the migration), deployment docs + runtime config flip the default. UpCloud
-deploy updated; keys/backup env unchanged.
+**P2 — the migrator (1–2 days).** `.ledger → .sqlite` through `Record.walk` +
+`Fact.from_stored/1`; proven against `old_shapes_test`'s hand-written byte
+fixtures answering identically from SQLite.
 
-## Open items the audit must settle (folded in as answered)
+**P3 — Turbopuffer out, Exact in (2–3 days; parallel to P1–P2).** Delete the
+vendor module + its test half (keep `Wire` as the generic HTTP-provider
+fixture so the swappable claim stays proven). Then the real work: supervise
+the Exact holder, `config :blazie, :index`, wire `Index.job/3` under a
+runner, and a restart-rebuilds-the-index test. The Index seam stays — a whale
+tenant can bring an ANN provider back for one space without a rewrite.
 
-- Exact seek-pattern semantics `Store.SQLite` must honor.
-- Which of backup/drill/compact/erasure touch the ledger file format directly
-  (hidden coupling), and what erasure's key-destruction needs from the store.
-- Whether `World` can shed its in-RAM sort orders entirely in P1 or that is a
-  P1.5 (memory win lands later, correctness first).
-- Turbopuffer's full delete footprint.
+**P4 — replication to R2 (3–5 days; highest risk, decided by measurement).**
+Continuous per-tenant shipping + hydrate-on-open. Vendor decision inside the
+phase: Litestream sidecar vs extending native `Backup.Target.S3` into a
+per-commit replicator — settled by the runtime-tenant/glob question (landmine
+5). Keep Backup's keys half; rework `Backup.run` to report replication lag as
+facts so `proven_at` alarms survive; rework `Drill.pull` to restore-into-
+scratch while `ask_both/3` stays. Exit: kill a node after an append, reopen
+elsewhere, the fact is there; the drill proves it on cadence.
+
+**P4-cluster — hydrate, evict, stick.** Idle eviction (close + drop local
+file; R2 is truth), disk-pressure LRU, sticky tenant→node consistent-hash at
+the surface (landmine 6 makes this correctness). Single-writer per tenant;
+`Cluster.owner/1` already answers who; routing starts acting on it.
+
+**P5 — flip the default (0.5 day; the dangerous commit).**
+`World.default_store/0` → SQLite; boot-time migration of any `.ledger` in
+`LEDGER_DIR`; `store_default_test` + `storage_layout_test` updated
+deliberately (its moduledoc records why: a silent rename once left a node
+green beside 791KB of invisible facts).
+
+**P6 — compaction + residency (1–2 days).** `Compact.erased/2` as
+UPDATE+VACUUM (same asserted properties). Then `resident: :none`, fixing the
+serialized-check hole (landmine 4) first.
+
+**P7 — retirement (much later, maybe never).** `Store.Record` stays as the
+importer; `Store.File` demoted to the read-only legacy path. Retiring it buys
+nothing; not scheduled.
 
 ## Verdicts
 
