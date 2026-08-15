@@ -618,3 +618,31 @@ REJECTED, not deferred** (soc-760d holds the scoped plan if it ever
 returns): 25MB module + stdlib-into-VFS + interpreter-on-interpreter buys
 little an agent can't do with Lua plus real tools. JS (porffor) stays out
 until demanded.
+
+### Luerl vs native lua, measured (2026-08-15)
+
+Same source, best of runs, checksums identical everywhere (Luerl carries
+PUC 5.4's integer semantics — `medium` distinguishes 5.4 from LuaJIT's
+floats and Luerl matches 5.4 exactly):
+
+| task | PUC 5.4 | LuaJIT | Luerl (via `Lua.run`) | Luerl ÷ PUC |
+|---|---|---|---|---|
+| light — 100k string find/upper/concat | 21.6ms | 7.2ms | 144.7ms | **6.7×** |
+| medium — 30k table build + sort + scan | 5.4ms | 5.6ms | 16.5ms | **3.1×** |
+| heavy — fib(24) + 500k-iter arithmetic | 4.8ms | 2.7ms | 91.8ms | **19×** |
+| guest floor — spawn + fence + `return 1` | — | — | **0.1ms** | — |
+
+Reading: **3–19× slower than PUC, not the 100×+ a tree-walker could be**;
+the penalty concentrates where expected (call-heavy numeric recursion);
+the fence itself is free (0.1ms floor, so a thousand small authored runs
+cost ~nothing over their compute); and at agent scale the absolute numbers
+are noise — the worst measured case is 145ms for 100k string operations.
+This is the doctrine's numeric footing: Lua orchestrates and glues (fast
+enough by two orders of magnitude of headroom), compiled wasm programs do
+the heavy lifting.
+
+Second Luerl gap recorded (beside `gmatch`, shimmed): **`local function`
+self-recursion** — the sugar does not pre-bind the name in stock Luerl 1.5
+(`{undefined_function, nil}`); the explicit form `local f; f = function()
+... end` works. Not shimmable at the grant (it is a parser behavior);
+documented here and worked around in authored code.
