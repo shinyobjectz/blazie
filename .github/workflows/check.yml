@@ -32,6 +32,16 @@ jobs:
 
       - run: mix deps.get
 
+      # The replication suite shells out to the real litestream binary — the
+      # restore path the drill proves is the one production runs, so the gate
+      # runs it rather than excluding it.
+      - name: Install litestream
+        run: |
+          curl -fsSL -o /tmp/litestream.deb \
+            https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.deb
+          sudo dpkg -i /tmp/litestream.deb
+          litestream version
+
       # Formatting is part of the gate, not a suggestion.
       - run: mix format --check-formatted
 
