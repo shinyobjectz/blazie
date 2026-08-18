@@ -21,7 +21,9 @@ defmodule Blazie.LuaRequireTest do
       Package.publish(
         "leftpad",
         "1.0.0",
-        "return function(s, n) while #s < n do s = ' ' .. s end return s end", library: lib)
+        "return function(s, n) while #s < n do s = ' ' .. s end return s end",
+        library: lib
+      )
 
     {:ok, _} =
       Package.publish("greet", "2.0.0", "return { hello = function(x) return 'hi ' .. x end }",
