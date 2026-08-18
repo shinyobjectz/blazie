@@ -34,13 +34,17 @@ jobs:
 
       # The replication suite shells out to the real litestream binary — the
       # restore path the drill proves is the one production runs, so the gate
-      # runs it rather than excluding it.
+      # runs it rather than excluding it. Pinned to the version the storage
+      # plan verdicted (dir-mode + conditional-write lease need 0.5.x; 0.3.x
+      # starts cleanly and ships nothing).
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
       - name: Install litestream
         run: |
-          curl -fsSL -o /tmp/litestream.deb \
-            https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.deb
-          sudo dpkg -i /tmp/litestream.deb
-          litestream version
+          go install github.com/benbjohnson/litestream/cmd/litestream@v0.5.8
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          "$HOME/go/bin/litestream" version
 
       # Formatting is part of the gate, not a suggestion.
       - run: mix format --check-formatted
