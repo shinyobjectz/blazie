@@ -33,8 +33,62 @@ final class TerminalSession: NSObject, TerminalViewDelegate {
         view.inputAssistantItem.trailingBarButtonGroups = []
         view.autocorrectionType = .no
         view.spellCheckingType = .no
+        // Taps stay local (focus, selection); only scrolls go to the program, and only as chosen in
+        // Settings. tmux runs with mouse on, so wheel scrolls reach the app or open tmux history.
+        view.allowMouseReporting = false
         applyKeyboardSetting()
+        setUpScrolling()
         connect()
+    }
+
+    // MARK: scrolling
+
+    private lazy var touchScroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
+    private lazy var pointerScroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
+    private var scrollRemainder: CGFloat = 0
+
+    private func setUpScrolling() {
+        touchScroll.maximumNumberOfTouches = 1
+        touchScroll.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        pointerScroll.allowedScrollTypesMask = .all
+        pointerScroll.allowedTouchTypes = []
+        for g in [touchScroll, pointerScroll] {
+            g.delegate = self
+            view.addGestureRecognizer(g)
+        }
+        // A trackpad or mouse wheel goes to the app first; when that's off it scrolls locally.
+        view.panGestureRecognizer.require(toFail: pointerScroll)
+        applyScrollSettings()
+    }
+
+    func applyScrollSettings() {
+        let touchToApp = Settings.Scroll.current(Settings.touchScrollKey) == .app
+        touchScroll.isEnabled = touchToApp
+        // One finger goes to the app, so two fingers scroll Blazie's scrollback.
+        view.panGestureRecognizer.minimumNumberOfTouches = touchToApp ? 2 : 1
+        pointerScroll.isEnabled = Settings.Scroll.current(Settings.mouseScrollKey) == .app
+    }
+
+    /// Turns drag distance into wheel clicks (SGR mouse reports, which tmux asks for), one per text line.
+    @objc private func scrolled(_ g: UIPanGestureRecognizer) {
+        switch g.state {
+        case .began, .changed:
+            let cell = max(view.bounds.height / CGFloat(max(rows, 1)), 1)
+            scrollRemainder += g.translation(in: view).y
+            g.setTranslation(.zero, in: view)
+            let lines = Int(scrollRemainder / cell)
+            guard lines != 0 else { return }
+            scrollRemainder -= CGFloat(lines) * cell
+            let p = g.location(in: view)
+            let col = min(max(Int(p.x / max(view.bounds.width / CGFloat(max(cols, 1)), 1)) + 1, 1), cols)
+            let row = min(max(Int((p.y - view.contentOffset.y) / cell) + 1, 1), rows)
+            // Content follows the finger: dragging down shows earlier lines, i.e. wheel up (64).
+            let button = lines > 0 ? 64 : 65
+            let report = "\u{1b}[<\(button);\(col);\(row)M"
+            task?.send(.data(Data(String(repeating: report, count: min(abs(lines), 20)).utf8))) { _ in }
+        default:
+            scrollRemainder = 0
+        }
     }
 
     /// "Off" swaps the on-screen keyboard for an empty view, so it never appears. "Automatic" leaves
@@ -131,6 +185,13 @@ final class TerminalSession: NSObject, TerminalViewDelegate {
     func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 }
 
+extension TerminalSession: UIGestureRecognizerDelegate {
+    // The two-finger scrollback pan and selection keep working alongside the one-finger app scroll.
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        g === touchScroll && other !== view.panGestureRecognizer
+    }
+}
+
 /// Sessions live as long as their tab, not their SwiftUI view, so switching tabs keeps the shell.
 @MainActor
 final class TerminalSessions {
@@ -157,6 +218,10 @@ final class TerminalSessions {
 
     func applyKeyboardSetting() {
         sessions.values.forEach { $0.applyKeyboardSetting() }
+    }
+
+    func applyScrollSettings() {
+        sessions.values.forEach { $0.applyScrollSettings() }
     }
 }
 
