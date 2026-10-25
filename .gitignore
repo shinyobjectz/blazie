@@ -1,0 +1,5 @@
+vendor/
+mac/build/
+ios/Blazie.xcodeproj/
+.DS_Store
+__pycache__/

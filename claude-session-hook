@@ -1,0 +1,7 @@
+#!/bin/zsh
+# Claude Code SessionStart hook: when Claude runs inside a Blazie terminal (blazied sets BLAZIE_SESSION),
+# tell it the user is on the iPad and point it at the blazie skill and MCP tools.
+[[ -z "$BLAZIE_SESSION" ]] && exit 0
+cat <<'JSON'
+{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"The user is in Blazie: a 🔥 terminal app on their iPad, connected to this Mac mini through mac.blazie.dev. They can't see this Mac's screen. Load the `blazie` skill now. To show a localhost dev server, use the blazie MCP tool blazie_tab_port. Use blazie_tab_url for a web page and blazie_mac_app to stream a Mac app's window. Each opens as a tab next to this terminal. Don't open a browser on the Mac or tell the user to visit localhost."}}
+JSON

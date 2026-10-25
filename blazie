@@ -1,0 +1,255 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pymobiledevice3==11.44.0", "mcp>=1.9,<2", "aiohttp>=3.10,<4"]
+# ///
+"""blazie: open tabs in the Blazie iPad app from the Mac mini, and check on the iPad.
+
+Blazie is a terminal on the iPad into this Mac (blazied, over Cloudflare Tunnel at mac.blazie.dev).
+`blazie tab 5173` shows localhost:5173 as a tab, `blazie mac-app Figma` opens Figma on the Mac and
+gives it a tab. When the iPad is on USB, `blazie shot` and `blazie ui` show what it is displaying.
+`blazie mcp` serves the same verbs as MCP tools over stdio.
+"""
+
+import argparse
+import asyncio
+import json
+import os
+import sys
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+STATE = Path.home() / ".blazie"
+APP = "com.shinyobjectz.blazie"
+UDID = os.environ.get("BLAZIE_IPAD")  # None = first USB device
+MAX_ELEMENTS = 150
+
+
+class BlazieError(Exception):
+    pass
+
+
+# ---------------------------------------------------------------- tabs (through blazied)
+
+async def api(cmd: dict) -> dict:
+    import aiohttp
+    token = (STATE / "token").read_text().strip()
+    try:
+        async with aiohttp.ClientSession() as s, s.ws_connect(f"ws://127.0.0.1:7777/api?token={token}") as ws:
+            await ws.send_str(json.dumps(cmd))
+            reply = json.loads((await ws.receive(timeout=30)).data)
+    except aiohttp.ClientError as e:
+        raise BlazieError(f"blazied is not answering on :7777 ({e}); "
+                          "`launchctl kickstart -k gui/$(id -u)/dev.blazie.daemon`, log ~/.blazie/daemon.log") from e
+    if reply.get("ok") is False:
+        raise BlazieError(reply["error"])
+    return reply
+
+
+def _listening(port: int) -> bool:
+    import socket
+    with socket.socket() as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+async def tab_port(port: int, path: str = "/", title: str | None = None) -> dict:
+    if not _listening(port):
+        raise BlazieError(f"nothing is listening on localhost:{port}")
+    return await api({"tab": {"port": port, "path": path, **({"title": title} if title else {})}})
+
+
+async def tab_url(url: str, title: str | None = None) -> dict:
+    return await api({"tab": {"url": url, **({"title": title} if title else {})}})
+
+
+async def mac_app(name: str) -> dict:
+    return await api({"tab": {"mac_app": name}})
+
+
+async def tabs() -> dict:
+    return await api({"list": True})
+
+
+# ---------------------------------------------------------------- iPad on USB
+
+async def lockdown():
+    from pymobiledevice3.lockdown import create_using_usbmux
+    try:
+        return await create_using_usbmux(serial=UDID)
+    except Exception as e:
+        raise BlazieError(f"no iPad on USB ({e.__class__.__name__}: {e})") from e
+
+
+@asynccontextmanager
+async def ready():
+    """A no-root tunnel to the iPad with the developer disk image mounted (iOS 17+ developer services)."""
+    from pymobiledevice3.remote.userspace_tunnel import UserspaceRsdTunnel
+    from pymobiledevice3.services.mobile_image_mounter import auto_mount
+    ld = await lockdown()
+    if not await ld.get_developer_mode_status():
+        from pymobiledevice3.services.amfi import AmfiService
+        await AmfiService(ld).reveal_developer_mode_option_in_ui()
+        raise BlazieError("Developer Mode is off on the iPad: Settings > Privacy & Security > Developer Mode > On, "
+                          "restart, then tap Turn On")
+    async with UserspaceRsdTunnel(serial=UDID) as rsd:
+        try:
+            await auto_mount(rsd)
+        except Exception as e:
+            if "AlreadyMounted" not in e.__class__.__name__:
+                raise BlazieError(f"developer disk image did not mount ({e}); unlock the iPad and retry") from e
+        yield rsd
+
+
+async def status() -> dict:
+    out: dict = {}
+    try:
+        out["blazied"] = await tabs()
+    except BlazieError as e:
+        out["blazied"] = f"error: {e}"
+    try:
+        ld = await lockdown()
+        out["ipad_usb"] = {"name": ld.all_values.get("DeviceName"), "ios": ld.all_values.get("ProductVersion"),
+                           "developer_mode": await ld.get_developer_mode_status()}
+    except BlazieError:
+        out["ipad_usb"] = None
+    return out
+
+
+async def open_app(bundle: str = APP) -> dict:
+    from pymobiledevice3.remote.core_device.app_service import AppServiceService
+    async with ready() as rsd, AppServiceService(rsd) as svc:
+        try:
+            await svc.launch_application(bundle, [], kill_existing=False)
+        except Exception as e:
+            raise BlazieError(f"could not open {bundle} ({e}); the iPad must be unlocked") from e
+    return {"opened": bundle}
+
+
+async def screenshot(out: str | None = None) -> str:
+    from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
+    from pymobiledevice3.services.dvt.instruments.screenshot import Screenshot
+    path = Path(out or STATE / "shots" / f"shot-{int(time.time())}.png")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    async with ready() as rsd, DvtProvider(rsd) as dvt, Screenshot(dvt) as shot:
+        path.write_bytes(await shot.get_screenshot())
+    return str(path)
+
+
+async def ui() -> list[str]:
+    """Labels of the focusable elements on screen, in focus order (accessibility inspector)."""
+    from pymobiledevice3.services.accessibilityaudit import AccessibilityAudit
+    labels: list[str] = []
+    async with ready() as rsd, AccessibilityAudit(rsd) as ax:
+        try:
+            async for el in ax.iter_elements():
+                if text := (el.caption or el.spoken_description or "").strip():
+                    labels.append(text)
+                if len(labels) >= MAX_ELEMENTS:
+                    break
+        except TimeoutError:
+            pass
+    return labels
+
+
+# ---------------------------------------------------------------- MCP
+
+def mcp_server():
+    from mcp.server.fastmcp import FastMCP, Image
+
+    m = FastMCP("blazie", instructions=(
+        "The user works on this Mac mini from an iPad through Blazie, a terminal app with tabs. Use "
+        "blazie_tab_port to show a localhost dev server as a tab on the iPad, blazie_tab_url for any web "
+        "page, and blazie_mac_app to stream a Mac app's window into a tab the user can work in. blazie_screenshot shows the iPad "
+        "screen, but only while the iPad is plugged into the Mac by USB."))
+
+    async def run(coro):
+        try:
+            r = await coro
+        except BlazieError as e:
+            return f"error: {e}"
+        return r if isinstance(r, str) else json.dumps(r)
+
+    @m.tool()
+    async def blazie_tab_port(port: int, path: str = "/", title: str = "") -> str:
+        """Show the server listening on localhost:PORT as a tab in Blazie on the iPad (via mac-PORT.blazie.dev)."""
+        return await run(tab_port(port, path, title or None))
+
+    @m.tool()
+    async def blazie_tab_url(url: str, title: str = "") -> str:
+        """Open any https URL as a tab in Blazie on the iPad."""
+        return await run(tab_url(url, title or None))
+
+    @m.tool()
+    async def blazie_mac_app(name: str) -> str:
+        """Open a Mac app (e.g. 'Figma', 'Xcode') on the Mac mini and stream its window live into a Blazie tab,
+        where the user can click, scroll and type into it."""
+        return await run(mac_app(name))
+
+    @m.tool()
+    async def blazie_status() -> str:
+        """Whether Blazie is connected (apps_listening), its tabs and shells, shared ports, and the USB iPad."""
+        return await run(status())
+
+    @m.tool()
+    async def blazie_screenshot():
+        """What the iPad screen shows right now (USB only)."""
+        try:
+            return Image(path=await screenshot())
+        except BlazieError as e:
+            return f"error: {e}"
+
+    @m.tool()
+    async def blazie_ui() -> str:
+        """Labels of the on-screen elements on the iPad (USB only)."""
+        async def labels():
+            return "\n".join(await ui())
+        return await run(labels())
+
+    m.run()
+
+
+# ---------------------------------------------------------------- CLI
+
+def main():
+    p = argparse.ArgumentParser(prog="blazie", description=__doc__.splitlines()[0])
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("tab", help="open localhost:PORT or a URL as a tab on the iPad")
+    s.add_argument("target", help="a port (5173) or a URL")
+    s.add_argument("--path", default="/")
+    s.add_argument("--title")
+    s = sub.add_parser("mac-app", help="open a Mac app and give it a tab")
+    s.add_argument("name")
+    sub.add_parser("tabs", help="tabs, shells and shared ports blazied knows about")
+    sub.add_parser("status", help="blazied plus the USB iPad")
+    sub.add_parser("open", help="open Blazie on the USB iPad")
+    s = sub.add_parser("shot", help="screenshot the USB iPad to a PNG")
+    s.add_argument("out", nargs="?")
+    sub.add_parser("ui", help="list on-screen element labels on the USB iPad")
+    sub.add_parser("mcp", help="run the MCP server on stdio")
+    a = p.parse_args()
+
+    def show(r):
+        print(r if isinstance(r, str) else json.dumps(r, indent=2))
+
+    try:
+        match a.cmd:
+            case "tab":
+                if a.target.isdigit():
+                    show(asyncio.run(tab_port(int(a.target), a.path, a.title)))
+                else:
+                    show(asyncio.run(tab_url(a.target, a.title)))
+            case "mac-app": show(asyncio.run(mac_app(a.name)))
+            case "tabs": show(asyncio.run(tabs()))
+            case "status": show(asyncio.run(status()))
+            case "open": show(asyncio.run(open_app()))
+            case "shot": show(asyncio.run(screenshot(a.out)))
+            case "ui": print("\n".join(asyncio.run(ui())))
+            case "mcp": mcp_server()
+    except BlazieError as e:
+        print(f"blazie: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,412 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["aiohttp>=3.10,<4"]
+# ///
+"""blazied: the Mac side of the Blazie iPad app.
+
+Cloudflare Tunnel "blazie-mac-mini" sends mac.blazie.dev and *.blazie.dev here (127.0.0.1:7777).
+
+  /pty?token=T[&session=ID]   WebSocket: one login shell. Binary frames are terminal bytes both ways;
+                              text frames are JSON: {"resize": [cols, rows]}. The first frame sent is
+                              {"session": ID}. A shell outlives its socket; reattaching with session=ID
+                              replays its recent output, so the iPad can sleep or switch networks.
+  /events?token=T             WebSocket: the app listens for {"tab": {...}} pushes.
+  /api?token=T                WebSocket, local callers only (the blazie CLI/MCP): {"tab": {...}} or
+                              {"list": true}; replies with JSON.
+  mac-PORT.blazie.dev         reverse proxy to 127.0.0.1:PORT (HTTP and WebSocket) for ports opened as
+                              tabs. The app signs in once per host via /__blazie/auth?t=T&next=/, which
+                              sets an HttpOnly cookie.
+
+The token lives in ~/.blazie/token and is baked into the app when it is built.
+"""
+
+import asyncio
+import fcntl
+import hashlib
+import hmac
+import json
+import os
+import pty
+import re
+import secrets
+import signal
+import shutil
+import struct
+import subprocess
+import termios
+import time
+import urllib.request
+import uuid
+from pathlib import Path
+
+import aiohttp
+from aiohttp import web
+
+STATE = Path.home() / ".blazie"
+PORT = int(os.environ.get("BLAZIED_PORT", "7777"))
+ZONE = "blazie.dev"
+TERMINAL_HOST = f"mac.{ZONE}"
+TUNNEL_ID = "20699c34-1153-417d-a41a-f1103802b65a"
+CF_ENV = Path.home() / ".ugc-pro/cloudflare.env"
+TMUX = shutil.which("tmux", path="/opt/homebrew/bin:/usr/local/bin:/usr/bin") or "tmux"
+TMUX_CONF = STATE / "tmux.conf"
+# Invisible tmux: no status bar, no prefix-key surprises, and no alternate screen (smcup@/rmcup@),
+# so output scrolls into Blazie's own scrollback as in a plain shell.
+TMUX_CONF_TEXT = """\
+set -g status off
+set -g prefix None
+unbind C-b
+set -g escape-time 0
+set -g history-limit 50000
+set -g window-size latest
+set -g aggressive-resize on
+set -g set-titles on
+set -g set-titles-string "#{pane_title}"
+set -g allow-passthrough on
+set -g set-clipboard on
+set -g default-terminal "xterm-256color"
+set -ga terminal-overrides ",xterm-256color:Tc:smcup@:rmcup@"
+set -g destroy-unattached off
+"""
+SCROLLBACK = 512 * 1024  # bytes of output replayed on reattach
+IDLE_REAP = 7 * 24 * 3600  # detached shells live a week
+PREVIEW = re.compile(rf"^mac-(\d{{2,5}})\.{re.escape(ZONE)}$")
+HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
+       "transfer-encoding", "upgrade", "host", "content-length"}
+
+
+def load_token() -> str:
+    path = STATE / "token"
+    if not path.exists():
+        STATE.mkdir(exist_ok=True)
+        path.write_text(secrets.token_urlsafe(32))
+        path.chmod(0o600)
+    return path.read_text().strip()
+
+
+TOKEN = load_token()
+TMUX_CONF.write_text(TMUX_CONF_TEXT)
+COOKIE = "blazie"
+COOKIE_VALUE = hmac.new(TOKEN.encode(), b"preview-cookie", hashlib.sha256).hexdigest()
+
+
+def remote(request: web.Request) -> bool:
+    """Through the tunnel (cloudflared adds Cf-Connecting-Ip) or from another machine."""
+    return "Cf-Connecting-Ip" in request.headers or request.remote not in ("127.0.0.1", "::1")
+
+
+def authed(request: web.Request) -> bool:
+    return hmac.compare_digest(request.query.get("token", ""), TOKEN)
+
+
+# ---------------------------------------------------------------- shells
+
+class Shell:
+    def __init__(self, sid: str, cols: int, rows: int, cwd: str | None):
+        self.sid = sid
+        self.buffer = bytearray()
+        self.socket: web.WebSocketResponse | None = None
+        self.detached_at = time.time()
+        self.pid, self.fd = pty.fork()
+        if self.pid == 0:
+            os.environ.update(TERM="xterm-256color", COLORTERM="truecolor", LANG="en_US.UTF-8",
+                              BLAZIE_SESSION=sid)
+            os.chdir(cwd if cwd and os.path.isdir(cwd) else str(Path.home()))
+            # The shell lives in a tmux session on blazie's own socket, so it survives blazied restarts:
+            # reattaching runs `new-session -A`, which attaches to the existing session by name.
+            os.execvp(TMUX, [TMUX, "-L", "blazie", "-f", str(TMUX_CONF), "new-session", "-A", "-s", sid,
+                             "-e", f"BLAZIE_SESSION={sid}"])
+        self.resize(cols, rows)
+        asyncio.get_running_loop().add_reader(self.fd, self._read)
+
+    def resize(self, cols: int, rows: int):
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+    def _read(self):
+        try:
+            data = os.read(self.fd, 65536)
+        except OSError:
+            data = b""
+        if not data:
+            self.close()
+            return
+        self.buffer += data
+        if len(self.buffer) > SCROLLBACK:
+            del self.buffer[: len(self.buffer) - SCROLLBACK]
+        if self.socket is not None and not self.socket.closed:
+            asyncio.ensure_future(self._send(self.socket, data))
+
+    @staticmethod
+    async def _send(ws, data: bytes):
+        try:
+            await ws.send_bytes(data)
+        except Exception:
+            pass
+
+    def write(self, data: bytes):
+        os.write(self.fd, data)
+
+    def alive(self) -> bool:
+        try:
+            return os.waitpid(self.pid, os.WNOHANG) == (0, 0)
+        except ChildProcessError:
+            return False
+
+    def kill(self):
+        """End the shell itself (the tab was closed), not just this attachment."""
+        subprocess.run([TMUX, "-L", "blazie", "kill-session", "-t", self.sid], capture_output=True)
+        self.close()
+
+    def close(self):
+        asyncio.get_running_loop().remove_reader(self.fd)
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        try:
+            os.kill(self.pid, signal.SIGHUP)
+        except OSError:
+            pass
+        shells.pop(self.sid, None)
+        if self.socket is not None and not self.socket.closed:
+            asyncio.ensure_future(self.socket.close(code=1000, message=b"shell exited"))
+
+
+shells: dict[str, Shell] = {}
+listeners: set[web.WebSocketResponse] = set()
+tabs: list[dict] = []  # tabs pushed so far, replayed to an app that connects later
+PORTS_FILE = STATE / "ports.json"
+open_ports: set[int] = set(json.loads(PORTS_FILE.read_text())) if PORTS_FILE.exists() else set()
+# Names exist ahead of time for these, so no resolver has cached "no such host" for them.
+COMMON_PORTS = [1420, 3000, 3001, 3002, 3003, 3333, 4000, 4173, 4200, 4321, 5000, 5173, 5174, 5175,
+                6006, 8000, 8080, 8081, 8765, 8787, 8888, 9000]
+
+
+async def pty_handler(request: web.Request):
+    if not authed(request):
+        raise web.HTTPUnauthorized()
+    ws = web.WebSocketResponse(heartbeat=20, max_msg_size=0)
+    await ws.prepare(request)
+    q = request.query
+    sid = q.get("session")
+    shell = shells.get(sid) if sid else None
+    if shell is None or not shell.alive():
+        sid = sid or uuid.uuid4().hex[:12]
+        shell = shells[sid] = Shell(sid, int(q.get("cols", 100)), int(q.get("rows", 30)), q.get("cwd"))
+    if shell.socket is not None and not shell.socket.closed:
+        await shell.socket.close(code=4000, message=b"attached elsewhere")
+    shell.socket = ws
+    await ws.send_str(json.dumps({"session": sid}))
+    if shell.buffer:
+        await ws.send_bytes(bytes(shell.buffer))
+    try:
+        async for msg in ws:
+            if msg.type == aiohttp.WSMsgType.BINARY:
+                shell.write(msg.data)
+            elif msg.type == aiohttp.WSMsgType.TEXT:
+                cmd = json.loads(msg.data)
+                if "resize" in cmd:
+                    shell.resize(*cmd["resize"])
+                elif cmd.get("close"):
+                    shell.kill()
+    finally:
+        if shell.socket is ws:
+            shell.socket = None
+            shell.detached_at = time.time()
+    return ws
+
+
+async def events_handler(request: web.Request):
+    if not authed(request):
+        raise web.HTTPUnauthorized()
+    ws = web.WebSocketResponse(heartbeat=20)
+    await ws.prepare(request)
+    listeners.add(ws)
+    try:
+        await ws.send_str(json.dumps({"tabs": tabs}))
+        async for _ in ws:
+            pass
+    finally:
+        listeners.discard(ws)
+    return ws
+
+
+# ---------------------------------------------------------------- tabs
+
+def cloudflare_dns(name: str):
+    """Point NAME at the tunnel (idempotent). Uses the account token in ~/.ugc-pro/cloudflare.env."""
+    env = dict(line.split("=", 1) for line in CF_ENV.read_text().split("\n") if "=" in line)
+    headers = {"Authorization": f"Bearer {env['CLOUDFLARE_API_TOKEN'].strip()}",
+               "Content-Type": "application/json", "User-Agent": "blazied/1.0"}
+
+    def call(method, path, body=None):
+        req = urllib.request.Request(f"https://api.cloudflare.com/client/v4{path}", method=method,
+                                     headers=headers, data=json.dumps(body).encode() if body else None)
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.load(r)
+
+    zone = call("GET", f"/zones?name={ZONE}")["result"][0]["id"]
+    if call("GET", f"/zones/{zone}/dns_records?name={name}")["result"]:
+        return
+    call("POST", f"/zones/{zone}/dns_records", {"type": "CNAME", "name": name, "proxied": True,
+                                                 "content": f"{TUNNEL_ID}.cfargotunnel.com",
+                                                 "comment": "Blazie: localhost tab"})
+
+
+async def push_tab(tab: dict) -> dict:
+    """A tab is {"url": ...}, {"port": N, "path": "/"} (a localhost server) or {"mac_app": "Figma"}."""
+    if "port" in tab:
+        port = int(tab["port"])
+        host = f"mac-{port}.{ZONE}"
+        await asyncio.to_thread(cloudflare_dns, host)
+        open_ports.add(port)
+        PORTS_FILE.write_text(json.dumps(sorted(open_ports)))
+        tab = {"title": f"localhost:{port}", **tab, "url": f"https://{host}{tab.get('path', '/')}",
+               "auth": True}
+    elif "mac_app" in tab:
+        proc = await asyncio.create_subprocess_exec("open", "-a", tab["mac_app"])
+        await proc.wait()
+        tab = {"title": tab["mac_app"], **tab}
+    tab = {"id": uuid.uuid4().hex[:8], "title": tab.get("url", ""), **tab}
+    tabs.append(tab)
+    del tabs[:-20]
+    for ws in list(listeners):
+        try:
+            await ws.send_str(json.dumps({"tab": tab}))
+        except Exception:
+            listeners.discard(ws)
+    return tab
+
+
+async def api_handler(request: web.Request):
+    if not authed(request) or remote(request):
+        raise web.HTTPForbidden()
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    async for msg in ws:
+        cmd = json.loads(msg.data)
+        try:
+            if "tab" in cmd:
+                tab = await push_tab(cmd["tab"])
+                reply = {"ok": True, "tab": tab, "apps_listening": len(listeners)}
+            else:
+                reply = {"apps_listening": len(listeners), "tabs": tabs, "ports": sorted(open_ports),
+                         "shells": [{"session": s.sid, "attached": s.socket is not None} for s in shells.values()]}
+        except Exception as e:
+            reply = {"ok": False, "error": f"{e.__class__.__name__}: {e}"}
+        await ws.send_str(json.dumps(reply))
+    return ws
+
+
+# ---------------------------------------------------------------- localhost proxy
+
+async def splice(a, b):
+    """Pump WebSocket messages both ways until either side closes."""
+    async def pump(src, dst):
+        async for m in src:
+            if m.type == aiohttp.WSMsgType.TEXT:
+                await dst.send_str(m.data)
+            elif m.type == aiohttp.WSMsgType.BINARY:
+                await dst.send_bytes(m.data)
+        await dst.close()
+    await asyncio.gather(pump(a, b), pump(b, a), return_exceptions=True)
+
+
+async def stream_handler(request: web.Request):
+    """A Mac app window, streamed by BlazieStream (LaunchAgent dev.blazie.stream on 127.0.0.1:7778)."""
+    if not authed(request):
+        raise web.HTTPUnauthorized()
+    ws = web.WebSocketResponse(heartbeat=20, max_msg_size=0)
+    await ws.prepare(request)
+    try:
+        async with aiohttp.ClientSession() as s, s.ws_connect("ws://127.0.0.1:7778/", max_msg_size=0) as up:
+            await splice(ws, up)
+    except aiohttp.ClientError:
+        await ws.send_str(json.dumps({"error": "Blazie Stream isn't running on the Mac "
+                                               "(launchctl kickstart gui/$UID/dev.blazie.stream)."}))
+        await ws.close()
+    return ws
+
+async def proxy(request: web.Request, port: int):
+    if request.path == "/__blazie/auth":
+        if not hmac.compare_digest(request.query.get("t", ""), TOKEN):
+            raise web.HTTPUnauthorized()
+        nxt = request.query.get("next", "/")
+        resp = web.HTTPFound(nxt if nxt.startswith("/") else "/")
+        resp.set_cookie(COOKIE, COOKIE_VALUE, httponly=True, secure=True, samesite="Lax", max_age=30 * 86400)
+        raise resp
+    if not hmac.compare_digest(request.cookies.get(COOKIE, ""), COOKIE_VALUE):
+        raise web.HTTPUnauthorized(text="Blazie: open this page from the Blazie app.")
+    if port not in open_ports:
+        raise web.HTTPNotFound(text=f"Blazie: localhost:{port} is not shared. Open it as a tab first.")
+
+    upstream = f"http://127.0.0.1:{port}{request.rel_url}"
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP and not k.lower().startswith("cf-")}
+    headers["Host"] = f"localhost:{port}"  # dev servers such as Vite reject other Host names
+
+    if request.headers.get("Upgrade", "").lower() == "websocket":
+        ws = web.WebSocketResponse(protocols=request.headers.get("Sec-WebSocket-Protocol", "").split(", ")
+                                   if "Sec-WebSocket-Protocol" in request.headers else ())
+        await ws.prepare(request)
+        headers = {k: v for k, v in headers.items() if not k.lower().startswith("sec-websocket")}
+        async with aiohttp.ClientSession() as s, s.ws_connect(upstream.replace("http", "ws", 1),
+                                                              headers=headers, protocols=ws.ws_protocol and [ws.ws_protocol] or ()) as up:
+            await splice(ws, up)
+        return ws
+
+    async with aiohttp.ClientSession(auto_decompress=False) as s:
+        try:
+            async with s.request(request.method, upstream, headers=headers, data=await request.read(),
+                                 allow_redirects=False) as up:
+                resp = web.StreamResponse(status=up.status, headers={
+                    k: v for k, v in up.headers.items() if k.lower() not in HOP})
+                await resp.prepare(request)
+                async for chunk in up.content.iter_any():
+                    await resp.write(chunk)
+                await resp.write_eof()
+                return resp
+        except aiohttp.ClientConnectorError:
+            raise web.HTTPBadGateway(text=f"Blazie: nothing is listening on localhost:{port} on the Mac.")
+
+
+# ---------------------------------------------------------------- routing
+
+@web.middleware
+async def route(request: web.Request, handler):
+    host = request.headers.get("Host", "").split(":")[0]
+    m = PREVIEW.match(host)
+    if m:
+        return await proxy(request, int(m.group(1)))
+    return await handler(request)
+
+
+async def health(_):
+    return web.json_response({"ok": True, "shells": len(shells), "apps_listening": len(listeners)})
+
+
+async def reap(_app):
+    async def loop():
+        while True:
+            await asyncio.sleep(600)
+            for s in list(shells.values()):
+                if not s.alive() or (s.socket is None and time.time() - s.detached_at > IDLE_REAP):
+                    s.close()
+    task = asyncio.create_task(loop())
+    yield
+    task.cancel()
+
+
+def main():
+    app = web.Application(middlewares=[route], client_max_size=64 * 1024 * 1024)
+    app.add_routes([web.get("/pty", pty_handler), web.get("/events", events_handler),
+                    web.get("/api", api_handler), web.get("/health", health),
+                    web.get("/stream", stream_handler)])
+    app.cleanup_ctx.append(reap)
+    print(f"blazied on :{PORT} ({TERMINAL_HOST})", flush=True)
+    web.run_app(app, host=["127.0.0.1", "::1"] + ([os.environ["BLAZIED_LAN"]] if "BLAZIED_LAN" in os.environ else []),
+                port=PORT, print=None)
+
+
+if __name__ == "__main__":
+    main()
